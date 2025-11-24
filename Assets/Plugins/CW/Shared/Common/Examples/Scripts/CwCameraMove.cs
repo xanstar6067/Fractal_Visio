@@ -56,7 +56,7 @@ namespace CW.Common
 			var oldPosition = transform.position;
 
 			// Translate
-			transform.Translate(delta * sensitivity, Space.Self);
+			transform.Translate(delta * sensitivity * Time.deltaTime, Space.Self);
 
 			// Add to remaining
 			var acceleration = transform.position - oldPosition;

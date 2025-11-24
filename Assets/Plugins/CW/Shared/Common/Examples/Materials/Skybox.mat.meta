@@ -8,8 +8,8 @@ NativeFormatImporter:
   assetBundleVariant: 
 AssetOrigin:
   serializedVersion: 1
-  productId: 30111
-  packageName: Lean Touch
-  packageVersion: 3.1.1
+  productId: 72138
+  packageName: Lean GUI
+  packageVersion: 2.1.0
   assetPath: Assets/Plugins/CW/Shared/Common/Examples/Materials/Skybox.mat
-  uploadId: 743182
+  uploadId: 653659

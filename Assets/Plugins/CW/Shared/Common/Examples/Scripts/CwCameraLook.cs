@@ -17,10 +17,10 @@ namespace CW.Common
 		public float Sensitivity { set { sensitivity = value; } get { return sensitivity; } } [SerializeField] private float sensitivity = 1.0f;
 
 		/// <summary>The keys/fingers required to pitch down/up.</summary>
-		public CwInputManager.Axis PitchControls { set { pitchControls = value; } get { return pitchControls; } } [SerializeField] private CwInputManager.Axis pitchControls = new CwInputManager.Axis(1, true, CwInputManager.AxisGesture.VerticalDrag, -0.1f, KeyCode.None, KeyCode.None, KeyCode.None, KeyCode.None, 45.0f);
+		public CwInputManager.Axis PitchControls { set { pitchControls = value; } get { return pitchControls; } } [SerializeField] private CwInputManager.Axis pitchControls = new CwInputManager.Axis(1, true, CwInputManager.AxisGesture.VerticalDrag, -10.0f, KeyCode.None, KeyCode.None, KeyCode.None, KeyCode.None, 45.0f);
 
 		/// <summary>The keys/fingers required to yaw left/right.</summary>
-		public CwInputManager.Axis YawControls { set { yawControls = value; } get { return yawControls; } } [SerializeField] private CwInputManager.Axis yawControls = new CwInputManager.Axis(1, true, CwInputManager.AxisGesture.HorizontalDrag, 0.1f, KeyCode.None, KeyCode.None, KeyCode.None, KeyCode.None, 45.0f);
+		public CwInputManager.Axis YawControls { set { yawControls = value; } get { return yawControls; } } [SerializeField] private CwInputManager.Axis yawControls = new CwInputManager.Axis(1, true, CwInputManager.AxisGesture.HorizontalDrag, 10.0f, KeyCode.None, KeyCode.None, KeyCode.None, KeyCode.None, 45.0f);
 
 		/// <summary>The keys/fingers required to roll left/right.</summary>
 		public CwInputManager.Axis RollControls { set { rollControls = value; } get { return rollControls; } } [SerializeField] private CwInputManager.Axis rollControls = new CwInputManager.Axis(2, true, CwInputManager.AxisGesture.Twist, 1.0f, KeyCode.E, KeyCode.Q, KeyCode.None, KeyCode.None, 45.0f);
