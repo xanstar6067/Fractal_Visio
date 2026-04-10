@@ -43,6 +43,7 @@ namespace FractalVisio.Fractal
 
         private void Awake()
         {
+            EnsureTargetImage();
             precisionManager = new FractalPrecisionManager();
             view = FractalView.Default;
             BuildDefaultGradient(out var gradient);
@@ -54,6 +55,36 @@ namespace FractalVisio.Fractal
             EnsureTextures(baseWidth, baseHeight);
             PushTexture();
             RequestRender();
+        }
+
+        private void EnsureTargetImage()
+        {
+            if (targetImage != null)
+            {
+                return;
+            }
+
+            targetImage = GetComponent<RawImage>();
+            if (targetImage != null)
+            {
+                return;
+            }
+
+            targetImage = GetComponentInChildren<RawImage>(true);
+            if (targetImage != null)
+            {
+                return;
+            }
+
+            if (TryGetComponent<Graphic>(out _))
+            {
+                var child = new GameObject("FractalOutput", typeof(RectTransform), typeof(RawImage));
+                child.transform.SetParent(transform, false);
+                targetImage = child.GetComponent<RawImage>();
+                return;
+            }
+
+            targetImage = gameObject.AddComponent<RawImage>();
         }
 
         private void Update()
@@ -130,14 +161,61 @@ namespace FractalVisio.Fractal
 
         private (double x, double y) ScreenToFractal(Vector2 screenPoint, in FractalView srcView)
         {
-            var nx = screenPoint.x / Screen.width;
-            var ny = screenPoint.y / Screen.height;
-            var aspect = (double)renderTexture.width / renderTexture.height;
+            var hasTargetRect = TryGetNormalizedPointInTarget(screenPoint, out var nx, out var ny, out var width, out var height);
+            if (!hasTargetRect)
+            {
+                width = Screen.width;
+                height = Screen.height;
+
+                if (width <= 0f || height <= 0f)
+                {
+                    return (srcView.x.AsDouble, srcView.y.AsDouble);
+                }
+
+                nx = screenPoint.x / width;
+                ny = screenPoint.y / height;
+            }
+
+            var aspect = width / height;
             var halfScale = srcView.scale.AsDouble * 0.5d;
 
             var x = srcView.x.AsDouble + ((nx - 0.5d) * 2d * halfScale * aspect);
             var y = srcView.y.AsDouble + ((ny - 0.5d) * 2d * halfScale);
             return (x, y);
+        }
+
+        private bool TryGetNormalizedPointInTarget(Vector2 screenPoint, out double nx, out double ny, out double width, out double height)
+        {
+            nx = 0.5d;
+            ny = 0.5d;
+            width = 0d;
+            height = 0d;
+
+            if (targetImage == null)
+            {
+                return false;
+            }
+
+            var rectTransform = targetImage.rectTransform;
+            var rect = rectTransform.rect;
+            width = rect.width;
+            height = rect.height;
+
+            if (width <= 0d || height <= 0d)
+            {
+                return false;
+            }
+
+            var canvas = targetImage.canvas;
+            var screenCamera = canvas != null && canvas.renderMode != UnityEngine.RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
+            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, screenPoint, screenCamera, out var localPoint))
+            {
+                return false;
+            }
+
+            nx = Mathf.Clamp01((localPoint.x - rect.xMin) / rect.width);
+            ny = Mathf.Clamp01((localPoint.y - rect.yMin) / rect.height);
+            return true;
         }
 
         private void RequestRender()
