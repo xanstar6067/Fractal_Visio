@@ -84,8 +84,23 @@ namespace FractalVisio.Fractal
         private void Start()
         {
             EnsureTargetImage();
+            LogShaderDiagnostics();
             RecreateTexturesIfNeeded(force: true, ResolveDesiredRenderScale());
             RequestRender();
+        }
+
+        private static void LogShaderDiagnostics()
+        {
+            Debug.Log($"[FractalSceneController] Active Graphics API: {SystemInfo.graphicsDeviceType}");
+
+            LogShaderStatus("FractalVisio/MandelbrotFloat");
+            LogShaderStatus("FractalVisio/MandelbrotPerturbation");
+        }
+
+        private static void LogShaderStatus(string shaderName)
+        {
+            var shader = Shader.Find(shaderName);
+            Debug.Log($"[FractalSceneController] Shader.Find('{shaderName}') => {(shader != null ? "FOUND" : "MISSING")}, isSupported: {shader?.isSupported}");
         }
 
         private void EnsureTargetImage()
