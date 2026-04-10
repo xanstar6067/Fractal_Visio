@@ -25,6 +25,7 @@ namespace FractalVisio.Fractal
         private Texture2D paletteTexture;
         private Texture2D orbitTexture;
         private bool gpuAvailable;
+        private Color32[] cpuTileBuffer;
 
         private double referenceCx;
         private double referenceCy;
@@ -107,7 +108,9 @@ namespace FractalVisio.Fractal
             }
 
             var iterationBudget = request.View.iterations + (request.IsInteracting ? 0 : request.View.iterations / 2);
-            FractalCpuKernels.RenderMandelbrotTile(texture2D, tile, request.View, iterationBudget, 1, gradient);
+            EnsureCpuTileBuffer(tile.PixelRect.width * tile.PixelRect.height);
+            FractalCpuKernels.RenderMandelbrotTile(cpuTileBuffer, texture2D.width, texture2D.height, tile, request.View, iterationBudget, 1, gradient);
+            FractalCpuKernels.BlitTile(texture2D, tile, cpuTileBuffer);
         }
 
         private void EnsureReferenceOrbit(in FractalView view)
@@ -143,19 +146,21 @@ namespace FractalVisio.Fractal
                 };
             }
 
+            var orbitPixels = new Color[OrbitTextureWidth * orbitPixelCount];
             var zx = 0d;
             var zy = 0d;
             for (var i = 0; i < cachedOrbitIterations; i++)
             {
                 var x = i % OrbitTextureWidth;
                 var y = i / OrbitTextureWidth;
-                orbitTexture.SetPixel(x, y, new Color((float)zx, (float)zy, 0f, 0f));
+                orbitPixels[y * OrbitTextureWidth + x] = new Color((float)zx, (float)zy, 0f, 0f);
 
                 var xt = zx * zx - zy * zy + referenceCx;
                 zy = 2d * zx * zy + referenceCy;
                 zx = xt;
             }
 
+            orbitTexture.SetPixels(orbitPixels);
             orbitTexture.Apply(false, false);
             perturbationMaterial.SetTexture("_ReferenceOrbitTex", orbitTexture);
             perturbationMaterial.SetInt("_OrbitLength", cachedOrbitIterations);
@@ -186,6 +191,16 @@ namespace FractalVisio.Fractal
 
             texture.Apply(false, true);
             return texture;
+        }
+
+        private void EnsureCpuTileBuffer(int requiredLength)
+        {
+            if (cpuTileBuffer != null && cpuTileBuffer.Length == requiredLength)
+            {
+                return;
+            }
+
+            cpuTileBuffer = new Color32[requiredLength];
         }
     }
 }

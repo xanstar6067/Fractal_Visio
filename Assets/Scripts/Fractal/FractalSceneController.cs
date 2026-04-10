@@ -23,6 +23,9 @@ namespace FractalVisio.Fractal
         [SerializeField] private int interactIterations = 96;
         [SerializeField] private int settleIterations = 256;
         [SerializeField] private float settleDelay = 0.15f;
+        [SerializeField] private int cpuApplyTileBatch = 4;
+        [SerializeField] private float fallbackFrameBudgetMs = 5f;
+        [SerializeField] private int maxFallbackTilesPerFrame = 8;
 
         [Header("Zoom")]
         [SerializeField] private float pinchZoomSpeed = 1f;
@@ -50,6 +53,8 @@ namespace FractalVisio.Fractal
         private Vector2 previousSingleFingerPosition;
         private bool hasPreviousSingleFingerPosition;
         private int previousFingerMode;
+        private double averageTileMs = 0.4d;
+        private double averageApplyMs = 0.3d;
 
         private void Awake()
         {
@@ -325,16 +330,44 @@ namespace FractalVisio.Fractal
                     if (mode == RenderMode.PerturbationWithFallback && cpuRenderTexture != null)
                     {
                         CopyRenderTextureToCpu(gpuRenderTexture, cpuRenderTexture);
-                        foreach (var fallbackTile in perturbationRenderer.BuildFallbackTiles(request, cpuRenderTexture.width, cpuRenderTexture.height, tileSize))
+                        var fallbackTileList = perturbationRenderer.BuildFallbackTiles(request, cpuRenderTexture.width, cpuRenderTexture.height, tileSize);
+                        var tilesPerFrame = ResolveFallbackTilesPerFrame();
+                        var applyBatch = ResolveApplyBatchSize();
+                        var renderedSinceApply = 0;
+
+                        foreach (var fallbackTile in fallbackTileList)
                         {
                             if (requestGeneration != generationId)
                             {
                                 yield break;
                             }
 
+                            var tileStartMs = Time.realtimeSinceStartupAsDouble * 1000d;
                             perturbationRenderer.Render(request, cpuRenderTexture, fallbackTile);
-                            cpuRenderTexture.Apply(false, false);
-                            yield return null;
+                            TrackTileMetric((Time.realtimeSinceStartupAsDouble * 1000d) - tileStartMs);
+                            renderedSinceApply++;
+
+                            if (renderedSinceApply >= applyBatch)
+                            {
+                                ApplyCpuTexture();
+                                renderedSinceApply = 0;
+                            }
+
+                            if (tilesPerFrame > 0 && fallbackTile.TileIndex % tilesPerFrame == tilesPerFrame - 1)
+                            {
+                                if (renderedSinceApply > 0)
+                                {
+                                    ApplyCpuTexture();
+                                    renderedSinceApply = 0;
+                                }
+
+                                yield return null;
+                            }
+                        }
+
+                        if (renderedSinceApply > 0)
+                        {
+                            ApplyCpuTexture();
                         }
 
                         lastFrameGpu = false;
@@ -354,6 +387,10 @@ namespace FractalVisio.Fractal
                 }
             }
 
+            var cpuTilesPerFrame = Mathf.Max(1, ResolveFallbackTilesPerFrame());
+            var cpuApplyBatch = ResolveApplyBatchSize();
+            var frameTileCount = 0;
+            var pendingApplyTiles = 0;
             foreach (var tile in TilePlanner.BuildTiles(cpuRenderTexture.width, cpuRenderTexture.height, tileSize))
             {
                 if (requestGeneration != generationId)
@@ -361,9 +398,34 @@ namespace FractalVisio.Fractal
                     yield break;
                 }
 
+                var tileStartMs = Time.realtimeSinceStartupAsDouble * 1000d;
                 renderer.Render(request, cpuRenderTexture, tile);
-                cpuRenderTexture.Apply(false, false);
-                yield return null;
+                TrackTileMetric((Time.realtimeSinceStartupAsDouble * 1000d) - tileStartMs);
+                pendingApplyTiles++;
+                frameTileCount++;
+
+                if (pendingApplyTiles >= cpuApplyBatch)
+                {
+                    ApplyCpuTexture();
+                    pendingApplyTiles = 0;
+                }
+
+                if (frameTileCount >= cpuTilesPerFrame)
+                {
+                    if (pendingApplyTiles > 0)
+                    {
+                        ApplyCpuTexture();
+                        pendingApplyTiles = 0;
+                    }
+
+                    frameTileCount = 0;
+                    yield return null;
+                }
+            }
+
+            if (pendingApplyTiles > 0)
+            {
+                ApplyCpuTexture();
             }
 
             lastFrameGpu = false;
@@ -448,6 +510,47 @@ namespace FractalVisio.Fractal
             destination.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0, false);
             destination.Apply(false, false);
             RenderTexture.active = previous;
+        }
+
+        private int ResolveFallbackTilesPerFrame()
+        {
+            var estimatedTileMs = Mathf.Max(0.05f, (float)averageTileMs);
+            var budgetTiles = Mathf.FloorToInt(fallbackFrameBudgetMs / estimatedTileMs);
+            return Mathf.Clamp(budgetTiles, 1, maxFallbackTilesPerFrame);
+        }
+
+        private int ResolveApplyBatchSize()
+        {
+            if (averageApplyMs > 1.5d)
+            {
+                return Mathf.Max(cpuApplyTileBatch, 8);
+            }
+
+            if (averageApplyMs > 0.75d)
+            {
+                return Mathf.Max(cpuApplyTileBatch, 6);
+            }
+
+            return Mathf.Max(1, cpuApplyTileBatch);
+        }
+
+        private void ApplyCpuTexture()
+        {
+            var applyStartMs = Time.realtimeSinceStartupAsDouble * 1000d;
+            cpuRenderTexture.Apply(false, false);
+            TrackApplyMetric((Time.realtimeSinceStartupAsDouble * 1000d) - applyStartMs);
+        }
+
+        private void TrackTileMetric(double tileMs)
+        {
+            const double alpha = 0.15d;
+            averageTileMs = (averageTileMs * (1d - alpha)) + (tileMs * alpha);
+        }
+
+        private void TrackApplyMetric(double applyMs)
+        {
+            const double alpha = 0.15d;
+            averageApplyMs = (averageApplyMs * (1d - alpha)) + (applyMs * alpha);
         }
 
         private void EnsureTextures(int width, int height)

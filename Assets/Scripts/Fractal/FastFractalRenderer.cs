@@ -11,6 +11,7 @@ namespace FractalVisio.Fractal
         private readonly Material fractalMaterial;
         private readonly Texture2D paletteTexture;
         private readonly bool gpuAvailable;
+        private Color32[] cpuTileBuffer;
 
         public FastFractalRenderer(Gradient gradient)
         {
@@ -46,7 +47,9 @@ namespace FractalVisio.Fractal
             }
 
             var sampleStep = request.IsInteracting ? 2 : 1;
-            FractalCpuKernels.RenderMandelbrotTile(texture2D, tile, request.View, request.View.iterations, sampleStep, gradient);
+            EnsureCpuTileBuffer(tile.PixelRect.width * tile.PixelRect.height);
+            FractalCpuKernels.RenderMandelbrotTile(cpuTileBuffer, texture2D.width, texture2D.height, tile, request.View, request.View.iterations, sampleStep, gradient);
+            FractalCpuKernels.BlitTile(texture2D, tile, cpuTileBuffer);
         }
 
         private static Texture2D BuildPaletteTexture(Gradient gradient)
@@ -63,6 +66,16 @@ namespace FractalVisio.Fractal
 
             texture.Apply(false, true);
             return texture;
+        }
+
+        private void EnsureCpuTileBuffer(int requiredLength)
+        {
+            if (cpuTileBuffer != null && cpuTileBuffer.Length == requiredLength)
+            {
+                return;
+            }
+
+            cpuTileBuffer = new Color32[requiredLength];
         }
     }
 }

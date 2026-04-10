@@ -5,7 +5,9 @@ namespace FractalVisio.Fractal
     internal static class FractalCpuKernels
     {
         public static void RenderMandelbrotTile(
-            Texture2D target,
+            Color32[] tileBuffer,
+            int targetWidth,
+            int targetHeight,
             TileDescriptor tile,
             in FractalView view,
             int maxIterations,
@@ -13,10 +15,14 @@ namespace FractalVisio.Fractal
             Gradient gradient)
         {
             var rect = tile.PixelRect;
-            var width = target.width;
-            var height = target.height;
+            var width = targetWidth;
+            var height = targetHeight;
             var halfScale = view.scale.AsDouble * 0.5d;
             var aspect = (double)width / height;
+
+            var rectWidth = rect.width;
+            var rectHeight = rect.height;
+            ClearTile(tileBuffer, rectWidth, rectHeight);
 
             for (var y = rect.yMin; y < rect.yMax; y += sampleStep)
             {
@@ -29,12 +35,18 @@ namespace FractalVisio.Fractal
                     var cy = view.y.AsDouble + ((ny - 0.5d) * 2d * halfScale);
 
                     var color = EvaluateMandelbrot(cx, cy, maxIterations, gradient);
-                    FillBlock(target, x, y, sampleStep, sampleStep, color);
+                    FillBlock(tileBuffer, rectWidth, rectHeight, x - rect.xMin, y - rect.yMin, sampleStep, sampleStep, color);
                 }
             }
         }
 
-        private static Color EvaluateMandelbrot(double cx, double cy, int maxIterations, Gradient gradient)
+        public static void BlitTile(Texture2D target, TileDescriptor tile, Color32[] tileBuffer)
+        {
+            var rect = tile.PixelRect;
+            target.SetPixels32(rect.x, rect.y, rect.width, rect.height, tileBuffer);
+        }
+
+        private static Color32 EvaluateMandelbrot(double cx, double cy, int maxIterations, Gradient gradient)
         {
             var zx = 0d;
             var zy = 0d;
@@ -50,24 +62,34 @@ namespace FractalVisio.Fractal
 
             if (iteration >= maxIterations)
             {
-                return Color.black;
+                return new Color32(0, 0, 0, 255);
             }
 
             var t = iteration / (float)maxIterations;
-            return gradient.Evaluate(t);
+            return (Color32)gradient.Evaluate(t);
         }
 
-        private static void FillBlock(Texture2D target, int xStart, int yStart, int blockWidth, int blockHeight, Color color)
+        private static void FillBlock(Color32[] tileBuffer, int tileWidth, int tileHeight, int xStart, int yStart, int blockWidth, int blockHeight, Color32 color)
         {
-            var maxX = Mathf.Min(target.width, xStart + blockWidth);
-            var maxY = Mathf.Min(target.height, yStart + blockHeight);
+            var maxX = Mathf.Min(tileWidth, xStart + blockWidth);
+            var maxY = Mathf.Min(tileHeight, yStart + blockHeight);
 
             for (var y = yStart; y < maxY; y++)
             {
+                var row = y * tileWidth;
                 for (var x = xStart; x < maxX; x++)
                 {
-                    target.SetPixel(x, y, color);
+                    tileBuffer[row + x] = color;
                 }
+            }
+        }
+
+        private static void ClearTile(Color32[] tileBuffer, int tileWidth, int tileHeight)
+        {
+            var length = tileWidth * tileHeight;
+            for (var i = 0; i < length; i++)
+            {
+                tileBuffer[i] = new Color32(0, 0, 0, 255);
             }
         }
     }
