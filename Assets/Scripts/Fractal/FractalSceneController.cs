@@ -17,6 +17,7 @@ namespace FractalVisio.Fractal
         [Header("Output")]
         [SerializeField] private RawImage targetImage;
         [SerializeField] private Text scaleValueText;
+        [SerializeField] private Text computeBackendText;
         [SerializeField] private int baseWidth = 1080;
         [SerializeField] private int baseHeight = 1920;
         [SerializeField] private int minTextureSize = 64;
@@ -71,6 +72,7 @@ namespace FractalVisio.Fractal
         private float smoothedFrameTimeMs = 16.6f;
         private float adaptiveInteractRenderScale;
         private RenderMode? previousRenderMode;
+        private string lastComputeBackendLabel = string.Empty;
 
         private void Awake()
         {
@@ -79,6 +81,7 @@ namespace FractalVisio.Fractal
             view = FractalView.Default;
             view.iterations = settleIterations;
             UpdateScaleText();
+            UpdateComputeBackendText("GPU");
             BuildDefaultGradient(out var gradient);
             adaptiveInteractRenderScale = interactRenderScale;
 
@@ -296,6 +299,17 @@ namespace FractalVisio.Fractal
             scaleValueText.text = scaleAsText;
         }
 
+        private void UpdateComputeBackendText(string backendLabel)
+        {
+            if (computeBackendText == null || string.Equals(lastComputeBackendLabel, backendLabel, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            computeBackendText.text = $"Fractal engine: {backendLabel}";
+            lastComputeBackendLabel = backendLabel;
+        }
+
         private (double x, double y) ScreenToFractal(Vector2 screenPoint, in FractalView srcView)
         {
             var hasTargetRect = TryGetNormalizedPointInTarget(screenPoint, out var nx, out var ny, out var width, out var height);
@@ -381,6 +395,7 @@ namespace FractalVisio.Fractal
             {
                 renderer.Render(request, gpuRenderTexture, new TileDescriptor(new RectInt(0, 0, gpuRenderTexture.width, gpuRenderTexture.height), 0));
                 lastFrameGpu = true;
+                UpdateComputeBackendText("GPU");
                 PushTexture();
                 if (targetImage != null)
                 {
@@ -439,10 +454,12 @@ namespace FractalVisio.Fractal
                         }
 
                         lastFrameGpu = false;
+                        UpdateComputeBackendText(fallbackTileList.Count > 0 ? "GPU + CPU" : "GPU");
                     }
                     else
                     {
                         lastFrameGpu = true;
+                        UpdateComputeBackendText("GPU");
                     }
 
                     PushTexture();
@@ -497,6 +514,7 @@ namespace FractalVisio.Fractal
             }
 
             lastFrameGpu = false;
+            UpdateComputeBackendText("CPU");
             PushTexture();
             if (targetImage != null)
             {
