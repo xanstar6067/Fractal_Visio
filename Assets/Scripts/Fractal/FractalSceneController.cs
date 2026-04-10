@@ -14,7 +14,6 @@ namespace FractalVisio.Fractal
     {
         [Header("Output")]
         [SerializeField] private RawImage targetImage;
-        [SerializeField] private Text zoomText;
         [SerializeField] private int baseWidth = 1080;
         [SerializeField] private int baseHeight = 1920;
         [SerializeField] private int minTextureSize = 64;
@@ -38,25 +37,19 @@ namespace FractalVisio.Fractal
 
         [Header("Zoom")]
         [SerializeField] private float pinchZoomSpeed = 1f;
-        [SerializeField] private double minScale = 1e-20d;
-        [SerializeField] private double maxScale = 4d;
-
-        [Header("Precision Mode Thresholds")]
-        [Tooltip("Mode switch threshold in scale space. With initialScale = 3 and zoom ≈ initialScale / currentScale, scale 1e-8 corresponds to zoom ≈ 3e8.")]
-        [SerializeField] private double fastModeThresholdScale = 1e-8d;
-        [Tooltip("Mode switch threshold in scale space. With initialScale = 3 and zoom ≈ initialScale / currentScale, scale 1e-16 corresponds to zoom ≈ 3e16.")]
-        [SerializeField] private double perturbationModeThresholdScale = 1e-16d;
+        [SerializeField] private float minScale = 1e-20f;
+        [SerializeField] private float maxScale = 4f;
 
         private readonly Dictionary<RenderMode, IFractalRenderer> renderers = new();
 
         private FractalPrecisionManager precisionManager;
         private Texture2D cpuRenderTexture;
+        private Texture2D cpuPreviewTexture;
         private Texture2D transitionPreviewTexture;
         private RenderTexture gpuRenderTexture;
+        private RenderTexture gpuPreviewTexture;
         private FractalView view;
-        private FractalView presentedView;
         private bool lastFrameGpu = true;
-        private bool hasPresentedView;
 
         private int generationId;
         private int currentTextureWidth;
@@ -78,7 +71,7 @@ namespace FractalVisio.Fractal
         private void Awake()
         {
             EnsureTargetImage();
-            precisionManager = new FractalPrecisionManager(fastModeThresholdScale, perturbationModeThresholdScale);
+            precisionManager = new FractalPrecisionManager();
             view = FractalView.Default;
             BuildDefaultGradient(out var gradient);
             adaptiveInteractRenderScale = interactRenderScale;
@@ -93,7 +86,6 @@ namespace FractalVisio.Fractal
             EnsureTargetImage();
             LogShaderDiagnostics();
             RecreateTexturesIfNeeded(force: true, ResolveDesiredRenderScale());
-            UpdateZoomText();
             RequestRender();
         }
 
@@ -150,7 +142,6 @@ namespace FractalVisio.Fractal
             }
 
             isInteracting = HandleTouchInput();
-            UpdateZoomText();
 
             if (!isInteracting && Time.unscaledTime - lastInteractionTime > settleDelay && view.iterations != settleIterations)
             {
@@ -284,33 +275,16 @@ namespace FractalVisio.Fractal
 
         private void ApplyPinchZoom(Vector2 screenCenter, float zoomFactor)
         {
+            zoomFactor = Mathf.Clamp(zoomFactor, 0.5f, 2f);
             var oldView = view;
             var oldPoint = ScreenToFractal(screenCenter, oldView);
 
-            var zoomFactorDouble = ClampDouble(zoomFactor, 0.5d, 2d);
-            var unclampedScale = oldView.scale.AsDouble / zoomFactorDouble;
-            var newScale = ClampDouble(unclampedScale, minScale, maxScale);
+            var newScale = Mathf.Clamp((float)oldView.scale.AsDouble / zoomFactor, minScale, maxScale);
             view.scale = HighPrecision.FromDouble(newScale);
 
             var newPoint = ScreenToFractal(screenCenter, view);
             view.x += HighPrecision.FromDouble(oldPoint.x - newPoint.x);
             view.y += HighPrecision.FromDouble(oldPoint.y - newPoint.y);
-        }
-
-
-        private static double ClampDouble(double value, double min, double max)
-        {
-            if (value < min)
-            {
-                return min;
-            }
-
-            if (value > max)
-            {
-                return max;
-            }
-
-            return value;
         }
 
         private (double x, double y) ScreenToFractal(Vector2 screenPoint, in FractalView srcView)
@@ -375,7 +349,7 @@ namespace FractalVisio.Fractal
         private void RequestRender()
         {
             generationId++;
-            ShowZoomedPreview();
+            CachePreview();
             StopAllCoroutines();
             StartCoroutine(RenderRoutine(generationId));
         }
@@ -518,7 +492,7 @@ namespace FractalVisio.Fractal
         private bool RecreateTexturesIfNeeded(bool force, float renderScale)
         {
             var targetSize = ComputeTargetTextureSize(renderScale);
-            if (!force && cpuRenderTexture != null && gpuRenderTexture != null &&
+            if (!force && cpuRenderTexture != null && cpuPreviewTexture != null && gpuRenderTexture != null && gpuPreviewTexture != null &&
                 currentTextureWidth == targetSize.width && currentTextureHeight == targetSize.height &&
                 Mathf.Abs(currentRenderScale - renderScale) < 0.001f)
             {
@@ -557,36 +531,30 @@ namespace FractalVisio.Fractal
             return (width, height);
         }
 
-        private void ShowZoomedPreview()
+        private void CachePreview()
         {
             if (targetImage == null)
             {
                 return;
             }
 
-            if (!hasPresentedView)
+            if (lastFrameGpu && gpuPreviewTexture != null && gpuRenderTexture != null)
+            {
+                Graphics.Blit(gpuRenderTexture, gpuPreviewTexture);
+                targetImage.texture = gpuPreviewTexture;
+                targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
+                return;
+            }
+
+            if (cpuPreviewTexture == null || cpuRenderTexture == null)
             {
                 return;
             }
 
-            var sourceTexture = targetImage.texture;
-            if (sourceTexture == null)
-            {
-                sourceTexture = lastFrameGpu ? gpuRenderTexture : cpuRenderTexture;
-            }
-
-            if (sourceTexture == null)
-            {
-                sourceTexture = transitionPreviewTexture;
-            }
-
-            if (sourceTexture == null)
-            {
-                return;
-            }
-
-            targetImage.texture = sourceTexture;
-            targetImage.uvRect = BuildZoomPreviewUv(presentedView, view);
+            cpuPreviewTexture.SetPixels32(cpuRenderTexture.GetPixels32());
+            cpuPreviewTexture.Apply(false, false);
+            targetImage.texture = cpuPreviewTexture;
+            targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
         }
 
 
@@ -643,11 +611,16 @@ namespace FractalVisio.Fractal
         private void EnsureTextures(int width, int height)
         {
             cpuRenderTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            cpuPreviewTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
             cpuRenderTexture.wrapMode = TextureWrapMode.Clamp;
+            cpuPreviewTexture.wrapMode = TextureWrapMode.Clamp;
 
             gpuRenderTexture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32);
+            gpuPreviewTexture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32);
             gpuRenderTexture.wrapMode = TextureWrapMode.Clamp;
+            gpuPreviewTexture.wrapMode = TextureWrapMode.Clamp;
             gpuRenderTexture.Create();
+            gpuPreviewTexture.Create();
         }
 
         private void ReleaseTextures()
@@ -658,11 +631,24 @@ namespace FractalVisio.Fractal
                 cpuRenderTexture = null;
             }
 
+            if (cpuPreviewTexture != null)
+            {
+                Destroy(cpuPreviewTexture);
+                cpuPreviewTexture = null;
+            }
+
             if (gpuRenderTexture != null)
             {
                 gpuRenderTexture.Release();
                 Destroy(gpuRenderTexture);
                 gpuRenderTexture = null;
+            }
+
+            if (gpuPreviewTexture != null)
+            {
+                gpuPreviewTexture.Release();
+                Destroy(gpuPreviewTexture);
+                gpuPreviewTexture = null;
             }
 
             currentTextureWidth = 0;
@@ -675,9 +661,6 @@ namespace FractalVisio.Fractal
             if (targetImage != null)
             {
                 targetImage.texture = lastFrameGpu && gpuRenderTexture != null ? gpuRenderTexture : cpuRenderTexture;
-                targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
-                presentedView = view;
-                hasPresentedView = true;
                 if (transitionPreviewTexture != null)
                 {
                     Destroy(transitionPreviewTexture);
@@ -708,38 +691,7 @@ namespace FractalVisio.Fractal
             transitionPreviewTexture.SetPixels32(cpuRenderTexture.GetPixels32());
             transitionPreviewTexture.Apply(false, false);
             targetImage.texture = transitionPreviewTexture;
-            targetImage.uvRect = hasPresentedView ? BuildZoomPreviewUv(presentedView, view) : new Rect(0f, 0f, 1f, 1f);
-        }
-
-        private Rect BuildZoomPreviewUv(in FractalView fromView, in FractalView toView)
-        {
-            var targetRect = targetImage != null ? targetImage.rectTransform.rect : default;
-            var width = Mathf.Max(1f, targetRect.width);
-            var height = Mathf.Max(1f, targetRect.height);
-            var aspect = width / height;
-
-            var fromScale = System.Math.Max(1e-30d, fromView.scale.AsDouble);
-            var toScale = System.Math.Max(1e-30d, toView.scale.AsDouble);
-            var scaleRatio = toScale / fromScale;
-            var ratioF = (float)scaleRatio;
-
-            var dx = toView.x.AsDouble - fromView.x.AsDouble;
-            var dy = toView.y.AsDouble - fromView.y.AsDouble;
-            var offsetX = 0.5d + (dx / (2d * fromScale * aspect)) - (0.5d * scaleRatio);
-            var offsetY = 0.5d + (dy / (2d * fromScale)) - (0.5d * scaleRatio);
-
-            return new Rect((float)offsetX, (float)offsetY, ratioF, ratioF);
-        }
-
-        private void UpdateZoomText()
-        {
-            if (zoomText == null)
-            {
-                return;
-            }
-
-            var zoom = 4d / System.Math.Max(1e-30d, view.scale.AsDouble);
-            zoomText.text = $"Zoom: x{zoom:0.###e+0}";
+            targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
         }
 
         private float ResolveDesiredRenderScale()

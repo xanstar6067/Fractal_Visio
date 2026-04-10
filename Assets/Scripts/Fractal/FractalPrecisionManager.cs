@@ -2,23 +2,17 @@ namespace FractalVisio.Fractal
 {
     public sealed class FractalPrecisionManager
     {
-        private readonly HighPrecision fastThreshold;
-        private readonly HighPrecision perturbationThreshold;
-
-        public FractalPrecisionManager(double fastThresholdScale, double perturbationThresholdScale)
-        {
-            fastThreshold = HighPrecision.FromDouble(fastThresholdScale);
-            perturbationThreshold = HighPrecision.FromDouble(perturbationThresholdScale);
-        }
+        private static readonly HighPrecision FastThreshold = HighPrecision.FromDouble(1e-8);
+        private static readonly HighPrecision PerturbationThreshold = HighPrecision.FromDouble(1e-16);
 
         public RenderMode GetMode(in FractalView view)
         {
-            if (view.scale > fastThreshold)
+            if (view.scale > FastThreshold)
             {
                 return RenderMode.Fast;
             }
 
-            if (view.scale > perturbationThreshold)
+            if (view.scale > PerturbationThreshold)
             {
                 return RenderMode.Perturbation;
             }
