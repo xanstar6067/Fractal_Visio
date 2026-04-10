@@ -41,6 +41,9 @@ namespace FractalVisio.Fractal
 
         private Vector2 previousPinchCenter;
         private float previousPinchDistance;
+        private Vector2 previousSingleFingerPosition;
+        private bool hasPreviousSingleFingerPosition;
+        private int previousFingerMode;
 
         private void Awake()
         {
@@ -102,30 +105,75 @@ namespace FractalVisio.Fractal
         private bool HandleTouchInput()
         {
             var fingers = LeanTouch.GetFingers(true, true);
-            if (fingers.Count < 2)
+            var fingerCount = fingers.Count;
+            var fingerMode = fingerCount >= 2 ? 2 : fingerCount == 1 ? 1 : 0;
+
+            if (fingerMode != previousFingerMode)
             {
-                previousPinchDistance = 0f;
-                return false;
+                ResetTouchTrackingState();
+                previousFingerMode = fingerMode;
             }
 
-            var center = LeanGesture.GetScreenCenter(fingers);
-            var distance = LeanGesture.GetScreenDistance(fingers);
-
-            if (previousPinchDistance > 0.001f)
+            if (fingerMode == 1)
             {
-                var zoomFactor = Mathf.Pow(distance / previousPinchDistance, pinchZoomSpeed);
-                ApplyPinchZoom(center, zoomFactor);
-                ApplyPanFromPinchCenter(previousPinchCenter, center);
+                var finger = fingers[0];
+                var currentPosition = finger.ScreenPosition;
+                if (hasPreviousSingleFingerPosition)
+                {
+                    ApplySingleFingerPan(previousSingleFingerPosition, currentPosition);
+                }
+
+                previousSingleFingerPosition = currentPosition;
+                hasPreviousSingleFingerPosition = true;
+
                 lastInteractionTime = Time.unscaledTime;
                 view.iterations = interactIterations;
                 RequestRender();
+                return true;
             }
 
-            previousPinchCenter = center;
-            previousPinchDistance = distance;
-            return true;
+            if (fingerMode == 2)
+            {
+                var center = LeanGesture.GetScreenCenter(fingers);
+                var distance = LeanGesture.GetScreenDistance(fingers);
+
+                if (previousPinchDistance > 0.001f)
+                {
+                    var zoomFactor = Mathf.Pow(distance / previousPinchDistance, pinchZoomSpeed);
+                    ApplyPinchZoom(center, zoomFactor);
+                    ApplyPanFromPinchCenter(previousPinchCenter, center);
+                }
+
+                previousPinchCenter = center;
+                previousPinchDistance = distance;
+
+                lastInteractionTime = Time.unscaledTime;
+                view.iterations = interactIterations;
+                RequestRender();
+                return true;
+            }
+
+            previousFingerMode = 0;
+            return false;
         }
 
+
+        private void ResetTouchTrackingState()
+        {
+            previousPinchCenter = Vector2.zero;
+            previousPinchDistance = 0f;
+            previousSingleFingerPosition = Vector2.zero;
+            hasPreviousSingleFingerPosition = false;
+        }
+
+        private void ApplySingleFingerPan(Vector2 oldPosition, Vector2 newPosition)
+        {
+            var oldWorld = ScreenToFractal(oldPosition, view);
+            var newWorld = ScreenToFractal(newPosition, view);
+
+            view.x += HighPrecision.FromDouble(oldWorld.x - newWorld.x);
+            view.y += HighPrecision.FromDouble(oldWorld.y - newWorld.y);
+        }
         private void ApplyPanFromPinchCenter(Vector2 oldCenter, Vector2 newCenter)
         {
             if (oldCenter == Vector2.zero)
