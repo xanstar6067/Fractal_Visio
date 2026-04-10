@@ -59,8 +59,8 @@ namespace FractalVisio.Fractal
             BuildDefaultGradient(out var gradient);
 
             renderers[RenderMode.Fast] = new FastFractalRenderer(gradient);
-            renderers[RenderMode.Perturbation] = new PerturbationFractalRenderer(gradient);
-            renderers[RenderMode.PerturbationWithFallback] = new PerturbationFractalRenderer(gradient);
+            renderers[RenderMode.Perturbation] = new PerturbationFractalRenderer(gradient, enableCpuFallback: false);
+            renderers[RenderMode.PerturbationWithFallback] = new PerturbationFractalRenderer(gradient, enableCpuFallback: true);
         }
 
         private void Start()
@@ -317,6 +317,43 @@ namespace FractalVisio.Fractal
                 yield break;
             }
 
+            if ((mode == RenderMode.Perturbation || mode == RenderMode.PerturbationWithFallback) &&
+                gpuRenderTexture != null && renderer is PerturbationFractalRenderer perturbationRenderer)
+            {
+                if (perturbationRenderer.RenderToGpu(request, gpuRenderTexture))
+                {
+                    if (mode == RenderMode.PerturbationWithFallback && cpuRenderTexture != null)
+                    {
+                        CopyRenderTextureToCpu(gpuRenderTexture, cpuRenderTexture);
+                        foreach (var fallbackTile in perturbationRenderer.BuildFallbackTiles(request, cpuRenderTexture.width, cpuRenderTexture.height, tileSize))
+                        {
+                            if (requestGeneration != generationId)
+                            {
+                                yield break;
+                            }
+
+                            perturbationRenderer.Render(request, cpuRenderTexture, fallbackTile);
+                            cpuRenderTexture.Apply(false, false);
+                            yield return null;
+                        }
+
+                        lastFrameGpu = false;
+                    }
+                    else
+                    {
+                        lastFrameGpu = true;
+                    }
+
+                    PushTexture();
+                    if (targetImage != null)
+                    {
+                        targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
+                    }
+
+                    yield break;
+                }
+            }
+
             foreach (var tile in TilePlanner.BuildTiles(cpuRenderTexture.width, cpuRenderTexture.height, tileSize))
             {
                 if (requestGeneration != generationId)
@@ -401,6 +438,16 @@ namespace FractalVisio.Fractal
             cpuPreviewTexture.Apply(false, false);
             targetImage.texture = cpuPreviewTexture;
             targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
+        }
+
+
+        private static void CopyRenderTextureToCpu(RenderTexture source, Texture2D destination)
+        {
+            var previous = RenderTexture.active;
+            RenderTexture.active = source;
+            destination.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0, false);
+            destination.Apply(false, false);
+            RenderTexture.active = previous;
         }
 
         private void EnsureTextures(int width, int height)

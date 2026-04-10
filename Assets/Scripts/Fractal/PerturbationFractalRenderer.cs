@@ -1,21 +1,103 @@
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace FractalVisio.Fractal
 {
     /// <summary>
-    /// Placeholder perturbation renderer contract.
-    /// Current implementation still uses CPU path, but follows the same interface and fallback rules.
+    /// Hybrid perturbation renderer:
+    /// 1) CPU builds reference orbit rarely and caches it.
+    /// 2) GPU renders delta field in full screen pass.
+    /// 3) Optional CPU fallback repaints problematic tiles.
     /// </summary>
     public sealed class PerturbationFractalRenderer : IFractalRenderer
     {
-        private readonly Gradient gradient;
+        private const string ShaderName = "FractalVisio/MandelbrotPerturbation";
+        private const int OrbitTextureWidth = 1024;
+        private const double OrbitReuseCenterFactor = 0.20d;
+        private const double OrbitReuseScaleFactor = 0.20d;
 
-        public PerturbationFractalRenderer(Gradient gradient)
+        private readonly Gradient gradient;
+        private readonly bool enableCpuFallback;
+        private readonly List<TileDescriptor> fallbackTiles = new();
+
+        private Material perturbationMaterial;
+        private Texture2D paletteTexture;
+        private Texture2D orbitTexture;
+        private bool gpuAvailable;
+
+        private double referenceCx;
+        private double referenceCy;
+        private double referenceScale;
+        private int cachedOrbitIterations;
+
+        public PerturbationFractalRenderer(Gradient gradient, bool enableCpuFallback = false)
         {
             this.gradient = gradient;
+            this.enableCpuFallback = enableCpuFallback;
+
+            var shader = Shader.Find(ShaderName);
+            if (shader != null && shader.isSupported)
+            {
+                perturbationMaterial = new Material(shader)
+                {
+                    hideFlags = HideFlags.HideAndDontSave
+                };
+                paletteTexture = BuildPaletteTexture(gradient);
+                perturbationMaterial.SetTexture("_PaletteTex", paletteTexture);
+                gpuAvailable = true;
+            }
         }
 
         public RenderMode Mode => RenderMode.Perturbation;
+
+        public bool RenderToGpu(in FractalRenderRequest request, RenderTexture target)
+        {
+            if (!gpuAvailable || target == null)
+            {
+                return false;
+            }
+
+            EnsureReferenceOrbit(request.View);
+            UpdateMaterialConstants(request.View);
+            Graphics.Blit(null, target, perturbationMaterial, 0);
+            return true;
+        }
+
+        public IReadOnlyList<TileDescriptor> BuildFallbackTiles(in FractalRenderRequest request, int width, int height, int tileSize)
+        {
+            fallbackTiles.Clear();
+            if (!enableCpuFallback)
+            {
+                return fallbackTiles;
+            }
+
+            var scale = request.View.scale.AsDouble;
+            var uncertainty = Math.Min(1d, scale <= 0d ? 1d : 1e-14d / scale);
+            var sampleStride = Mathf.Max(tileSize * 3, tileSize);
+            var tileIndex = 0;
+
+            for (var y = 0; y < height; y += sampleStride)
+            {
+                for (var x = 0; x < width; x += sampleStride)
+                {
+                    var nx = (x + 0.5d) / width;
+                    var ny = (y + 0.5d) / height;
+                    var dx = Math.Abs(nx - 0.5d);
+                    var dy = Math.Abs(ny - 0.5d);
+
+                    // Bias fallback toward deep zoom edges where delta approximation diverges first.
+                    if ((dx + dy) * uncertainty > 0.08d)
+                    {
+                        var rectWidth = Mathf.Min(tileSize, width - x);
+                        var rectHeight = Mathf.Min(tileSize, height - y);
+                        fallbackTiles.Add(new TileDescriptor(new RectInt(x, y, rectWidth, rectHeight), tileIndex++));
+                    }
+                }
+            }
+
+            return fallbackTiles;
+        }
 
         public void Render(in FractalRenderRequest request, Texture target, TileDescriptor tile)
         {
@@ -25,15 +107,85 @@ namespace FractalVisio.Fractal
             }
 
             var iterationBudget = request.View.iterations + (request.IsInteracting ? 0 : request.View.iterations / 2);
-            var sampleStep = request.IsInteracting ? 3 : 1;
+            FractalCpuKernels.RenderMandelbrotTile(texture2D, tile, request.View, iterationBudget, 1, gradient);
+        }
 
-            FractalCpuKernels.RenderMandelbrotTile(texture2D, tile, request.View, iterationBudget, sampleStep, gradient);
+        private void EnsureReferenceOrbit(in FractalView view)
+        {
+            var centerX = view.x.AsDouble;
+            var centerY = view.y.AsDouble;
+            var scale = view.scale.AsDouble;
+            var needsRebuild = orbitTexture == null ||
+                               cachedOrbitIterations != view.iterations ||
+                               Math.Abs(referenceCx - centerX) > Math.Max(scale * OrbitReuseCenterFactor, 1e-18d) ||
+                               Math.Abs(referenceCy - centerY) > Math.Max(scale * OrbitReuseCenterFactor, 1e-18d) ||
+                               Math.Abs(referenceScale - scale) > Math.Max(scale * OrbitReuseScaleFactor, 1e-18d);
 
-            if (request.View.scale <= HighPrecision.FromDouble(1e-16))
+            if (!needsRebuild)
             {
-                // Minimal fallback sample refinement for very deep zooms.
-                FractalCpuKernels.RenderMandelbrotTile(texture2D, tile, request.View, iterationBudget * 2, 1, gradient);
+                return;
             }
+
+            cachedOrbitIterations = Mathf.Max(4, view.iterations);
+            referenceCx = centerX;
+            referenceCy = centerY;
+            referenceScale = scale;
+
+            var orbitPixelCount = Mathf.CeilToInt(cachedOrbitIterations / (float)OrbitTextureWidth);
+            orbitPixelCount = Mathf.Max(1, orbitPixelCount);
+
+            if (orbitTexture == null || orbitTexture.width != OrbitTextureWidth || orbitTexture.height != orbitPixelCount)
+            {
+                orbitTexture = new Texture2D(OrbitTextureWidth, orbitPixelCount, TextureFormat.RGBAHalf, false, true)
+                {
+                    wrapMode = TextureWrapMode.Clamp,
+                    filterMode = FilterMode.Point
+                };
+            }
+
+            var zx = 0d;
+            var zy = 0d;
+            for (var i = 0; i < cachedOrbitIterations; i++)
+            {
+                var x = i % OrbitTextureWidth;
+                var y = i / OrbitTextureWidth;
+                orbitTexture.SetPixel(x, y, new Color((float)zx, (float)zy, 0f, 0f));
+
+                var xt = zx * zx - zy * zy + referenceCx;
+                zy = 2d * zx * zy + referenceCy;
+                zx = xt;
+            }
+
+            orbitTexture.Apply(false, false);
+            perturbationMaterial.SetTexture("_ReferenceOrbitTex", orbitTexture);
+            perturbationMaterial.SetInt("_OrbitLength", cachedOrbitIterations);
+            perturbationMaterial.SetVector("_ReferenceC", new Vector4((float)referenceCx, (float)referenceCy, 0f, 0f));
+        }
+
+        private void UpdateMaterialConstants(in FractalView view)
+        {
+            perturbationMaterial.SetVector("_Center", new Vector4((float)view.x.AsDouble, (float)view.y.AsDouble, 0f, 0f));
+            perturbationMaterial.SetFloat("_Scale", (float)view.scale.AsDouble);
+            perturbationMaterial.SetFloat("_Iterations", view.iterations);
+        }
+
+        private static Texture2D BuildPaletteTexture(Gradient gradient)
+        {
+            const int resolution = 256;
+            var texture = new Texture2D(resolution, 1, TextureFormat.RGBA32, false, true)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+
+            for (var i = 0; i < resolution; i++)
+            {
+                var t = i / (resolution - 1f);
+                texture.SetPixel(i, 0, gradient.Evaluate(t));
+            }
+
+            texture.Apply(false, true);
+            return texture;
         }
     }
 }
