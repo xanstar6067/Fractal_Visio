@@ -22,10 +22,18 @@ namespace FractalVisio.Fractal
         [SerializeField] private int tileSize = 96;
         [SerializeField] private int interactIterations = 96;
         [SerializeField] private int settleIterations = 256;
+        [SerializeField] [Range(0.1f, 1f)] private float interactRenderScale = 0.5f;
+        [SerializeField] [Range(0.25f, 1f)] private float settleRenderScale = 1f;
         [SerializeField] private float settleDelay = 0.15f;
         [SerializeField] private int cpuApplyTileBatch = 4;
         [SerializeField] private float fallbackFrameBudgetMs = 5f;
         [SerializeField] private int maxFallbackTilesPerFrame = 8;
+
+        [Header("Mobile Adaptive Quality")]
+        [SerializeField] private float mobileTargetFrameTimeMs = 16.6f;
+        [SerializeField] [Range(0.25f, 1f)] private float mobileMinInteractScale = 0.4f;
+        [SerializeField] [Range(0.25f, 1f)] private float mobileMaxInteractScale = 0.65f;
+        [SerializeField] private float mobileScaleAdjustSpeed = 0.35f;
 
         [Header("Zoom")]
         [SerializeField] private float pinchZoomSpeed = 1f;
@@ -37,6 +45,7 @@ namespace FractalVisio.Fractal
         private FractalPrecisionManager precisionManager;
         private Texture2D cpuRenderTexture;
         private Texture2D cpuPreviewTexture;
+        private Texture2D transitionPreviewTexture;
         private RenderTexture gpuRenderTexture;
         private RenderTexture gpuPreviewTexture;
         private FractalView view;
@@ -45,6 +54,7 @@ namespace FractalVisio.Fractal
         private int generationId;
         private int currentTextureWidth;
         private int currentTextureHeight;
+        private float currentRenderScale = -1f;
         private float lastInteractionTime;
         private bool isInteracting;
 
@@ -55,6 +65,8 @@ namespace FractalVisio.Fractal
         private int previousFingerMode;
         private double averageTileMs = 0.4d;
         private double averageApplyMs = 0.3d;
+        private float smoothedFrameTimeMs = 16.6f;
+        private float adaptiveInteractRenderScale;
 
         private void Awake()
         {
@@ -62,6 +74,7 @@ namespace FractalVisio.Fractal
             precisionManager = new FractalPrecisionManager();
             view = FractalView.Default;
             BuildDefaultGradient(out var gradient);
+            adaptiveInteractRenderScale = interactRenderScale;
 
             renderers[RenderMode.Fast] = new FastFractalRenderer(gradient);
             renderers[RenderMode.Perturbation] = new PerturbationFractalRenderer(gradient, enableCpuFallback: false);
@@ -71,7 +84,8 @@ namespace FractalVisio.Fractal
         private void Start()
         {
             EnsureTargetImage();
-            RecreateTexturesIfNeeded(force: true);
+            RecreateTexturesIfNeeded(force: true, ResolveDesiredRenderScale());
+            RequestRender();
         }
 
         private void EnsureTargetImage()
@@ -106,13 +120,21 @@ namespace FractalVisio.Fractal
 
         private void Update()
         {
-            RecreateTexturesIfNeeded();
+            TrackFrameTiming();
+            if (RecreateTexturesIfNeeded(force: false, ResolveDesiredRenderScale()))
+            {
+                RequestRender();
+            }
 
             isInteracting = HandleTouchInput();
 
             if (!isInteracting && Time.unscaledTime - lastInteractionTime > settleDelay && view.iterations != settleIterations)
             {
                 view.iterations = settleIterations;
+                if (RecreateTexturesIfNeeded(force: false, ResolveDesiredRenderScale()))
+                {
+                    // Preview is kept during stage switch; explicit rerender below fills full-res target.
+                }
                 RequestRender();
             }
         }
@@ -124,12 +146,20 @@ namespace FractalVisio.Fractal
                 return;
             }
 
-            RecreateTexturesIfNeeded();
+            if (RecreateTexturesIfNeeded(force: false, ResolveDesiredRenderScale()))
+            {
+                RequestRender();
+            }
         }
 
         private void OnDestroy()
         {
             ReleaseTextures();
+            if (transitionPreviewTexture != null)
+            {
+                Destroy(transitionPreviewTexture);
+                transitionPreviewTexture = null;
+            }
         }
 
         private bool HandleTouchInput()
@@ -158,6 +188,10 @@ namespace FractalVisio.Fractal
 
                 lastInteractionTime = Time.unscaledTime;
                 view.iterations = interactIterations;
+                if (RecreateTexturesIfNeeded(force: false, ResolveDesiredRenderScale()))
+                {
+                    // Texture scale changed for interaction; trigger render with new size below.
+                }
                 RequestRender();
                 return true;
             }
@@ -179,6 +213,10 @@ namespace FractalVisio.Fractal
 
                 lastInteractionTime = Time.unscaledTime;
                 view.iterations = interactIterations;
+                if (RecreateTexturesIfNeeded(force: false, ResolveDesiredRenderScale()))
+                {
+                    // Texture scale changed for interaction; trigger render with new size below.
+                }
                 RequestRender();
                 return true;
             }
@@ -436,26 +474,28 @@ namespace FractalVisio.Fractal
             }
         }
 
-        private bool RecreateTexturesIfNeeded(bool force = false)
+        private bool RecreateTexturesIfNeeded(bool force, float renderScale)
         {
-            var targetSize = ComputeTargetTextureSize();
+            var targetSize = ComputeTargetTextureSize(renderScale);
             if (!force && cpuRenderTexture != null && cpuPreviewTexture != null && gpuRenderTexture != null && gpuPreviewTexture != null &&
-                currentTextureWidth == targetSize.width && currentTextureHeight == targetSize.height)
+                currentTextureWidth == targetSize.width && currentTextureHeight == targetSize.height &&
+                Mathf.Abs(currentRenderScale - renderScale) < 0.001f)
             {
                 return false;
             }
 
+            CaptureTransitionPreview();
             ReleaseTextures();
             EnsureTextures(targetSize.width, targetSize.height);
             currentTextureWidth = targetSize.width;
             currentTextureHeight = targetSize.height;
+            currentRenderScale = renderScale;
 
             PushTexture();
-            RequestRender();
             return true;
         }
 
-        private (int width, int height) ComputeTargetTextureSize()
+        private (int width, int height) ComputeTargetTextureSize(float renderScale)
         {
             var width = Mathf.Max(minTextureSize, baseWidth);
             var height = Mathf.Max(minTextureSize, baseHeight);
@@ -465,14 +505,14 @@ namespace FractalVisio.Fractal
                 var rect = targetImage.rectTransform.rect;
                 if (rect.width > 0f && rect.height > 0f)
                 {
-                    width = Mathf.Max(minTextureSize, Mathf.RoundToInt(rect.width));
-                    height = Mathf.Max(minTextureSize, Mathf.RoundToInt(rect.height));
+                    width = Mathf.Max(minTextureSize, Mathf.RoundToInt(rect.width * renderScale));
+                    height = Mathf.Max(minTextureSize, Mathf.RoundToInt(rect.height * renderScale));
                     return (width, height);
                 }
             }
 
-            width = Mathf.Max(minTextureSize, Screen.width > 0 ? Screen.width : width);
-            height = Mathf.Max(minTextureSize, Screen.height > 0 ? Screen.height : height);
+            width = Mathf.Max(minTextureSize, Mathf.RoundToInt((Screen.width > 0 ? Screen.width : width) * renderScale));
+            height = Mathf.Max(minTextureSize, Mathf.RoundToInt((Screen.height > 0 ? Screen.height : height) * renderScale));
             return (width, height);
         }
 
@@ -598,6 +638,7 @@ namespace FractalVisio.Fractal
 
             currentTextureWidth = 0;
             currentTextureHeight = 0;
+            currentRenderScale = -1f;
         }
 
         private void PushTexture()
@@ -605,7 +646,79 @@ namespace FractalVisio.Fractal
             if (targetImage != null)
             {
                 targetImage.texture = lastFrameGpu && gpuRenderTexture != null ? gpuRenderTexture : cpuRenderTexture;
+                if (transitionPreviewTexture != null)
+                {
+                    Destroy(transitionPreviewTexture);
+                    transitionPreviewTexture = null;
+                }
             }
+        }
+
+        private void CaptureTransitionPreview()
+        {
+            if (targetImage == null)
+            {
+                return;
+            }
+
+            if (transitionPreviewTexture != null)
+            {
+                Destroy(transitionPreviewTexture);
+                transitionPreviewTexture = null;
+            }
+
+            if (cpuRenderTexture == null || cpuRenderTexture.width <= 0 || cpuRenderTexture.height <= 0)
+            {
+                return;
+            }
+
+            transitionPreviewTexture = new Texture2D(cpuRenderTexture.width, cpuRenderTexture.height, TextureFormat.RGBA32, false);
+            transitionPreviewTexture.SetPixels32(cpuRenderTexture.GetPixels32());
+            transitionPreviewTexture.Apply(false, false);
+            targetImage.texture = transitionPreviewTexture;
+            targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
+        }
+
+        private float ResolveDesiredRenderScale()
+        {
+            if (isInteracting)
+            {
+                return ResolveInteractRenderScale();
+            }
+
+            return Mathf.Clamp01(settleRenderScale);
+        }
+
+        private float ResolveInteractRenderScale()
+        {
+            var defaultScale = Mathf.Clamp(interactRenderScale, 0.1f, 1f);
+            if (!Application.isMobilePlatform)
+            {
+                adaptiveInteractRenderScale = defaultScale;
+                return defaultScale;
+            }
+
+            var minScale = Mathf.Min(mobileMinInteractScale, mobileMaxInteractScale);
+            var maxScale = Mathf.Max(mobileMinInteractScale, mobileMaxInteractScale);
+            adaptiveInteractRenderScale = Mathf.Clamp(adaptiveInteractRenderScale, minScale, maxScale);
+
+            var targetMs = Mathf.Max(8f, mobileTargetFrameTimeMs);
+            if (smoothedFrameTimeMs > targetMs + 0.75f)
+            {
+                adaptiveInteractRenderScale -= mobileScaleAdjustSpeed * Time.unscaledDeltaTime;
+            }
+            else if (smoothedFrameTimeMs < targetMs - 1f)
+            {
+                adaptiveInteractRenderScale += mobileScaleAdjustSpeed * Time.unscaledDeltaTime;
+            }
+
+            return Mathf.Clamp(adaptiveInteractRenderScale, minScale, maxScale);
+        }
+
+        private void TrackFrameTiming()
+        {
+            var frameTimeMs = Mathf.Max(0.1f, Time.unscaledDeltaTime * 1000f);
+            smoothedFrameTimeMs = Mathf.Lerp(smoothedFrameTimeMs, frameTimeMs, 0.12f);
         }
 
         private static void BuildDefaultGradient(out Gradient gradient)
