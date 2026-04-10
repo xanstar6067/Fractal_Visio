@@ -16,6 +16,7 @@ namespace FractalVisio.Fractal
         [SerializeField] private RawImage targetImage;
         [SerializeField] private int baseWidth = 1080;
         [SerializeField] private int baseHeight = 1920;
+        [SerializeField] private int minTextureSize = 64;
 
         [Header("Quality")]
         [SerializeField] private int tileSize = 96;
@@ -36,6 +37,8 @@ namespace FractalVisio.Fractal
         private FractalView view;
 
         private int generationId;
+        private int currentTextureWidth;
+        private int currentTextureHeight;
         private float lastInteractionTime;
         private bool isInteracting;
 
@@ -55,10 +58,12 @@ namespace FractalVisio.Fractal
             renderers[RenderMode.Fast] = new FastFractalRenderer(gradient);
             renderers[RenderMode.Perturbation] = new PerturbationFractalRenderer(gradient);
             renderers[RenderMode.PerturbationWithFallback] = new PerturbationFractalRenderer(gradient);
+        }
 
-            EnsureTextures(baseWidth, baseHeight);
-            PushTexture();
-            RequestRender();
+        private void Start()
+        {
+            EnsureTargetImage();
+            RecreateTexturesIfNeeded(force: true);
         }
 
         private void EnsureTargetImage()
@@ -93,6 +98,8 @@ namespace FractalVisio.Fractal
 
         private void Update()
         {
+            RecreateTexturesIfNeeded();
+
             isInteracting = HandleTouchInput();
 
             if (!isInteracting && Time.unscaledTime - lastInteractionTime > settleDelay && view.iterations != settleIterations)
@@ -100,6 +107,21 @@ namespace FractalVisio.Fractal
                 view.iterations = settleIterations;
                 RequestRender();
             }
+        }
+
+        private void OnRectTransformDimensionsChange()
+        {
+            if (!isActiveAndEnabled)
+            {
+                return;
+            }
+
+            RecreateTexturesIfNeeded();
+        }
+
+        private void OnDestroy()
+        {
+            ReleaseTextures();
         }
 
         private bool HandleTouchInput()
@@ -298,6 +320,46 @@ namespace FractalVisio.Fractal
             }
         }
 
+        private bool RecreateTexturesIfNeeded(bool force = false)
+        {
+            var targetSize = ComputeTargetTextureSize();
+            if (!force && renderTexture != null && previewTexture != null &&
+                currentTextureWidth == targetSize.width && currentTextureHeight == targetSize.height)
+            {
+                return false;
+            }
+
+            ReleaseTextures();
+            EnsureTextures(targetSize.width, targetSize.height);
+            currentTextureWidth = targetSize.width;
+            currentTextureHeight = targetSize.height;
+
+            PushTexture();
+            RequestRender();
+            return true;
+        }
+
+        private (int width, int height) ComputeTargetTextureSize()
+        {
+            var width = Mathf.Max(minTextureSize, baseWidth);
+            var height = Mathf.Max(minTextureSize, baseHeight);
+
+            if (targetImage != null)
+            {
+                var rect = targetImage.rectTransform.rect;
+                if (rect.width > 0f && rect.height > 0f)
+                {
+                    width = Mathf.Max(minTextureSize, Mathf.RoundToInt(rect.width));
+                    height = Mathf.Max(minTextureSize, Mathf.RoundToInt(rect.height));
+                    return (width, height);
+                }
+            }
+
+            width = Mathf.Max(minTextureSize, Screen.width > 0 ? Screen.width : width);
+            height = Mathf.Max(minTextureSize, Screen.height > 0 ? Screen.height : height);
+            return (width, height);
+        }
+
         private void CachePreview()
         {
             if (previewTexture == null || renderTexture == null)
@@ -321,6 +383,24 @@ namespace FractalVisio.Fractal
             previewTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
             renderTexture.wrapMode = TextureWrapMode.Clamp;
             previewTexture.wrapMode = TextureWrapMode.Clamp;
+        }
+
+        private void ReleaseTextures()
+        {
+            if (renderTexture != null)
+            {
+                Destroy(renderTexture);
+                renderTexture = null;
+            }
+
+            if (previewTexture != null)
+            {
+                Destroy(previewTexture);
+                previewTexture = null;
+            }
+
+            currentTextureWidth = 0;
+            currentTextureHeight = 0;
         }
 
         private void PushTexture()
