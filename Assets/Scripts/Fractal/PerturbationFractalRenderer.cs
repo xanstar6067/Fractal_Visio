@@ -72,28 +72,17 @@ namespace FractalVisio.Fractal
             {
                 return fallbackTiles;
             }
-
-            var scale = request.View.scale.AsDouble;
-            var uncertainty = Math.Min(1d, scale <= 0d ? 1d : 1e-14d / scale);
-            var sampleStride = Mathf.Max(tileSize * 3, tileSize);
             var tileIndex = 0;
 
-            for (var y = 0; y < height; y += sampleStride)
+            // Accuracy-first fallback mode: repaint full frame by tiles on CPU.
+            // This avoids perturbation divergence artifacts that can look like blur/structure averaging.
+            for (var y = 0; y < height; y += tileSize)
             {
-                for (var x = 0; x < width; x += sampleStride)
+                for (var x = 0; x < width; x += tileSize)
                 {
-                    var nx = (x + 0.5d) / width;
-                    var ny = (y + 0.5d) / height;
-                    var dx = Math.Abs(nx - 0.5d);
-                    var dy = Math.Abs(ny - 0.5d);
-
-                    // Bias fallback toward deep zoom edges where delta approximation diverges first.
-                    if ((dx + dy) * uncertainty > 0.08d)
-                    {
-                        var rectWidth = Mathf.Min(tileSize, width - x);
-                        var rectHeight = Mathf.Min(tileSize, height - y);
-                        fallbackTiles.Add(new TileDescriptor(new RectInt(x, y, rectWidth, rectHeight), tileIndex++));
-                    }
+                    var rectWidth = Mathf.Min(tileSize, width - x);
+                    var rectHeight = Mathf.Min(tileSize, height - y);
+                    fallbackTiles.Add(new TileDescriptor(new RectInt(x, y, rectWidth, rectHeight), tileIndex++));
                 }
             }
 
@@ -139,7 +128,7 @@ namespace FractalVisio.Fractal
 
             if (orbitTexture == null || orbitTexture.width != OrbitTextureWidth || orbitTexture.height != orbitPixelCount)
             {
-                orbitTexture = new Texture2D(OrbitTextureWidth, orbitPixelCount, TextureFormat.RGBAHalf, false, true)
+                orbitTexture = new Texture2D(OrbitTextureWidth, orbitPixelCount, TextureFormat.RGBAFloat, false, true)
                 {
                     wrapMode = TextureWrapMode.Clamp,
                     filterMode = FilterMode.Point
@@ -164,12 +153,13 @@ namespace FractalVisio.Fractal
             orbitTexture.Apply(false, false);
             perturbationMaterial.SetTexture("_ReferenceOrbitTex", orbitTexture);
             perturbationMaterial.SetInt("_OrbitLength", cachedOrbitIterations);
-            perturbationMaterial.SetVector("_ReferenceC", new Vector4((float)referenceCx, (float)referenceCy, 0f, 0f));
         }
 
         private void UpdateMaterialConstants(in FractalView view)
         {
-            perturbationMaterial.SetVector("_Center", new Vector4((float)view.x.AsDouble, (float)view.y.AsDouble, 0f, 0f));
+            var centerDeltaX = view.x.AsDouble - referenceCx;
+            var centerDeltaY = view.y.AsDouble - referenceCy;
+            perturbationMaterial.SetVector("_CenterDelta", new Vector4((float)centerDeltaX, (float)centerDeltaY, 0f, 0f));
             perturbationMaterial.SetFloat("_Scale", (float)view.scale.AsDouble);
             perturbationMaterial.SetFloat("_Iterations", view.iterations);
         }

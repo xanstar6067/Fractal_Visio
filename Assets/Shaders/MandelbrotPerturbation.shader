@@ -2,8 +2,7 @@ Shader "FractalVisio/MandelbrotPerturbation"
 {
     Properties
     {
-        _Center ("Center", Vector) = (0, 0, 0, 0)
-        _ReferenceC ("Reference C", Vector) = (0, 0, 0, 0)
+        _CenterDelta ("Center Delta", Vector) = (0, 0, 0, 0)
         _Scale ("Scale", Float) = 3
         _Iterations ("Iterations", Float) = 128
         _OrbitLength ("Orbit Length", Int) = 128
@@ -31,8 +30,7 @@ Shader "FractalVisio/MandelbrotPerturbation"
             SAMPLER(sampler_ReferenceOrbitTex);
 
             CBUFFER_START(UnityPerMaterial)
-            float4 _Center;
-            float4 _ReferenceC;
+            float4 _CenterDelta;
             float _Scale;
             float _Iterations;
             int _OrbitLength;
@@ -67,8 +65,7 @@ Shader "FractalVisio/MandelbrotPerturbation"
                 float aspect = _ScreenParams.x / _ScreenParams.y;
                 p.x *= aspect;
 
-                float2 c = float2(_Center.x, _Center.y) + p * (_Scale * 0.5);
-                float2 dc = c - _ReferenceC.xy;
+                float2 dc = _CenterDelta.xy + p * (_Scale * 0.5);
                 float2 delta = 0.0;
 
                 int maxIterations = max(1, (int)_Iterations);

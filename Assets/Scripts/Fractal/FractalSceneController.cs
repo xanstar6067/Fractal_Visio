@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -39,8 +40,8 @@ namespace FractalVisio.Fractal
 
         [Header("Zoom")]
         [SerializeField] private float pinchZoomSpeed = 1f;
-        [SerializeField] private float minScale = 1e-20f;
-        [SerializeField] private float maxScale = 4f;
+        [SerializeField] private double minScale = 1e-20d;
+        [SerializeField] private double maxScale = 4d;
 
         private readonly Dictionary<RenderMode, IFractalRenderer> renderers = new();
 
@@ -69,6 +70,7 @@ namespace FractalVisio.Fractal
         private double averageApplyMs = 0.3d;
         private float smoothedFrameTimeMs = 16.6f;
         private float adaptiveInteractRenderScale;
+        private RenderMode? previousRenderMode;
 
         private void Awake()
         {
@@ -274,7 +276,7 @@ namespace FractalVisio.Fractal
             var oldView = view;
             var oldPoint = ScreenToFractal(screenCenter, oldView);
 
-            var newScale = Mathf.Clamp((float)oldView.scale.AsDouble / zoomFactor, minScale, maxScale);
+            var newScale = Math.Clamp(oldView.scale.AsDouble / zoomFactor, minScale, maxScale);
             view.scale = HighPrecision.FromDouble(newScale);
 
             var newPoint = ScreenToFractal(screenCenter, view);
@@ -364,6 +366,12 @@ namespace FractalVisio.Fractal
         private IEnumerator RenderRoutine(int requestGeneration)
         {
             var mode = precisionManager.GetMode(view);
+            if (previousRenderMode != mode)
+            {
+                Debug.Log($"[FractalSceneController] Render mode switched: {previousRenderMode?.ToString() ?? "None"} -> {mode}, scale={view.scale.AsDouble:E6}");
+                previousRenderMode = mode;
+            }
+
             var adjustedView = view;
             adjustedView.iterations = precisionManager.ResolveIterations(view, isInteracting);
             var request = new FractalRenderRequest(adjustedView, requestGeneration, isInteracting);
