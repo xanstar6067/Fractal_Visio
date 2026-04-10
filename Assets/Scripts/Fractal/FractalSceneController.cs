@@ -38,8 +38,8 @@ namespace FractalVisio.Fractal
 
         [Header("Zoom")]
         [SerializeField] private float pinchZoomSpeed = 1f;
-        [SerializeField] private float minScale = 1e-20f;
-        [SerializeField] private float maxScale = 4f;
+        [SerializeField] private double minScale = 1e-20d;
+        [SerializeField] private double maxScale = 4d;
 
         [Header("Precision Mode Thresholds")]
         [Tooltip("Mode switch threshold in scale space. With initialScale = 3 and zoom ≈ initialScale / currentScale, scale 1e-8 corresponds to zoom ≈ 3e8.")]
@@ -284,16 +284,33 @@ namespace FractalVisio.Fractal
 
         private void ApplyPinchZoom(Vector2 screenCenter, float zoomFactor)
         {
-            zoomFactor = Mathf.Clamp(zoomFactor, 0.5f, 2f);
             var oldView = view;
             var oldPoint = ScreenToFractal(screenCenter, oldView);
 
-            var newScale = Mathf.Clamp((float)oldView.scale.AsDouble / zoomFactor, minScale, maxScale);
+            var zoomFactorDouble = ClampDouble(zoomFactor, 0.5d, 2d);
+            var unclampedScale = oldView.scale.AsDouble / zoomFactorDouble;
+            var newScale = ClampDouble(unclampedScale, minScale, maxScale);
             view.scale = HighPrecision.FromDouble(newScale);
 
             var newPoint = ScreenToFractal(screenCenter, view);
             view.x += HighPrecision.FromDouble(oldPoint.x - newPoint.x);
             view.y += HighPrecision.FromDouble(oldPoint.y - newPoint.y);
+        }
+
+
+        private static double ClampDouble(double value, double min, double max)
+        {
+            if (value < min)
+            {
+                return min;
+            }
+
+            if (value > max)
+            {
+                return max;
+            }
+
+            return value;
         }
 
         private (double x, double y) ScreenToFractal(Vector2 screenPoint, in FractalView srcView)
@@ -721,7 +738,7 @@ namespace FractalVisio.Fractal
                 return;
             }
 
-            var zoom = 4d / Mathf.Max(1e-30f, (float)view.scale.AsDouble);
+            var zoom = 4d / System.Math.Max(1e-30d, view.scale.AsDouble);
             zoomText.text = $"Zoom: x{zoom:0.###e+0}";
         }
 
