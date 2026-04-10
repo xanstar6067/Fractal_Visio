@@ -41,6 +41,12 @@ namespace FractalVisio.Fractal
         [SerializeField] private float minScale = 1e-20f;
         [SerializeField] private float maxScale = 4f;
 
+        [Header("Precision Mode Thresholds")]
+        [Tooltip("Mode switch threshold in scale space. With initialScale = 3 and zoom ≈ initialScale / currentScale, scale 1e-8 corresponds to zoom ≈ 3e8.")]
+        [SerializeField] private double fastModeThresholdScale = 1e-8d;
+        [Tooltip("Mode switch threshold in scale space. With initialScale = 3 and zoom ≈ initialScale / currentScale, scale 1e-16 corresponds to zoom ≈ 3e16.")]
+        [SerializeField] private double perturbationModeThresholdScale = 1e-16d;
+
         private readonly Dictionary<RenderMode, IFractalRenderer> renderers = new();
 
         private FractalPrecisionManager precisionManager;
@@ -72,7 +78,7 @@ namespace FractalVisio.Fractal
         private void Awake()
         {
             EnsureTargetImage();
-            precisionManager = new FractalPrecisionManager();
+            precisionManager = new FractalPrecisionManager(fastModeThresholdScale, perturbationModeThresholdScale);
             view = FractalView.Default;
             BuildDefaultGradient(out var gradient);
             adaptiveInteractRenderScale = interactRenderScale;
