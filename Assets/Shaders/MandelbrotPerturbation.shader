@@ -2,12 +2,15 @@ Shader "FractalVisio/MandelbrotPerturbation"
 {
     Properties
     {
-        _CenterDelta ("Center Delta", Vector) = (0, 0, 0, 0)
+        _CenterDeltaHigh ("Center Delta High", Vector) = (0, 0, 0, 0)
+        _CenterDeltaLow ("Center Delta Low", Vector) = (0, 0, 0, 0)
         _Scale ("Scale", Float) = 3
+        _Aspect ("Aspect", Float) = 1
         _Iterations ("Iterations", Float) = 128
         _OrbitLength ("Orbit Length", Int) = 128
         _PaletteTex ("Palette", 2D) = "white" {}
-        _ReferenceOrbitTex ("Reference Orbit", 2D) = "black" {}
+        _ReferenceOrbitTexHigh ("Reference Orbit High", 2D) = "black" {}
+        _ReferenceOrbitTexLow ("Reference Orbit Low", 2D) = "black" {}
     }
 
     SubShader
@@ -26,12 +29,16 @@ Shader "FractalVisio/MandelbrotPerturbation"
 
             TEXTURE2D(_PaletteTex);
             SAMPLER(sampler_PaletteTex);
-            TEXTURE2D(_ReferenceOrbitTex);
-            SAMPLER(sampler_ReferenceOrbitTex);
+            TEXTURE2D(_ReferenceOrbitTexHigh);
+            SAMPLER(sampler_ReferenceOrbitTexHigh);
+            TEXTURE2D(_ReferenceOrbitTexLow);
+            SAMPLER(sampler_ReferenceOrbitTexLow);
 
             CBUFFER_START(UnityPerMaterial)
-            float4 _CenterDelta;
+            float4 _CenterDeltaHigh;
+            float4 _CenterDeltaLow;
             float _Scale;
+            float _Aspect;
             float _Iterations;
             int _OrbitLength;
             CBUFFER_END
@@ -52,20 +59,21 @@ Shader "FractalVisio/MandelbrotPerturbation"
             {
                 uint width;
                 uint height;
-                _ReferenceOrbitTex.GetDimensions(width, height);
+                _ReferenceOrbitTexHigh.GetDimensions(width, height);
                 int x = index % (int)width;
                 int y = index / (int)width;
                 float2 uv = (float2(x, y) + 0.5) / float2(width, height);
-                return SAMPLE_TEXTURE2D_LOD(_ReferenceOrbitTex, sampler_ReferenceOrbitTex, uv, 0).xy;
+                float2 orbitHigh = SAMPLE_TEXTURE2D_LOD(_ReferenceOrbitTexHigh, sampler_ReferenceOrbitTexHigh, uv, 0).xy;
+                float2 orbitLow = SAMPLE_TEXTURE2D_LOD(_ReferenceOrbitTexLow, sampler_ReferenceOrbitTexLow, uv, 0).xy;
+                return orbitHigh + orbitLow;
             }
 
             half4 Frag(Varyings input) : SV_Target
             {
                 float2 p = input.uv * 2.0 - 1.0;
-                float aspect = _ScreenParams.x / _ScreenParams.y;
-                p.x *= aspect;
+                p.x *= _Aspect;
 
-                float2 dc = _CenterDelta.xy + p * (_Scale * 0.5);
+                float2 dc = (_CenterDeltaHigh.xy + _CenterDeltaLow.xy) + p * (_Scale * 0.5);
                 float2 delta = 0.0;
 
                 int maxIterations = max(1, (int)_Iterations);
