@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using Lean.Touch;
 
 namespace FractalVisio.Fractal
 {
@@ -100,19 +101,15 @@ namespace FractalVisio.Fractal
 
         private bool HandleTouchInput()
         {
-            if (Input.touchCount < 2)
+            var fingers = LeanTouch.GetFingers(true, true);
+            if (fingers.Count < 2)
             {
                 previousPinchDistance = 0f;
                 return false;
             }
 
-            var t0 = Input.GetTouch(0);
-            var t1 = Input.GetTouch(1);
-
-            var p0 = t0.position;
-            var p1 = t1.position;
-            var center = (p0 + p1) * 0.5f;
-            var distance = Vector2.Distance(p0, p1);
+            var center = LeanGesture.GetScreenCenter(fingers);
+            var distance = LeanGesture.GetScreenDistance(fingers);
 
             if (previousPinchDistance > 0.001f)
             {
