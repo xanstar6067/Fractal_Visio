@@ -73,6 +73,7 @@ namespace FractalVisio.Fractal
             EnsureTargetImage();
             precisionManager = new FractalPrecisionManager();
             view = FractalView.Default;
+            view.iterations = settleIterations;
             BuildDefaultGradient(out var gradient);
             adaptiveInteractRenderScale = interactRenderScale;
 
@@ -142,16 +143,6 @@ namespace FractalVisio.Fractal
             }
 
             isInteracting = HandleTouchInput();
-
-            if (!isInteracting && Time.unscaledTime - lastInteractionTime > settleDelay && view.iterations != settleIterations)
-            {
-                view.iterations = settleIterations;
-                if (RecreateTexturesIfNeeded(force: false, ResolveDesiredRenderScale()))
-                {
-                    // Preview is kept during stage switch; explicit rerender below fills full-res target.
-                }
-                RequestRender();
-            }
         }
 
         private void OnRectTransformDimensionsChange()
@@ -193,21 +184,21 @@ namespace FractalVisio.Fractal
             {
                 var finger = fingers[0];
                 var currentPosition = finger.ScreenPosition;
+                var hasViewChanged = false;
                 if (hasPreviousSingleFingerPosition)
                 {
                     ApplySingleFingerPan(previousSingleFingerPosition, currentPosition);
+                    hasViewChanged = (currentPosition - previousSingleFingerPosition).sqrMagnitude > 0f;
                 }
 
                 previousSingleFingerPosition = currentPosition;
                 hasPreviousSingleFingerPosition = true;
 
-                lastInteractionTime = Time.unscaledTime;
-                view.iterations = interactIterations;
-                if (RecreateTexturesIfNeeded(force: false, ResolveDesiredRenderScale()))
+                if (hasViewChanged)
                 {
-                    // Texture scale changed for interaction; trigger render with new size below.
+                    lastInteractionTime = Time.unscaledTime;
+                    RequestRender();
                 }
-                RequestRender();
                 return true;
             }
 
@@ -221,18 +212,17 @@ namespace FractalVisio.Fractal
                     var zoomFactor = Mathf.Pow(distance / previousPinchDistance, pinchZoomSpeed);
                     ApplyPinchZoom(center, zoomFactor);
                     ApplyPanFromPinchCenter(previousPinchCenter, center);
+                    var hasZoomChanged = Mathf.Abs(zoomFactor - 1f) > 0.0001f;
+                    var hasPanChanged = (center - previousPinchCenter).sqrMagnitude > 0f;
+                    if (hasZoomChanged || hasPanChanged)
+                    {
+                        lastInteractionTime = Time.unscaledTime;
+                        RequestRender();
+                    }
                 }
 
                 previousPinchCenter = center;
                 previousPinchDistance = distance;
-
-                lastInteractionTime = Time.unscaledTime;
-                view.iterations = interactIterations;
-                if (RecreateTexturesIfNeeded(force: false, ResolveDesiredRenderScale()))
-                {
-                    // Texture scale changed for interaction; trigger render with new size below.
-                }
-                RequestRender();
                 return true;
             }
 
@@ -696,11 +686,6 @@ namespace FractalVisio.Fractal
 
         private float ResolveDesiredRenderScale()
         {
-            if (isInteracting)
-            {
-                return ResolveInteractRenderScale();
-            }
-
             return Mathf.Clamp01(settleRenderScale);
         }
 

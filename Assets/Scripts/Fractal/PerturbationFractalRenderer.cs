@@ -107,7 +107,7 @@ namespace FractalVisio.Fractal
                 return;
             }
 
-            var iterationBudget = request.View.iterations + (request.IsInteracting ? 0 : request.View.iterations / 2);
+            var iterationBudget = request.View.iterations + (request.View.iterations / 2);
             EnsureCpuTileBuffer(tile.PixelRect.width * tile.PixelRect.height);
             FractalCpuKernels.RenderMandelbrotTile(cpuTileBuffer, texture2D.width, texture2D.height, tile, request.View, iterationBudget, 1, gradient);
             FractalCpuKernels.BlitTile(texture2D, tile, cpuTileBuffer);

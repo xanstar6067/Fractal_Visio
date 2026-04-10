@@ -22,14 +22,7 @@ namespace FractalVisio.Fractal
 
         public int ResolveIterations(in FractalView view, bool interacting)
         {
-            var baseIterations = view.iterations;
-
-            if (interacting)
-            {
-                return baseIterations / 2;
-            }
-
-            return baseIterations;
+            return view.iterations;
         }
     }
 }
