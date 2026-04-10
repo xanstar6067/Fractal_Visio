@@ -32,9 +32,12 @@ namespace FractalVisio.Fractal
         private readonly Dictionary<RenderMode, IFractalRenderer> renderers = new();
 
         private FractalPrecisionManager precisionManager;
-        private Texture2D renderTexture;
-        private Texture2D previewTexture;
+        private Texture2D cpuRenderTexture;
+        private Texture2D cpuPreviewTexture;
+        private RenderTexture gpuRenderTexture;
+        private RenderTexture gpuPreviewTexture;
         private FractalView view;
+        private bool lastFrameGpu = true;
 
         private int generationId;
         private int currentTextureWidth;
@@ -301,18 +304,32 @@ namespace FractalVisio.Fractal
             var request = new FractalRenderRequest(adjustedView, requestGeneration, isInteracting);
             var renderer = renderers[mode];
 
-            foreach (var tile in TilePlanner.BuildTiles(renderTexture.width, renderTexture.height, tileSize))
+            if (mode == RenderMode.Fast && gpuRenderTexture != null)
+            {
+                renderer.Render(request, gpuRenderTexture, new TileDescriptor(new RectInt(0, 0, gpuRenderTexture.width, gpuRenderTexture.height), 0));
+                lastFrameGpu = true;
+                PushTexture();
+                if (targetImage != null)
+                {
+                    targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
+                }
+
+                yield break;
+            }
+
+            foreach (var tile in TilePlanner.BuildTiles(cpuRenderTexture.width, cpuRenderTexture.height, tileSize))
             {
                 if (requestGeneration != generationId)
                 {
                     yield break;
                 }
 
-                renderer.Render(request, renderTexture, tile);
-                renderTexture.Apply(false, false);
+                renderer.Render(request, cpuRenderTexture, tile);
+                cpuRenderTexture.Apply(false, false);
                 yield return null;
             }
 
+            lastFrameGpu = false;
             PushTexture();
             if (targetImage != null)
             {
@@ -323,7 +340,7 @@ namespace FractalVisio.Fractal
         private bool RecreateTexturesIfNeeded(bool force = false)
         {
             var targetSize = ComputeTargetTextureSize();
-            if (!force && renderTexture != null && previewTexture != null &&
+            if (!force && cpuRenderTexture != null && cpuPreviewTexture != null && gpuRenderTexture != null && gpuPreviewTexture != null &&
                 currentTextureWidth == targetSize.width && currentTextureHeight == targetSize.height)
             {
                 return false;
@@ -362,41 +379,71 @@ namespace FractalVisio.Fractal
 
         private void CachePreview()
         {
-            if (previewTexture == null || renderTexture == null)
+            if (targetImage == null)
             {
                 return;
             }
 
-            previewTexture.SetPixels32(renderTexture.GetPixels32());
-            previewTexture.Apply(false, false);
-
-            if (targetImage != null)
+            if (lastFrameGpu && gpuPreviewTexture != null && gpuRenderTexture != null)
             {
-                targetImage.texture = previewTexture;
+                Graphics.Blit(gpuRenderTexture, gpuPreviewTexture);
+                targetImage.texture = gpuPreviewTexture;
                 targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
+                return;
             }
+
+            if (cpuPreviewTexture == null || cpuRenderTexture == null)
+            {
+                return;
+            }
+
+            cpuPreviewTexture.SetPixels32(cpuRenderTexture.GetPixels32());
+            cpuPreviewTexture.Apply(false, false);
+            targetImage.texture = cpuPreviewTexture;
+            targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
         }
 
         private void EnsureTextures(int width, int height)
         {
-            renderTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-            previewTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-            renderTexture.wrapMode = TextureWrapMode.Clamp;
-            previewTexture.wrapMode = TextureWrapMode.Clamp;
+            cpuRenderTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            cpuPreviewTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            cpuRenderTexture.wrapMode = TextureWrapMode.Clamp;
+            cpuPreviewTexture.wrapMode = TextureWrapMode.Clamp;
+
+            gpuRenderTexture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32);
+            gpuPreviewTexture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32);
+            gpuRenderTexture.wrapMode = TextureWrapMode.Clamp;
+            gpuPreviewTexture.wrapMode = TextureWrapMode.Clamp;
+            gpuRenderTexture.Create();
+            gpuPreviewTexture.Create();
         }
 
         private void ReleaseTextures()
         {
-            if (renderTexture != null)
+            if (cpuRenderTexture != null)
             {
-                Destroy(renderTexture);
-                renderTexture = null;
+                Destroy(cpuRenderTexture);
+                cpuRenderTexture = null;
             }
 
-            if (previewTexture != null)
+            if (cpuPreviewTexture != null)
             {
-                Destroy(previewTexture);
-                previewTexture = null;
+                Destroy(cpuPreviewTexture);
+                cpuPreviewTexture = null;
+            }
+
+            if (gpuRenderTexture != null)
+            {
+                gpuRenderTexture.Release();
+                Destroy(gpuRenderTexture);
+                gpuRenderTexture = null;
+            }
+
+            if (gpuPreviewTexture != null)
+            {
+                gpuPreviewTexture.Release();
+                Destroy(gpuPreviewTexture);
+                gpuPreviewTexture = null;
             }
 
             currentTextureWidth = 0;
@@ -407,7 +454,7 @@ namespace FractalVisio.Fractal
         {
             if (targetImage != null)
             {
-                targetImage.texture = renderTexture;
+                targetImage.texture = lastFrameGpu && gpuRenderTexture != null ? gpuRenderTexture : cpuRenderTexture;
             }
         }
 

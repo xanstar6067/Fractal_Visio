@@ -38,6 +38,6 @@ namespace FractalVisio.Fractal
     public interface IFractalRenderer
     {
         RenderMode Mode { get; }
-        void Render(in FractalRenderRequest request, Texture2D target, TileDescriptor tile);
+        void Render(in FractalRenderRequest request, Texture target, TileDescriptor tile);
     }
 }
