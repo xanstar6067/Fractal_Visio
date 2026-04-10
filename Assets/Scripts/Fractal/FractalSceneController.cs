@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 using UnityEngine.UI;
 using Lean.Touch;
@@ -14,6 +15,7 @@ namespace FractalVisio.Fractal
     {
         [Header("Output")]
         [SerializeField] private RawImage targetImage;
+        [SerializeField] private Text scaleValueText;
         [SerializeField] private int baseWidth = 1080;
         [SerializeField] private int baseHeight = 1920;
         [SerializeField] private int minTextureSize = 64;
@@ -74,6 +76,7 @@ namespace FractalVisio.Fractal
             precisionManager = new FractalPrecisionManager();
             view = FractalView.Default;
             view.iterations = settleIterations;
+            UpdateScaleText();
             BuildDefaultGradient(out var gradient);
             adaptiveInteractRenderScale = interactRenderScale;
 
@@ -143,6 +146,7 @@ namespace FractalVisio.Fractal
             }
 
             isInteracting = HandleTouchInput();
+            UpdateScaleText();
         }
 
         private void OnRectTransformDimensionsChange()
@@ -246,6 +250,7 @@ namespace FractalVisio.Fractal
 
             view.x += HighPrecision.FromDouble(oldWorld.x - newWorld.x);
             view.y += HighPrecision.FromDouble(oldWorld.y - newWorld.y);
+            UpdateScaleText();
         }
         private void ApplyPanFromPinchCenter(Vector2 oldCenter, Vector2 newCenter)
         {
@@ -275,6 +280,18 @@ namespace FractalVisio.Fractal
             var newPoint = ScreenToFractal(screenCenter, view);
             view.x += HighPrecision.FromDouble(oldPoint.x - newPoint.x);
             view.y += HighPrecision.FromDouble(oldPoint.y - newPoint.y);
+            UpdateScaleText();
+        }
+
+        private void UpdateScaleText()
+        {
+            if (scaleValueText == null)
+            {
+                return;
+            }
+
+            var scaleAsText = view.scale.AsDouble.ToString("0.0e+0", CultureInfo.InvariantCulture).Replace('.', ',');
+            scaleValueText.text = scaleAsText;
         }
 
         private (double x, double y) ScreenToFractal(Vector2 screenPoint, in FractalView srcView)
