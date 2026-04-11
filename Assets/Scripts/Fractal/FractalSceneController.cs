@@ -73,6 +73,13 @@ namespace FractalVisio.Fractal
         private float adaptiveInteractRenderScale;
         private RenderMode? previousRenderMode;
         private string lastComputeBackendLabel = string.Empty;
+        private FractalView? lastRenderView;
+        private bool lastRenderInteracting;
+        private float lastRenderScale = -1f;
+
+        private const float PanMoveThresholdSqr = 0.25f;
+        private const float PinchCenterMoveThresholdSqr = 0.25f;
+        private const float ZoomChangeThreshold = 0.0001f;
 
         private void Awake()
         {
@@ -94,8 +101,9 @@ namespace FractalVisio.Fractal
         {
             EnsureTargetImage();
             LogShaderDiagnostics();
-            RecreateTexturesIfNeeded(force: true, ResolveDesiredRenderScale());
-            RequestRender();
+            var desiredRenderScale = ResolveDesiredRenderScale();
+            RecreateTexturesIfNeeded(force: true, desiredRenderScale);
+            RequestRender(desiredRenderScale, force: true);
         }
 
         private static void LogShaderDiagnostics()
@@ -145,12 +153,15 @@ namespace FractalVisio.Fractal
         private void Update()
         {
             TrackFrameTiming();
-            if (RecreateTexturesIfNeeded(force: false, ResolveDesiredRenderScale()))
-            {
-                RequestRender();
-            }
 
             isInteracting = HandleTouchInput();
+            var desiredRenderScale = isInteracting ? ResolveInteractRenderScale() : ResolveDesiredRenderScale();
+            var texturesRecreated = RecreateTexturesIfNeeded(force: false, desiredRenderScale);
+            if (texturesRecreated || ShouldRequestRender(desiredRenderScale))
+            {
+                RequestRender(desiredRenderScale);
+            }
+
             UpdateScaleText();
         }
 
@@ -161,9 +172,10 @@ namespace FractalVisio.Fractal
                 return;
             }
 
-            if (RecreateTexturesIfNeeded(force: false, ResolveDesiredRenderScale()))
+            var desiredRenderScale = isInteracting ? ResolveInteractRenderScale() : ResolveDesiredRenderScale();
+            if (RecreateTexturesIfNeeded(force: false, desiredRenderScale))
             {
-                RequestRender();
+                RequestRender(desiredRenderScale);
             }
         }
 
@@ -197,7 +209,7 @@ namespace FractalVisio.Fractal
                 if (hasPreviousSingleFingerPosition)
                 {
                     ApplySingleFingerPan(previousSingleFingerPosition, currentPosition);
-                    hasViewChanged = (currentPosition - previousSingleFingerPosition).sqrMagnitude > 0f;
+                    hasViewChanged = (currentPosition - previousSingleFingerPosition).sqrMagnitude > PanMoveThresholdSqr;
                 }
 
                 previousSingleFingerPosition = currentPosition;
@@ -206,7 +218,6 @@ namespace FractalVisio.Fractal
                 if (hasViewChanged)
                 {
                     lastInteractionTime = Time.unscaledTime;
-                    RequestRender();
                 }
                 return true;
             }
@@ -221,12 +232,11 @@ namespace FractalVisio.Fractal
                     var zoomFactor = Mathf.Pow(distance / previousPinchDistance, pinchZoomSpeed);
                     ApplyPinchZoom(center, zoomFactor);
                     ApplyPanFromPinchCenter(previousPinchCenter, center);
-                    var hasZoomChanged = Mathf.Abs(zoomFactor - 1f) > 0.0001f;
-                    var hasPanChanged = (center - previousPinchCenter).sqrMagnitude > 0f;
+                    var hasZoomChanged = Mathf.Abs(zoomFactor - 1f) > ZoomChangeThreshold;
+                    var hasPanChanged = (center - previousPinchCenter).sqrMagnitude > PinchCenterMoveThresholdSqr;
                     if (hasZoomChanged || hasPanChanged)
                     {
                         lastInteractionTime = Time.unscaledTime;
-                        RequestRender();
                     }
                 }
 
@@ -369,8 +379,34 @@ namespace FractalVisio.Fractal
             return true;
         }
 
-        private void RequestRender()
+        private bool ShouldRequestRender(float desiredRenderScale)
         {
+            if (!lastRenderView.HasValue)
+            {
+                return true;
+            }
+
+            var lastView = lastRenderView.Value;
+            var scaleChanged = Mathf.Abs(lastRenderScale - desiredRenderScale) > 0.001f;
+            return scaleChanged ||
+                   lastRenderInteracting != isInteracting ||
+                   !lastView.x.Equals(view.x) ||
+                   !lastView.y.Equals(view.y) ||
+                   !lastView.scale.Equals(view.scale) ||
+                   lastView.iterations != view.iterations;
+        }
+
+        private void RequestRender(float desiredRenderScale, bool force = false)
+        {
+            if (!force && !ShouldRequestRender(desiredRenderScale))
+            {
+                return;
+            }
+
+            lastRenderView = view;
+            lastRenderInteracting = isInteracting;
+            lastRenderScale = desiredRenderScale;
+
             generationId++;
             CachePreview();
             StopAllCoroutines();
