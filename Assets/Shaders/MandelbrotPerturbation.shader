@@ -8,6 +8,7 @@ Shader "FractalVisio/MandelbrotPerturbation"
         _Aspect          ("Aspect",            Float)  = 1
         _Iterations      ("Iterations",        Float)  = 128
         _OrbitLength     ("Orbit Length",      Int)    = 128
+        _GlitchThreshold ("Glitch Threshold",  Float)  = 0.0001
         _PaletteTex              ("Palette",              2D) = "white" {}
         _ReferenceOrbitTexHigh   ("Reference Orbit High", 2D) = "black" {}
         _ReferenceOrbitTexLow    ("Reference Orbit Low",  2D) = "black" {}
@@ -35,6 +36,7 @@ Shader "FractalVisio/MandelbrotPerturbation"
             float  _Scale;
             float  _Aspect;
             float  _Iterations;
+            float  _GlitchThreshold;
             int    _OrbitLength;
             CBUFFER_END
 
@@ -108,6 +110,7 @@ Shader "FractalVisio/MandelbrotPerturbation"
                 // FIX: используем отдельный флаг вместо перезаписи iteration,
                 // чтобы корректно отличить "убежало на шаге i" от "не убежало".
                 bool escaped  = false;
+                bool glitched = false;
                 int  escapeAt = 0;
 
                 [loop]
@@ -126,7 +129,20 @@ Shader "FractalVisio/MandelbrotPerturbation"
 
                     float2 zNextRef = LoadOrbit(i + 1);
                     float2 z = zNextRef + delta;
-                    if (dot(z, z) > 4.0)
+                    float zMag2 = dot(z, z);
+                    float zRefMag2 = dot(zNextRef, zNextRef);
+
+                    // Single-reference perturbation is unreliable when the
+                    // perturbed orbit becomes tiny compared with the reference
+                    // orbit. That cancellation is the classic perturbation
+                    // glitch and commonly paints interior regions as escaped.
+                    if (zRefMag2 > 1e-12 && zMag2 < zRefMag2 * _GlitchThreshold)
+                    {
+                        glitched = true;
+                        break;
+                    }
+
+                    if (zMag2 > 4.0)
                     {
                         escaped  = true;
                         escapeAt = i + 1; // количество итераций до выхода
@@ -135,7 +151,7 @@ Shader "FractalVisio/MandelbrotPerturbation"
                 }
 
                 // Точки внутри множества — чёрные.
-                if (!escaped)
+                if (glitched || !escaped)
                     return half4(0.0, 0.0, 0.0, 1.0);
 
                 float t = saturate((float)escapeAt / max(1.0, (float)maxIter));

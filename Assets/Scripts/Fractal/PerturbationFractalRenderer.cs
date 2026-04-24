@@ -26,6 +26,7 @@ namespace FractalVisio.Fractal
     {
         private const string ShaderName = "FractalVisio/MandelbrotPerturbation";
         private const int OrbitTextureWidth = 1024;
+        private const float GlitchThreshold = 1e-4f;
 
         // Tightened from 0.20 – stale orbits at deep zoom cause bloom/banding.
         private const double OrbitReuseCenterFactor = 0.05d;
@@ -231,6 +232,7 @@ namespace FractalVisio.Fractal
 
             perturbationMaterial.SetFloat("_Scale",       (float)view.scale.AsDouble);
             perturbationMaterial.SetFloat("_Iterations",  view.iterations);
+            perturbationMaterial.SetFloat("_GlitchThreshold", GlitchThreshold);
 
             // FIX: pass aspect ratio so GPU UV mapping matches CPU kernel.
             var aspect = texHeight > 0 ? (float)texWidth / texHeight : 1f;
