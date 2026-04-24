@@ -449,6 +449,13 @@ namespace FractalVisio.Fractal
                     if (mode == RenderMode.PerturbationWithFallback && cpuRenderTexture != null)
                     {
                         CopyRenderTextureToCpu(gpuRenderTexture, cpuRenderTexture);
+                        lastFrameGpu = false;
+                        PushTexture();
+                        if (targetImage != null)
+                        {
+                            targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
+                        }
+
                         var fallbackTileList = perturbationRenderer.BuildFallbackTiles(request, cpuRenderTexture.width, cpuRenderTexture.height, tileSize);
                         var tilesPerFrame = ResolveFallbackTilesPerFrame();
                         var applyBatch = ResolveApplyBatchSize();
@@ -575,7 +582,16 @@ namespace FractalVisio.Fractal
             currentTextureHeight = targetSize.height;
             currentRenderScale = renderScale;
 
-            PushTexture();
+            if (targetImage != null && transitionPreviewTexture != null)
+            {
+                targetImage.texture = transitionPreviewTexture;
+                targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
+            }
+            else
+            {
+                PushTexture();
+            }
+
             return true;
         }
 
@@ -604,6 +620,13 @@ namespace FractalVisio.Fractal
         {
             if (targetImage == null)
             {
+                return;
+            }
+
+            if (transitionPreviewTexture != null)
+            {
+                targetImage.texture = transitionPreviewTexture;
+                targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
                 return;
             }
 
@@ -749,6 +772,15 @@ namespace FractalVisio.Fractal
             {
                 Destroy(transitionPreviewTexture);
                 transitionPreviewTexture = null;
+            }
+
+            if (lastFrameGpu && gpuRenderTexture != null && gpuRenderTexture.width > 0 && gpuRenderTexture.height > 0)
+            {
+                transitionPreviewTexture = new Texture2D(gpuRenderTexture.width, gpuRenderTexture.height, TextureFormat.RGBA32, false);
+                CopyRenderTextureToCpu(gpuRenderTexture, transitionPreviewTexture);
+                targetImage.texture = transitionPreviewTexture;
+                targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
+                return;
             }
 
             if (cpuRenderTexture == null || cpuRenderTexture.width <= 0 || cpuRenderTexture.height <= 0)
