@@ -60,7 +60,10 @@ namespace FractalVisio.Fractal
         private int currentTextureHeight;
         private float currentRenderScale = -1f;
         private float lastInteractionTime;
+        private float lastZoomInteractionTime = float.NegativeInfinity;
         private bool isInteracting;
+        private bool isZooming;
+        private bool hasDeferredCpuRender;
 
         private Vector2 previousPinchCenter;
         private float previousPinchDistance;
@@ -162,6 +165,7 @@ namespace FractalVisio.Fractal
                 RequestRender(desiredRenderScale);
             }
 
+            ResumeDeferredCpuRenderIfReady();
             UpdateScaleText();
         }
 
@@ -211,6 +215,7 @@ namespace FractalVisio.Fractal
 
             if (fingerMode == 1)
             {
+                isZooming = false;
                 var finger = fingers[0];
                 var currentPosition = finger.ScreenPosition;
                 var hasViewChanged = false;
@@ -232,6 +237,7 @@ namespace FractalVisio.Fractal
 
             if (fingerMode == 2)
             {
+                isZooming = true;
                 var center = LeanGesture.GetScreenCenter(fingers);
                 var distance = LeanGesture.GetScreenDistance(fingers);
 
@@ -246,6 +252,11 @@ namespace FractalVisio.Fractal
                     {
                         lastInteractionTime = Time.unscaledTime;
                     }
+
+                    if (hasZoomChanged)
+                    {
+                        lastZoomInteractionTime = Time.unscaledTime;
+                    }
                 }
 
                 previousPinchCenter = center;
@@ -253,6 +264,7 @@ namespace FractalVisio.Fractal
                 return true;
             }
 
+            isZooming = false;
             previousFingerMode = 0;
             return false;
         }
@@ -421,6 +433,29 @@ namespace FractalVisio.Fractal
             StartCoroutine(RenderRoutine(generationId));
         }
 
+        private void ResumeDeferredCpuRenderIfReady()
+        {
+            if (!hasDeferredCpuRender || ShouldDeferCpuRenderForZoom())
+            {
+                return;
+            }
+
+            hasDeferredCpuRender = false;
+            var desiredRenderScale = isInteracting ? ResolveInteractRenderScale() : ResolveDesiredRenderScale();
+            RecreateTexturesIfNeeded(force: false, desiredRenderScale);
+            RequestRender(desiredRenderScale, force: true);
+        }
+
+        private bool ShouldDeferCpuRenderForZoom()
+        {
+            return isZooming || Time.unscaledTime - lastZoomInteractionTime < settleDelay;
+        }
+
+        private void DeferCpuRenderUntilZoomSettles()
+        {
+            hasDeferredCpuRender = true;
+        }
+
         private IEnumerator RenderRoutine(int requestGeneration)
         {
             var mode = precisionManager.GetMode(view);
@@ -456,6 +491,20 @@ namespace FractalVisio.Fractal
                 {
                     if (mode == RenderMode.PerturbationWithFallback && cpuRenderTexture != null)
                     {
+                        if (ShouldDeferCpuRenderForZoom())
+                        {
+                            DeferCpuRenderUntilZoomSettles();
+                            lastFrameGpu = true;
+                            UpdateComputeBackendText("GPU");
+                            PushTexture();
+                            if (targetImage != null)
+                            {
+                                targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
+                            }
+
+                            yield break;
+                        }
+
                         CopyRenderTextureToCpu(gpuRenderTexture, cpuRenderTexture);
                         lastFrameGpu = false;
                         PushTexture();
@@ -521,6 +570,12 @@ namespace FractalVisio.Fractal
 
                     yield break;
                 }
+            }
+
+            if (ShouldDeferCpuRenderForZoom())
+            {
+                DeferCpuRenderUntilZoomSettles();
+                yield break;
             }
 
             var cpuTilesPerFrame = Mathf.Max(1, ResolveFallbackTilesPerFrame());
