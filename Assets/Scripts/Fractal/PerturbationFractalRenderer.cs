@@ -8,11 +8,12 @@ namespace FractalVisio.Fractal
     /// Hybrid perturbation renderer:
     /// 1) CPU builds reference orbit rarely and caches it.
     /// 2) GPU renders delta field in full screen pass.
-    /// 3) Optional CPU fallback repaints problematic tiles.
+    /// 3) Optional CPU fallback progressively repaints the frame when precision
+    ///    requirements exceed the GPU approximation.
     ///
     /// FIXES applied:
-    /// - Reference orbit stored as RGBAFloat with split high/low double encoding
-    ///   to avoid float precision loss at deep zoom (was losing mantissa bits).
+    /// - Reference orbit stores an extra Z(n+1) sample so the shader can test
+    ///   escape against the same iteration state used by the delta recurrence.
     /// - _CenterDelta computed via decimal arithmetic to avoid catastrophic
     ///   cancellation when subtracting two nearly-equal doubles.
     /// - Aspect ratio passed to shader so UV mapping matches CPU kernel exactly.
@@ -37,8 +38,8 @@ namespace FractalVisio.Fractal
         private Material perturbationMaterial;
         private Texture2D paletteTexture;
 
-        // Two RGFloat textures encoding the high and low 23-bit halves of each
-        // double coordinate, so the GPU can reconstruct ~46 bits of mantissa.
+        // Two float textures store a high component and residual for each
+        // reference coordinate. The shader still runs the recurrence in float.
         // Layout: pixel (i) → orbit step i; R = X component, G = Y component.
         private Texture2D orbitTexHigh; // upper float of each (zx, zy)
         private Texture2D orbitTexLow;  // lower float (remainder after subtracting high)
@@ -128,9 +129,10 @@ namespace FractalVisio.Fractal
             var centerY = view.y.AsDouble;
             var scale   = view.scale.AsDouble;
 
+            var requiredOrbitLength = Mathf.Max(2, view.iterations + 1);
             var needsRebuild =
                 orbitTexHigh == null ||
-                cachedOrbitIterations != view.iterations ||
+                cachedOrbitIterations != requiredOrbitLength ||
                 Math.Abs((double)(view.x.AsDecimal - referenceCxDecimal)) >
                     Math.Max(scale * OrbitReuseCenterFactor, 1e-18d) ||
                 Math.Abs((double)(view.y.AsDecimal - referenceCyDecimal)) >
@@ -141,7 +143,7 @@ namespace FractalVisio.Fractal
             if (!needsRebuild)
                 return;
 
-            cachedOrbitIterations = Mathf.Max(4, view.iterations);
+            cachedOrbitIterations = requiredOrbitLength;
             referenceCxDecimal    = view.x.AsDecimal;
             referenceCyDecimal    = view.y.AsDecimal;
             referenceScale        = scale;
@@ -149,7 +151,8 @@ namespace FractalVisio.Fractal
             var rows = Mathf.Max(1, Mathf.CeilToInt(cachedOrbitIterations / (float)OrbitTextureWidth));
             EnsureOrbitTextures(rows);
 
-            // Build orbit in double precision.
+            // Build Z_0 through Z_iterations. The shader uses Z_i for the
+            // recurrence and Z_(i+1) for escape testing after delta updates.
             var pixelsHigh = new Color[OrbitTextureWidth * rows];
             var pixelsLow  = new Color[OrbitTextureWidth * rows];
 
@@ -161,8 +164,8 @@ namespace FractalVisio.Fractal
                 var row = i / OrbitTextureWidth;
                 var idx = row * OrbitTextureWidth + col;
 
-                // Split each double into two floats (Veltkamp split / "double-float").
-                // high = round-to-float, low = exact remainder.
+                // Split each double into a float and residual before uploading
+                // to the orbit textures.
                 var zxHi = (float)zx;
                 var zyHi = (float)zy;
                 var zxLo = (float)(zx - zxHi);

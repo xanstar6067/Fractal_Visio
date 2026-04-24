@@ -53,7 +53,8 @@ Shader "FractalVisio/MandelbrotPerturbation"
                 return o;
             }
 
-            // Загружает точку орбиты с индексом i как double-float (hi + lo).
+            // Loads the reference orbit sample. The residual improves the
+            // texture upload round-trip, but the recurrence below runs in float.
             float2 LoadOrbit(int index)
             {
                 uint w, h;
@@ -97,12 +98,12 @@ Shader "FractalVisio/MandelbrotPerturbation"
                 // ── Perturbation iteration ────────────────────────────────────
                 // delta_0 = 0
                 // delta_{n+1} = 2*Z_n*delta_n + delta_n^2 + dc
-                // escape: |Z_n + delta_n|^2 > 4
+                // escape: |Z_{n+1} + delta_{n+1}|^2 > 4
 
                 float2 delta = float2(0.0, 0.0);
                 int maxIter   = max(1, (int)_Iterations);
-                int orbitLen  = max(1, _OrbitLength);
-                int loopCount = min(maxIter, orbitLen);
+                int orbitLen  = max(2, _OrbitLength);
+                int loopCount = min(maxIter, orbitLen - 1);
 
                 // FIX: используем отдельный флаг вместо перезаписи iteration,
                 // чтобы корректно отличить "убежало на шаге i" от "не убежало".
@@ -123,7 +124,8 @@ Shader "FractalVisio/MandelbrotPerturbation"
 
                     delta = twoZd + dSq + dc;
 
-                    float2 z = zRef + delta;
+                    float2 zNextRef = LoadOrbit(i + 1);
+                    float2 z = zNextRef + delta;
                     if (dot(z, z) > 4.0)
                     {
                         escaped  = true;
