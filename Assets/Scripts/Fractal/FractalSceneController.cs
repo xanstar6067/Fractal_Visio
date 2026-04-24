@@ -181,6 +181,14 @@ namespace FractalVisio.Fractal
 
         private void OnDestroy()
         {
+            foreach (var renderer in renderers.Values)
+            {
+                if (renderer is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+            }
+
             ReleaseTextures();
             if (transitionPreviewTexture != null)
             {
@@ -497,7 +505,7 @@ namespace FractalVisio.Fractal
                         }
 
                         lastFrameGpu = false;
-                        UpdateComputeBackendText(fallbackTileList.Count > 0 ? "GPU + CPU" : "GPU");
+                        UpdateComputeBackendText(fallbackTileList.Count > 0 ? "GPU + CPU Burst" : "GPU");
                     }
                     else
                     {

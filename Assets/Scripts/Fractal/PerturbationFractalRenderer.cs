@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 
 namespace FractalVisio.Fractal
@@ -22,7 +23,7 @@ namespace FractalVisio.Fractal
     /// - OrbitReuseCenterFactor tightened from 0.20 → 0.05 to force orbit
     ///   rebuild earlier; eliminates "blooming" at deep zoom from stale orbits.
     /// </summary>
-    public sealed class PerturbationFractalRenderer : IFractalRenderer
+    public sealed class PerturbationFractalRenderer : IFractalRenderer, IDisposable
     {
         private const string ShaderName = "FractalVisio/MandelbrotPerturbation";
         private const int OrbitTextureWidth = 1024;
@@ -38,6 +39,7 @@ namespace FractalVisio.Fractal
 
         private Material perturbationMaterial;
         private Texture2D paletteTexture;
+        private NativeArray<Color32> nativePalette;
 
         // Two float textures store a high component and residual for each
         // reference coordinate. The shader still runs the recurrence in float.
@@ -47,6 +49,7 @@ namespace FractalVisio.Fractal
 
         private bool gpuAvailable;
         private Color32[] cpuTileBuffer;
+        private NativeArray<Color32> nativeCpuTileBuffer;
 
         // Cached in decimal for high-precision delta computation.
         private decimal referenceCxDecimal;
@@ -70,6 +73,8 @@ namespace FractalVisio.Fractal
                 perturbationMaterial.SetTexture("_PaletteTex", paletteTexture);
                 gpuAvailable = true;
             }
+
+            nativePalette = BuildNativePalette(gradient, Allocator.Persistent);
         }
 
         public RenderMode Mode => RenderMode.Perturbation;
@@ -112,13 +117,13 @@ namespace FractalVisio.Fractal
             // FIX: use request.View.iterations directly – no more inflated budget
             // that caused brightness seams between GPU pass and CPU fallback tiles.
             EnsureCpuTileBuffer(tile.PixelRect.width * tile.PixelRect.height);
-            FractalCpuKernels.RenderMandelbrotTile(
+            FractalCpuKernels.RenderMandelbrotTileBurst(
                 cpuTileBuffer,
+                ref nativeCpuTileBuffer,
+                nativePalette,
                 texture2D.width, texture2D.height,
                 tile, request.View,
-                request.View.iterations, // was: iterations + iterations/2
-                sampleStep: 1,
-                gradient);
+                request.View.iterations); // was: iterations + iterations/2
             FractalCpuKernels.BlitTile(texture2D, tile, cpuTileBuffer);
         }
 
@@ -257,11 +262,36 @@ namespace FractalVisio.Fractal
             return texture;
         }
 
+        private static NativeArray<Color32> BuildNativePalette(Gradient gradient, Allocator allocator)
+        {
+            const int resolution = 256;
+            var palette = new NativeArray<Color32>(resolution, allocator);
+            for (var i = 0; i < resolution; i++)
+            {
+                palette[i] = (Color32)gradient.Evaluate(i / (resolution - 1f));
+            }
+
+            return palette;
+        }
+
         private void EnsureCpuTileBuffer(int requiredLength)
         {
             if (cpuTileBuffer != null && cpuTileBuffer.Length == requiredLength)
                 return;
             cpuTileBuffer = new Color32[requiredLength];
+        }
+
+        public void Dispose()
+        {
+            if (nativeCpuTileBuffer.IsCreated)
+            {
+                nativeCpuTileBuffer.Dispose();
+            }
+
+            if (nativePalette.IsCreated)
+            {
+                nativePalette.Dispose();
+            }
         }
     }
 }
