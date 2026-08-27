@@ -2,9 +2,10 @@ Shader "FractalVisio/MandelbrotFloat"
 {
     Properties
     {
-        _Center ("Center", Vector) = (0, 0, 0, 0)
+        _Center ("Center", Vector) = (-0.5, 0, 0, 0)
         _Scale ("Scale", Float) = 3
-        _Iterations ("Iterations", Float) = 128
+        _Aspect ("Aspect", Float) = 1
+        _Iterations ("Iterations", Int) = 128
         _PaletteTex ("Palette", 2D) = "white" {}
     }
 
@@ -18,6 +19,7 @@ Shader "FractalVisio/MandelbrotFloat"
         Pass
         {
             HLSLPROGRAM
+            #pragma target 3.0
             #pragma vertex Vert
             #pragma fragment Frag
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
@@ -28,7 +30,8 @@ Shader "FractalVisio/MandelbrotFloat"
             CBUFFER_START(UnityPerMaterial)
             float4 _Center;
             float _Scale;
-            float _Iterations;
+            float _Aspect;
+            int _Iterations;
             CBUFFER_END
 
             struct Attributes
@@ -45,52 +48,54 @@ Shader "FractalVisio/MandelbrotFloat"
             Varyings Vert(Attributes input)
             {
                 Varyings output;
-
-                output.uv = float2((input.vertexID << 1) & 2, input.vertexID & 2);
-                output.positionCS = float4(output.uv * 2.0 - 1.0, 0.0, 1.0);
-                output.uv.y = 1.0 - output.uv.y;
+                output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
+                output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
                 return output;
             }
 
             half4 Frag(Varyings input) : SV_Target
             {
-                float2 p = input.uv * 2.0 - 1.0;
-                float aspect = _ScreenParams.x / _ScreenParams.y;
-                p.x *= aspect;
+                float2 offset = input.uv - 0.5;
+                float2 c = _Center.xy + float2(offset.x * _Aspect, offset.y) * _Scale;
 
-                float2 c = float2(_Center.x, _Center.y) + p * (_Scale * 0.5);
+                // Main cardioid and period-2 bulb: very cheap on mobile GPUs.
+                float cardioidX = c.x - 0.25;
+                float y2 = c.y * c.y;
+                float q = cardioidX * cardioidX + y2;
+                if (q * (q + cardioidX) <= 0.25 * y2 || dot(c + float2(1.0, 0.0), c + float2(1.0, 0.0)) <= 0.0625)
+                {
+                    return half4(0.012, 0.02, 0.047, 1.0);
+                }
+
                 float2 z = 0.0;
-
-                int maxIterations = max(1, (int)_Iterations);
+                int maxIterations = clamp(_Iterations, 1, 2048);
                 int iteration = 0;
+                bool escaped = false;
+
                 [loop]
-                for (int i = 0; i < 4096; i++)
+                for (int i = 0; i < 2048; i++)
                 {
                     if (i >= maxIterations)
                     {
                         break;
                     }
 
-                    float x = z.x * z.x - z.y * z.y + c.x;
-                    float y = 2.0 * z.x * z.y + c.y;
-                    z = float2(x, y);
-
+                    z = float2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+                    iteration = i + 1;
                     if (dot(z, z) > 4.0)
                     {
-                        iteration = i;
+                        escaped = true;
                         break;
                     }
-
-                    iteration = i + 1;
                 }
 
-                if (iteration >= maxIterations)
+                if (!escaped)
                 {
-                    return half4(0, 0, 0, 1);
+                    return half4(0.012, 0.02, 0.047, 1.0);
                 }
 
-                float t = iteration / max(1.0, _Iterations);
-                return SAMPLE_TEXTURE2D(_PaletteTex, sampler_PaletteTex, float2(t, 0.5));
+                float palettePosition = frac(iteration * 0.021);
+                return SAMPLE_TEXTURE2D(_PaletteTex, sampler_PaletteTex, float2(palettePosition, 0.5));
             }
             ENDHLSL
         }

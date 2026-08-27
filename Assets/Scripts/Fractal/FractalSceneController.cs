@@ -1,916 +1,469 @@
 using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 using UnityEngine.UI;
-using Lean.Touch;
 
 namespace FractalVisio.Fractal
 {
     /// <summary>
-    /// Scene-level orchestrator for Fractal_Manager.unity.
-    /// Handles only input + pipeline orchestration and does not depend on scene wiring details.
+    /// Small application coordinator: gestures -> precise view -> one of two
+    /// renderers. It intentionally contains no Lean/CW dependencies.
     /// </summary>
+    [DisallowMultipleComponent]
+    [RequireComponent(typeof(Canvas))]
     public sealed class FractalSceneController : MonoBehaviour
     {
-        [Header("Output")]
+        private enum RenderBackend
+        {
+            GpuFloat,
+            Cpu
+        }
+
+        [Header("Scene references")]
         [SerializeField] private RawImage targetImage;
         [SerializeField] private Text scaleValueText;
         [SerializeField] private Text computeBackendText;
-        [SerializeField] private int baseWidth = 1080;
-        [SerializeField] private int baseHeight = 1920;
-        [SerializeField] private int minTextureSize = 64;
 
         [Header("Quality")]
-        [SerializeField] private int tileSize = 96;
-        [SerializeField] private int interactIterations = 96;
-        [SerializeField] private int settleIterations = 256;
-        [SerializeField] [Range(0.1f, 1f)] private float interactRenderScale = 0.5f;
-        [SerializeField] [Range(0.25f, 1f)] private float settleRenderScale = 1f;
-        [SerializeField] private float settleDelay = 0.15f;
-        [SerializeField] private int cpuApplyTileBatch = 4;
-        [SerializeField] private float fallbackFrameBudgetMs = 5f;
-        [SerializeField] private int maxFallbackTilesPerFrame = 8;
+        [SerializeField, Min(16)] private int interactionIterations = 96;
+        [SerializeField, Min(32)] private int settledIterations = 320;
+        [SerializeField, Min(64)] private int maximumIterations = 2048;
+        [SerializeField, Min(0.05f)] private float settleDelay = 0.18f;
+        [SerializeField, Min(32)] private int overrideTileSize;
 
-        [Header("Mobile Adaptive Quality")]
-        [SerializeField] private float mobileTargetFrameTimeMs = 16.6f;
-        [SerializeField] [Range(0.25f, 1f)] private float mobileMinInteractScale = 0.4f;
-        [SerializeField] [Range(0.25f, 1f)] private float mobileMaxInteractScale = 0.65f;
-        [SerializeField] private float mobileScaleAdjustSpeed = 0.35f;
+        [Header("Precision")]
+        [SerializeField] private double gpuMinimumScale = 2.5e-4d;
+        [SerializeField] private double extendedPrecisionScale = 1e-12d;
+        [SerializeField] private double minimumScale = 1e-24d;
+        [SerializeField] private double maximumScale = 4d;
+        [SerializeField, Range(0.2f, 2f)] private float pinchZoomSpeed = 1f;
 
-        [Header("Zoom")]
-        [SerializeField] private float pinchZoomSpeed = 1f;
-        [SerializeField] private double minScale = 1e-20d;
-        [SerializeField] private double maxScale = 4d;
-
-        private readonly Dictionary<RenderMode, IFractalRenderer> renderers = new();
-
-        private FractalPrecisionManager precisionManager;
-        private Texture2D cpuRenderTexture;
-        private Texture2D cpuPreviewTexture;
-        private Texture2D transitionPreviewTexture;
-        private RenderTexture gpuRenderTexture;
-        private RenderTexture gpuPreviewTexture;
         private FractalView view;
-        private bool lastFrameGpu = true;
-
-        private int generationId;
-        private int currentTextureWidth;
-        private int currentTextureHeight;
-        private float currentRenderScale = -1f;
+        private FractalView lastRequestedView;
+        private MobileRenderProfile profile;
+        private FractalGestureInput gestureInput;
+        private FractalGpuRenderer gpuRenderer;
+        private FractalCpuRenderer cpuRenderer;
+        private RenderBackend currentBackend;
+        private bool hasRequestedView;
+        private bool lastRequestWasInteractive;
+        private bool renderDirty;
         private float lastInteractionTime;
-        private float lastZoomInteractionTime = float.NegativeInfinity;
-        private bool isInteracting;
-        private bool isZooming;
-        private bool hasDeferredCpuRender;
+        private float nextHudUpdateTime;
+        private int cachedScreenWidth;
+        private int cachedScreenHeight;
 
-        private Vector2 previousPinchCenter;
-        private float previousPinchDistance;
-        private Vector2 previousSingleFingerPosition;
-        private bool hasPreviousSingleFingerPosition;
-        private int previousFingerMode;
-        private double averageTileMs = 0.4d;
-        private double averageApplyMs = 0.3d;
-        private float smoothedFrameTimeMs = 16.6f;
-        private float adaptiveInteractRenderScale;
-        private RenderMode? previousRenderMode;
-        private string lastComputeBackendLabel = string.Empty;
-        private FractalView? lastRenderView;
-        private bool lastRenderInteracting;
-        private float lastRenderScale = -1f;
+        private RenderTexture interactiveGpuTexture;
+        private RenderTexture settledGpuTexture;
+        private Texture2D interactiveCpuTexture;
+        private Texture2D settledCpuTexture;
 
-        private const float PanMoveThresholdSqr = 0.25f;
-        private const float PinchCenterMoveThresholdSqr = 0.25f;
-        private const float ZoomChangeThreshold = 0.0001f;
+        public double CurrentScale => view.scale.AsDouble;
+        public double CurrentCenterX => view.x.AsDouble;
+        public double CurrentCenterY => view.y.AsDouble;
+        public bool IsCpuRendering => cpuRenderer != null && cpuRenderer.IsBusy;
+        public float CpuRenderProgress => cpuRenderer != null ? cpuRenderer.Progress : 0f;
+        public string ActiveTextureName => targetImage != null && targetImage.texture != null
+            ? targetImage.texture.name
+            : string.Empty;
 
         private void Awake()
         {
-            EnsureTargetImage();
-            precisionManager = new FractalPrecisionManager();
+            Application.targetFrameRate = Application.isMobilePlatform ? 60 : -1;
+            profile = MobileRenderProfile.Detect();
+            EnsureUi();
+
+            gestureInput = GetComponent<FractalGestureInput>();
+            if (gestureInput == null)
+            {
+                gestureInput = gameObject.AddComponent<FractalGestureInput>();
+            }
+
+            var gradient = BuildDefaultGradient();
+            gpuRenderer = new FractalGpuRenderer(gradient);
+            cpuRenderer = new FractalCpuRenderer(gradient);
             view = FractalView.Default;
-            view.iterations = settleIterations;
-            UpdateScaleText();
-            UpdateComputeBackendText("GPU");
-            BuildDefaultGradient(out var gradient);
-            adaptiveInteractRenderScale = interactRenderScale;
-
-            renderers[RenderMode.Fast] = new FastFractalRenderer(gradient);
-            renderers[RenderMode.Perturbation] = new PerturbationFractalRenderer(gradient, enableCpuFallback: false);
-            renderers[RenderMode.PerturbationWithFallback] = new PerturbationFractalRenderer(gradient, enableCpuFallback: true);
-        }
-
-        private void Start()
-        {
-            EnsureTargetImage();
-            LogShaderDiagnostics();
-            var desiredRenderScale = ResolveDesiredRenderScale();
-            RecreateTexturesIfNeeded(force: true, desiredRenderScale);
-            RequestRender(desiredRenderScale, force: true);
-        }
-
-        private static void LogShaderDiagnostics()
-        {
-            Debug.Log($"[FractalSceneController] Active Graphics API: {SystemInfo.graphicsDeviceType}");
-
-            LogShaderStatus("FractalVisio/MandelbrotFloat");
-            LogShaderStatus("FractalVisio/MandelbrotPerturbation");
-        }
-
-        private static void LogShaderStatus(string shaderName)
-        {
-            var shader = Shader.Find(shaderName);
-            Debug.Log($"[FractalSceneController] Shader.Find('{shaderName}') => {(shader != null ? "FOUND" : "MISSING")}, isSupported: {shader?.isSupported}");
-        }
-
-        private void EnsureTargetImage()
-        {
-            if (targetImage != null)
-            {
-                return;
-            }
-
-            targetImage = GetComponent<RawImage>();
-            if (targetImage != null)
-            {
-                return;
-            }
-
-            targetImage = GetComponentInChildren<RawImage>(true);
-            if (targetImage != null)
-            {
-                return;
-            }
-
-            if (TryGetComponent<Graphic>(out _))
-            {
-                var child = new GameObject("FractalOutput", typeof(RectTransform), typeof(RawImage));
-                child.transform.SetParent(transform, false);
-                targetImage = child.GetComponent<RawImage>();
-                return;
-            }
-
-            targetImage = gameObject.AddComponent<RawImage>();
+            lastInteractionTime = -100f;
+            RecreateTextures();
+            renderDirty = true;
         }
 
         private void Update()
         {
-            TrackFrameTiming();
-
-            isInteracting = HandleTouchInput();
-            var desiredRenderScale = isInteracting ? ResolveInteractRenderScale() : ResolveDesiredRenderScale();
-            var texturesRecreated = RecreateTexturesIfNeeded(force: false, desiredRenderScale);
-            if (texturesRecreated || ShouldRequestRender(desiredRenderScale))
+            if (Screen.width != cachedScreenWidth || Screen.height != cachedScreenHeight)
             {
-                RequestRender(desiredRenderScale);
+                RecreateTextures();
+                renderDirty = true;
             }
 
-            ResumeDeferredCpuRenderIfReady();
-            UpdateScaleText();
-        }
-
-        private void OnRectTransformDimensionsChange()
-        {
-            if (!isActiveAndEnabled)
+            var gesture = gestureInput != null ? gestureInput.Current : default;
+            if (gesture.ResetRequested)
             {
-                return;
+                ResetView();
+            }
+            else if (gesture.Changed)
+            {
+                ApplyGesture(gesture);
+                lastInteractionTime = Time.unscaledTime;
+                renderDirty = true;
             }
 
-            var desiredRenderScale = isInteracting ? ResolveInteractRenderScale() : ResolveDesiredRenderScale();
-            if (RecreateTexturesIfNeeded(force: false, desiredRenderScale))
+            var interacting = gesture.IsInteracting || Time.unscaledTime - lastInteractionTime < settleDelay;
+            if (interacting != lastRequestWasInteractive)
             {
-                RequestRender(desiredRenderScale);
+                renderDirty = true;
             }
+
+            if (renderDirty || !hasRequestedView || ViewChanged())
+            {
+                RequestRender(interacting);
+            }
+
+            cpuRenderer?.Update();
+            UpdateHud(interacting);
         }
 
         private void OnDestroy()
         {
-            foreach (var renderer in renderers.Values)
-            {
-                if (renderer is IDisposable disposable)
-                {
-                    disposable.Dispose();
-                }
-            }
-
-            ReleaseTextures();
-            if (transitionPreviewTexture != null)
-            {
-                Destroy(transitionPreviewTexture);
-                transitionPreviewTexture = null;
-            }
+            cpuRenderer?.Dispose();
+            gpuRenderer?.Dispose();
+            DestroyTextures();
         }
 
-        private bool HandleTouchInput()
+        private void OnValidate()
         {
-            var fingers = LeanTouch.GetFingers(true, true);
-            var fingerCount = fingers.Count;
-            var fingerMode = fingerCount >= 2 ? 2 : fingerCount == 1 ? 1 : 0;
-
-            if (fingerMode != previousFingerMode)
-            {
-                ResetTouchTrackingState();
-                previousFingerMode = fingerMode;
-            }
-
-            if (fingerMode == 1)
-            {
-                isZooming = false;
-                var finger = fingers[0];
-                var currentPosition = finger.ScreenPosition;
-                var hasViewChanged = false;
-                if (hasPreviousSingleFingerPosition)
-                {
-                    ApplySingleFingerPan(previousSingleFingerPosition, currentPosition);
-                    hasViewChanged = (currentPosition - previousSingleFingerPosition).sqrMagnitude > PanMoveThresholdSqr;
-                }
-
-                previousSingleFingerPosition = currentPosition;
-                hasPreviousSingleFingerPosition = true;
-
-                if (hasViewChanged)
-                {
-                    lastInteractionTime = Time.unscaledTime;
-                }
-                return true;
-            }
-
-            if (fingerMode == 2)
-            {
-                isZooming = true;
-                var center = LeanGesture.GetScreenCenter(fingers);
-                var distance = LeanGesture.GetScreenDistance(fingers);
-
-                if (previousPinchDistance > 0.001f)
-                {
-                    var zoomFactor = Mathf.Pow(distance / previousPinchDistance, pinchZoomSpeed);
-                    ApplyPinchZoom(center, zoomFactor);
-                    ApplyPanFromPinchCenter(previousPinchCenter, center);
-                    var hasZoomChanged = Mathf.Abs(zoomFactor - 1f) > ZoomChangeThreshold;
-                    var hasPanChanged = (center - previousPinchCenter).sqrMagnitude > PinchCenterMoveThresholdSqr;
-                    if (hasZoomChanged || hasPanChanged)
-                    {
-                        lastInteractionTime = Time.unscaledTime;
-                    }
-
-                    if (hasZoomChanged)
-                    {
-                        lastZoomInteractionTime = Time.unscaledTime;
-                    }
-                }
-
-                previousPinchCenter = center;
-                previousPinchDistance = distance;
-                return true;
-            }
-
-            isZooming = false;
-            previousFingerMode = 0;
-            return false;
+            interactionIterations = Mathf.Max(16, interactionIterations);
+            settledIterations = Mathf.Max(interactionIterations, settledIterations);
+            maximumIterations = Mathf.Max(settledIterations, maximumIterations);
+            gpuMinimumScale = Math.Max(1e-8d, gpuMinimumScale);
+            extendedPrecisionScale = Math.Min(gpuMinimumScale, Math.Max(1e-20d, extendedPrecisionScale));
+            minimumScale = Math.Max(1e-28d, minimumScale);
+            maximumScale = Math.Max(gpuMinimumScale, maximumScale);
         }
 
-
-        private void ResetTouchTrackingState()
+        /// <summary>Public entry point for future bookmarks/presets in the fractal manager.</summary>
+        public void SetView(decimal centerX, decimal centerY, decimal scale)
         {
-            previousPinchCenter = Vector2.zero;
-            previousPinchDistance = 0f;
-            previousSingleFingerPosition = Vector2.zero;
-            hasPreviousSingleFingerPosition = false;
+            var clampedScale = Math.Clamp((double)scale, minimumScale, maximumScale);
+            view.x = new HighPrecision(centerX);
+            view.y = new HighPrecision(centerY);
+            view.scale = HighPrecision.FromDouble(clampedScale);
+            renderDirty = true;
+            RenderExternalViewNow();
         }
 
-        private void ApplySingleFingerPan(Vector2 oldPosition, Vector2 newPosition)
+        public void ResetView()
         {
-            var oldWorld = ScreenToFractal(oldPosition, view);
-            var newWorld = ScreenToFractal(newPosition, view);
-
-            view.x += HighPrecision.FromDouble(oldWorld.x - newWorld.x);
-            view.y += HighPrecision.FromDouble(oldWorld.y - newWorld.y);
-            UpdateScaleText();
+            view = FractalView.Default;
+            renderDirty = true;
+            RenderExternalViewNow();
         }
-        private void ApplyPanFromPinchCenter(Vector2 oldCenter, Vector2 newCenter)
+
+        private void RenderExternalViewNow()
         {
-            if (oldCenter == Vector2.zero)
+            // Awake has not necessarily run when a preset is assigned by another
+            // component's Awake, so preserve the dirty flag in that case.
+            if (gpuRenderer == null || cpuRenderer == null || targetImage == null)
             {
                 return;
             }
 
-            var oldWorld = ScreenToFractal(oldCenter, view);
-            var newWorld = ScreenToFractal(newCenter, view);
-            var dx = oldWorld.x - newWorld.x;
-            var dy = oldWorld.y - newWorld.y;
-
-            view.x += HighPrecision.FromDouble(dx);
-            view.y += HighPrecision.FromDouble(dy);
+            lastInteractionTime = -100f;
+            RequestRender(false);
         }
 
-        private void ApplyPinchZoom(Vector2 screenCenter, float zoomFactor)
+        private void ApplyGesture(in FractalGestureFrame gesture)
         {
-            zoomFactor = Mathf.Clamp(zoomFactor, 0.5f, 2f);
-            var oldView = view;
-            var oldPoint = ScreenToFractal(screenCenter, oldView);
-
-            var newScale = Math.Clamp(oldView.scale.AsDouble / zoomFactor, minScale, maxScale);
-            view.scale = HighPrecision.FromDouble(newScale);
-
-            var newPoint = ScreenToFractal(screenCenter, view);
-            view.x += HighPrecision.FromDouble(oldPoint.x - newPoint.x);
-            view.y += HighPrecision.FromDouble(oldPoint.y - newPoint.y);
-            UpdateScaleText();
-        }
-
-        private void UpdateScaleText()
-        {
-            if (scaleValueText == null)
+            var pinchMoved = (gesture.CurrentCenter - gesture.PreviousCenter).sqrMagnitude > 0.01f;
+            if (gesture.HasZoom || pinchMoved)
             {
+                ApplyPinch(gesture.PreviousCenter, gesture.CurrentCenter, gesture.ZoomRatio);
                 return;
             }
 
-            var scaleAsText = view.scale.AsDouble.ToString("0.0e+0", CultureInfo.InvariantCulture).Replace('.', ',');
-            scaleValueText.text = scaleAsText;
-        }
-
-        private void UpdateComputeBackendText(string backendLabel)
-        {
-            if (computeBackendText == null || string.Equals(lastComputeBackendLabel, backendLabel, StringComparison.Ordinal))
+            if (gesture.PanDelta.sqrMagnitude > 0.01f)
             {
-                return;
-            }
-
-            computeBackendText.text = $"Fractal engine: {backendLabel}";
-            lastComputeBackendLabel = backendLabel;
-        }
-
-        private (double x, double y) ScreenToFractal(Vector2 screenPoint, in FractalView srcView)
-        {
-            var hasTargetRect = TryGetNormalizedPointInTarget(screenPoint, out var nx, out var ny, out var width, out var height);
-            if (!hasTargetRect)
-            {
-                width = Screen.width;
-                height = Screen.height;
-
-                if (width <= 0f || height <= 0f)
-                {
-                    return (srcView.x.AsDouble, srcView.y.AsDouble);
-                }
-
-                nx = screenPoint.x / width;
-                ny = screenPoint.y / height;
-            }
-
-            var aspect = width / height;
-            var halfScale = srcView.scale.AsDouble * 0.5d;
-
-            var x = srcView.x.AsDouble + ((nx - 0.5d) * 2d * halfScale * aspect);
-            var y = srcView.y.AsDouble + ((ny - 0.5d) * 2d * halfScale);
-            return (x, y);
-        }
-
-        private bool TryGetNormalizedPointInTarget(Vector2 screenPoint, out double nx, out double ny, out double width, out double height)
-        {
-            nx = 0.5d;
-            ny = 0.5d;
-            width = 0d;
-            height = 0d;
-
-            if (targetImage == null)
-            {
-                return false;
-            }
-
-            var rectTransform = targetImage.rectTransform;
-            var rect = rectTransform.rect;
-            width = rect.width;
-            height = rect.height;
-
-            if (width <= 0d || height <= 0d)
-            {
-                return false;
-            }
-
-            var canvas = targetImage.canvas;
-            var screenCamera = canvas != null && canvas.renderMode != UnityEngine.RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
-            if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(rectTransform, screenPoint, screenCamera, out var localPoint))
-            {
-                return false;
-            }
-
-            nx = Mathf.Clamp01((localPoint.x - rect.xMin) / rect.width);
-            ny = Mathf.Clamp01((localPoint.y - rect.yMin) / rect.height);
-            return true;
-        }
-
-        private bool ShouldRequestRender(float desiredRenderScale)
-        {
-            if (!lastRenderView.HasValue)
-            {
-                return true;
-            }
-
-            var lastView = lastRenderView.Value;
-            var scaleChanged = Mathf.Abs(lastRenderScale - desiredRenderScale) > 0.001f;
-            return scaleChanged ||
-                   lastRenderInteracting != isInteracting ||
-                   !lastView.x.Equals(view.x) ||
-                   !lastView.y.Equals(view.y) ||
-                   !lastView.scale.Equals(view.scale) ||
-                   lastView.iterations != view.iterations;
-        }
-
-        private void RequestRender(float desiredRenderScale, bool force = false)
-        {
-            if (!force && !ShouldRequestRender(desiredRenderScale))
-            {
-                return;
-            }
-
-            lastRenderView = view;
-            lastRenderInteracting = isInteracting;
-            lastRenderScale = desiredRenderScale;
-
-            generationId++;
-            CachePreview();
-            StopAllCoroutines();
-            StartCoroutine(RenderRoutine(generationId));
-        }
-
-        private void ResumeDeferredCpuRenderIfReady()
-        {
-            if (!hasDeferredCpuRender || ShouldDeferCpuRenderForZoom())
-            {
-                return;
-            }
-
-            hasDeferredCpuRender = false;
-            var desiredRenderScale = isInteracting ? ResolveInteractRenderScale() : ResolveDesiredRenderScale();
-            RecreateTexturesIfNeeded(force: false, desiredRenderScale);
-            RequestRender(desiredRenderScale, force: true);
-        }
-
-        private bool ShouldDeferCpuRenderForZoom()
-        {
-            return isZooming || Time.unscaledTime - lastZoomInteractionTime < settleDelay;
-        }
-
-        private void DeferCpuRenderUntilZoomSettles()
-        {
-            hasDeferredCpuRender = true;
-        }
-
-        private IEnumerator RenderRoutine(int requestGeneration)
-        {
-            var mode = precisionManager.GetMode(view);
-            if (previousRenderMode != mode)
-            {
-                Debug.Log($"[FractalSceneController] Render mode switched: {previousRenderMode?.ToString() ?? "None"} -> {mode}, scale={view.scale.AsDouble:E6}");
-                previousRenderMode = mode;
-            }
-
-            var adjustedView = view;
-            adjustedView.iterations = precisionManager.ResolveIterations(view, isInteracting);
-            var request = new FractalRenderRequest(adjustedView, requestGeneration, isInteracting);
-            var renderer = renderers[mode];
-
-            if (mode == RenderMode.Fast && gpuRenderTexture != null)
-            {
-                renderer.Render(request, gpuRenderTexture, new TileDescriptor(new RectInt(0, 0, gpuRenderTexture.width, gpuRenderTexture.height), 0));
-                lastFrameGpu = true;
-                UpdateComputeBackendText("GPU");
-                PushTexture();
-                if (targetImage != null)
-                {
-                    targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
-                }
-
-                yield break;
-            }
-
-            if ((mode == RenderMode.Perturbation || mode == RenderMode.PerturbationWithFallback) &&
-                gpuRenderTexture != null && renderer is PerturbationFractalRenderer perturbationRenderer)
-            {
-                if (perturbationRenderer.RenderToGpu(request, gpuRenderTexture))
-                {
-                    if (mode == RenderMode.PerturbationWithFallback && cpuRenderTexture != null)
-                    {
-                        if (ShouldDeferCpuRenderForZoom())
-                        {
-                            DeferCpuRenderUntilZoomSettles();
-                            lastFrameGpu = true;
-                            UpdateComputeBackendText("GPU");
-                            PushTexture();
-                            if (targetImage != null)
-                            {
-                                targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
-                            }
-
-                            yield break;
-                        }
-
-                        CopyRenderTextureToCpu(gpuRenderTexture, cpuRenderTexture);
-                        lastFrameGpu = false;
-                        PushTexture();
-                        if (targetImage != null)
-                        {
-                            targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
-                        }
-
-                        var fallbackTileList = perturbationRenderer.BuildFallbackTiles(request, cpuRenderTexture.width, cpuRenderTexture.height, tileSize);
-                        var tilesPerFrame = ResolveFallbackTilesPerFrame();
-                        var applyBatch = ResolveApplyBatchSize();
-                        var renderedSinceApply = 0;
-
-                        foreach (var fallbackTile in fallbackTileList)
-                        {
-                            if (requestGeneration != generationId)
-                            {
-                                yield break;
-                            }
-
-                            var tileStartMs = Time.realtimeSinceStartupAsDouble * 1000d;
-                            perturbationRenderer.Render(request, cpuRenderTexture, fallbackTile);
-                            TrackTileMetric((Time.realtimeSinceStartupAsDouble * 1000d) - tileStartMs);
-                            renderedSinceApply++;
-
-                            if (renderedSinceApply >= applyBatch)
-                            {
-                                ApplyCpuTexture();
-                                renderedSinceApply = 0;
-                            }
-
-                            if (tilesPerFrame > 0 && fallbackTile.TileIndex % tilesPerFrame == tilesPerFrame - 1)
-                            {
-                                if (renderedSinceApply > 0)
-                                {
-                                    ApplyCpuTexture();
-                                    renderedSinceApply = 0;
-                                }
-
-                                yield return null;
-                            }
-                        }
-
-                        if (renderedSinceApply > 0)
-                        {
-                            ApplyCpuTexture();
-                        }
-
-                        lastFrameGpu = false;
-                        UpdateComputeBackendText(fallbackTileList.Count > 0 ? "GPU + CPU Burst" : "GPU");
-                    }
-                    else
-                    {
-                        lastFrameGpu = true;
-                        UpdateComputeBackendText("GPU");
-                    }
-
-                    PushTexture();
-                    if (targetImage != null)
-                    {
-                        targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
-                    }
-
-                    yield break;
-                }
-            }
-
-            if (ShouldDeferCpuRenderForZoom())
-            {
-                DeferCpuRenderUntilZoomSettles();
-                yield break;
-            }
-
-            var cpuTilesPerFrame = Mathf.Max(1, ResolveFallbackTilesPerFrame());
-            var cpuApplyBatch = ResolveApplyBatchSize();
-            var frameTileCount = 0;
-            var pendingApplyTiles = 0;
-            foreach (var tile in TilePlanner.BuildTiles(cpuRenderTexture.width, cpuRenderTexture.height, tileSize))
-            {
-                if (requestGeneration != generationId)
-                {
-                    yield break;
-                }
-
-                var tileStartMs = Time.realtimeSinceStartupAsDouble * 1000d;
-                renderer.Render(request, cpuRenderTexture, tile);
-                TrackTileMetric((Time.realtimeSinceStartupAsDouble * 1000d) - tileStartMs);
-                pendingApplyTiles++;
-                frameTileCount++;
-
-                if (pendingApplyTiles >= cpuApplyBatch)
-                {
-                    ApplyCpuTexture();
-                    pendingApplyTiles = 0;
-                }
-
-                if (frameTileCount >= cpuTilesPerFrame)
-                {
-                    if (pendingApplyTiles > 0)
-                    {
-                        ApplyCpuTexture();
-                        pendingApplyTiles = 0;
-                    }
-
-                    frameTileCount = 0;
-                    yield return null;
-                }
-            }
-
-            if (pendingApplyTiles > 0)
-            {
-                ApplyCpuTexture();
-            }
-
-            lastFrameGpu = false;
-            UpdateComputeBackendText("CPU");
-            PushTexture();
-            if (targetImage != null)
-            {
-                targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
+                PanByPixels(gesture.PanDelta);
             }
         }
 
-        private bool RecreateTexturesIfNeeded(bool force, float renderScale)
+        private void PanByPixels(Vector2 delta)
         {
-            var targetSize = ComputeTargetTextureSize(renderScale);
-            if (!force && cpuRenderTexture != null && cpuPreviewTexture != null && gpuRenderTexture != null && gpuPreviewTexture != null &&
-                currentTextureWidth == targetSize.width && currentTextureHeight == targetSize.height &&
-                Mathf.Abs(currentRenderScale - renderScale) < 0.001f)
-            {
-                return false;
-            }
+            var width = Math.Max(1, Screen.width);
+            var height = Math.Max(1, Screen.height);
+            var scale = view.scale.AsDecimal;
+            var aspect = (decimal)width / height;
+            var dx = -(decimal)delta.x / width * scale * aspect;
+            var dy = -(decimal)delta.y / height * scale;
+            view.x = new HighPrecision(view.x.AsDecimal + dx);
+            view.y = new HighPrecision(view.y.AsDecimal + dy);
+        }
 
-            CaptureTransitionPreview();
-            ReleaseTextures();
-            EnsureTextures(targetSize.width, targetSize.height);
-            currentTextureWidth = targetSize.width;
-            currentTextureHeight = targetSize.height;
-            currentRenderScale = renderScale;
+        private void ApplyPinch(Vector2 previousCenter, Vector2 currentCenter, float rawZoomRatio)
+        {
+            var safeRatio = Mathf.Max(0.01f, rawZoomRatio);
+            var zoomRatio = Math.Pow(safeRatio, pinchZoomSpeed);
+            var oldPoint = ScreenToFractal(previousCenter, view);
+            var newScaleDouble = Math.Clamp(view.scale.AsDouble / zoomRatio, minimumScale, maximumScale);
+            view.scale = HighPrecision.FromDouble(newScaleDouble);
+            var newPoint = ScreenToFractal(currentCenter, view);
+            view.x = new HighPrecision(view.x.AsDecimal + oldPoint.x - newPoint.x);
+            view.y = new HighPrecision(view.y.AsDecimal + oldPoint.y - newPoint.y);
+        }
 
-            if (targetImage != null && transitionPreviewTexture != null)
+        private static (decimal x, decimal y) ScreenToFractal(Vector2 point, in FractalView sourceView)
+        {
+            var width = Math.Max(1, Screen.width);
+            var height = Math.Max(1, Screen.height);
+            var aspect = (decimal)width / height;
+            var normalizedX = (decimal)point.x / width - 0.5m;
+            var normalizedY = (decimal)point.y / height - 0.5m;
+            var scale = sourceView.scale.AsDecimal;
+            return (
+                sourceView.x.AsDecimal + normalizedX * scale * aspect,
+                sourceView.y.AsDecimal + normalizedY * scale);
+        }
+
+        private bool ViewChanged()
+        {
+            return !lastRequestedView.x.Equals(view.x) ||
+                   !lastRequestedView.y.Equals(view.y) ||
+                   !lastRequestedView.scale.Equals(view.scale);
+        }
+
+        private void RequestRender(bool interacting)
+        {
+            var scale = view.scale.AsDouble;
+            var iterations = ResolveIterations(scale, interacting);
+            view.iterations = iterations;
+            currentBackend = gpuRenderer != null && gpuRenderer.IsAvailable && scale >= gpuMinimumScale
+                ? RenderBackend.GpuFloat
+                : RenderBackend.Cpu;
+
+            if (currentBackend == RenderBackend.GpuFloat)
             {
-                targetImage.texture = transitionPreviewTexture;
-                targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
+                cpuRenderer?.Invalidate();
+                var target = interacting ? interactiveGpuTexture : settledGpuTexture;
+                gpuRenderer.Render(view, iterations, target);
+                targetImage.texture = target;
             }
             else
             {
-                PushTexture();
+                var target = interacting ? interactiveCpuTexture : settledCpuTexture;
+                var useExtendedPrecision = scale < extendedPrecisionScale;
+                var tileSize = overrideTileSize > 0 ? overrideTileSize : profile.TileSize;
+                cpuRenderer.Request(target, view, iterations, tileSize, useExtendedPrecision);
+                targetImage.texture = target;
             }
 
-            return true;
+            targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
+            lastRequestedView = view;
+            lastRequestWasInteractive = interacting;
+            hasRequestedView = true;
+            renderDirty = false;
         }
 
-        private (int width, int height) ComputeTargetTextureSize(float renderScale)
+        private int ResolveIterations(double scale, bool interacting)
         {
-            var width = Mathf.Max(minTextureSize, baseWidth);
-            var height = Mathf.Max(minTextureSize, baseHeight);
+            var baseIterations = interacting ? interactionIterations : settledIterations;
+            var depth = Math.Max(0d, -Math.Log10(Math.Max(scale, 1e-28d)) - 3d);
+            var depthBudget = interacting ? depth * 10d : depth * 64d;
+            return Mathf.Clamp(baseIterations + Mathf.RoundToInt((float)depthBudget), 16, maximumIterations);
+        }
 
-            if (targetImage != null)
+        private void UpdateHud(bool interacting)
+        {
+            if (Time.unscaledTime < nextHudUpdateTime)
             {
-                var rect = targetImage.rectTransform.rect;
-                if (rect.width > 0f && rect.height > 0f)
-                {
-                    width = Mathf.Max(minTextureSize, Mathf.RoundToInt(rect.width * renderScale));
-                    height = Mathf.Max(minTextureSize, Mathf.RoundToInt(rect.height * renderScale));
-                    return (width, height);
-                }
+                return;
             }
 
-            width = Mathf.Max(minTextureSize, Mathf.RoundToInt((Screen.width > 0 ? Screen.width : width) * renderScale));
-            height = Mathf.Max(minTextureSize, Mathf.RoundToInt((Screen.height > 0 ? Screen.height : height) * renderScale));
-            return (width, height);
+            nextHudUpdateTime = Time.unscaledTime + 0.1f;
+            if (scaleValueText != null)
+            {
+                scaleValueText.text = "Масштаб  " + view.scale.AsDouble.ToString("0.00e+0", CultureInfo.InvariantCulture);
+            }
+
+            if (computeBackendText == null)
+            {
+                return;
+            }
+
+            if (currentBackend == RenderBackend.GpuFloat)
+            {
+                computeBackendText.text = "GPU · fp32" + (interacting ? " · интерактивно" : string.Empty);
+                return;
+            }
+
+            var precision = view.scale.AsDouble < extendedPrecisionScale ? "double-double" : "fp64";
+            var progress = cpuRenderer != null && cpuRenderer.IsBusy
+                ? " · " + Mathf.RoundToInt(cpuRenderer.Progress * 100f) + "%"
+                : string.Empty;
+            computeBackendText.text = "CPU Burst · " + precision + progress;
         }
 
-        private void CachePreview()
+        private void RecreateTextures()
         {
+            if (cpuRenderer != null)
+            {
+                cpuRenderer.CompletePendingWork();
+            }
+
+            DestroyTextures();
+            cachedScreenWidth = Mathf.Max(64, Screen.width);
+            cachedScreenHeight = Mathf.Max(64, Screen.height);
+            var interactiveSize = profile.ResolveSize(cachedScreenWidth, cachedScreenHeight, true);
+            var settledSize = profile.ResolveSize(cachedScreenWidth, cachedScreenHeight, false);
+
+            interactiveGpuTexture = CreateRenderTexture(interactiveSize, "Fractal GPU Interactive");
+            settledGpuTexture = CreateRenderTexture(settledSize, "Fractal GPU Settled");
+            interactiveCpuTexture = CreateCpuTexture(interactiveSize, "Fractal CPU Interactive");
+            settledCpuTexture = CreateCpuTexture(settledSize, "Fractal CPU Settled");
+            hasRequestedView = false;
+        }
+
+        private void DestroyTextures()
+        {
+            ReleaseRenderTexture(ref interactiveGpuTexture);
+            ReleaseRenderTexture(ref settledGpuTexture);
+            DestroyTexture(ref interactiveCpuTexture);
+            DestroyTexture(ref settledCpuTexture);
+        }
+
+        private static RenderTexture CreateRenderTexture(Vector2Int size, string textureName)
+        {
+            var texture = new RenderTexture(size.x, size.y, 0, RenderTextureFormat.ARGB32)
+            {
+                name = textureName,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+                useMipMap = false,
+                autoGenerateMips = false
+            };
+            texture.Create();
+            return texture;
+        }
+
+        private static Texture2D CreateCpuTexture(Vector2Int size, string textureName)
+        {
+            var texture = new Texture2D(size.x, size.y, TextureFormat.RGBA32, false, false)
+            {
+                name = textureName,
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp
+            };
+            return texture;
+        }
+
+        private static void ReleaseRenderTexture(ref RenderTexture texture)
+        {
+            if (texture == null)
+            {
+                return;
+            }
+
+            texture.Release();
+            Destroy(texture);
+            texture = null;
+        }
+
+        private static void DestroyTexture(ref Texture2D texture)
+        {
+            if (texture == null)
+            {
+                return;
+            }
+
+            Destroy(texture);
+            texture = null;
+        }
+
+        private void EnsureUi()
+        {
+            var canvas = GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+
             if (targetImage == null)
             {
-                return;
+                var output = new GameObject("FractalOutput", typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
+                output.transform.SetParent(transform, false);
+                targetImage = output.GetComponent<RawImage>();
             }
 
-            if (transitionPreviewTexture != null)
+            Stretch(targetImage.rectTransform);
+            targetImage.raycastTarget = false;
+            targetImage.color = Color.white;
+            targetImage.transform.SetAsFirstSibling();
+
+            if (scaleValueText == null)
             {
-                targetImage.texture = transitionPreviewTexture;
-                targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
-                return;
+                scaleValueText = CreateHudText("Scale", new Vector2(-24f, -24f));
             }
 
-            if (lastFrameGpu && gpuPreviewTexture != null && gpuRenderTexture != null)
+            if (computeBackendText == null)
             {
-                Graphics.Blit(gpuRenderTexture, gpuPreviewTexture);
-                targetImage.texture = gpuPreviewTexture;
-                targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
-                return;
+                computeBackendText = CreateHudText("Backend", new Vector2(-24f, -62f));
             }
 
-            if (cpuPreviewTexture == null || cpuRenderTexture == null)
-            {
-                return;
-            }
-
-            cpuPreviewTexture.SetPixels32(cpuRenderTexture.GetPixels32());
-            cpuPreviewTexture.Apply(false, false);
-            targetImage.texture = cpuPreviewTexture;
-            targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
+            ConfigureHudText(scaleValueText, new Vector2(-24f, -24f));
+            ConfigureHudText(computeBackendText, new Vector2(-24f, -62f));
         }
 
-
-        private static void CopyRenderTextureToCpu(RenderTexture source, Texture2D destination)
+        private Text CreateHudText(string objectName, Vector2 anchoredPosition)
         {
-            var previous = RenderTexture.active;
-            RenderTexture.active = source;
-            destination.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0, false);
-            destination.Apply(false, false);
-            RenderTexture.active = previous;
+            var child = new GameObject(objectName, typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            child.transform.SetParent(transform, false);
+            var text = child.GetComponent<Text>();
+            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            ConfigureHudText(text, anchoredPosition);
+            return text;
         }
 
-        private int ResolveFallbackTilesPerFrame()
+        private static void ConfigureHudText(Text text, Vector2 anchoredPosition)
         {
-            var estimatedTileMs = Mathf.Max(0.05f, (float)averageTileMs);
-            var budgetTiles = Mathf.FloorToInt(fallbackFrameBudgetMs / estimatedTileMs);
-            return Mathf.Clamp(budgetTiles, 1, maxFallbackTilesPerFrame);
-        }
-
-        private int ResolveApplyBatchSize()
-        {
-            if (averageApplyMs > 1.5d)
-            {
-                return Mathf.Max(cpuApplyTileBatch, 8);
-            }
-
-            if (averageApplyMs > 0.75d)
-            {
-                return Mathf.Max(cpuApplyTileBatch, 6);
-            }
-
-            return Mathf.Max(1, cpuApplyTileBatch);
-        }
-
-        private void ApplyCpuTexture()
-        {
-            var applyStartMs = Time.realtimeSinceStartupAsDouble * 1000d;
-            cpuRenderTexture.Apply(false, false);
-            TrackApplyMetric((Time.realtimeSinceStartupAsDouble * 1000d) - applyStartMs);
-        }
-
-        private void TrackTileMetric(double tileMs)
-        {
-            const double alpha = 0.15d;
-            averageTileMs = (averageTileMs * (1d - alpha)) + (tileMs * alpha);
-        }
-
-        private void TrackApplyMetric(double applyMs)
-        {
-            const double alpha = 0.15d;
-            averageApplyMs = (averageApplyMs * (1d - alpha)) + (applyMs * alpha);
-        }
-
-        private void EnsureTextures(int width, int height)
-        {
-            cpuRenderTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-            cpuPreviewTexture = new Texture2D(width, height, TextureFormat.RGBA32, false);
-            cpuRenderTexture.wrapMode = TextureWrapMode.Clamp;
-            cpuPreviewTexture.wrapMode = TextureWrapMode.Clamp;
-
-            gpuRenderTexture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32);
-            gpuPreviewTexture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32);
-            gpuRenderTexture.wrapMode = TextureWrapMode.Clamp;
-            gpuPreviewTexture.wrapMode = TextureWrapMode.Clamp;
-            gpuRenderTexture.Create();
-            gpuPreviewTexture.Create();
-        }
-
-        private void ReleaseTextures()
-        {
-            if (cpuRenderTexture != null)
-            {
-                Destroy(cpuRenderTexture);
-                cpuRenderTexture = null;
-            }
-
-            if (cpuPreviewTexture != null)
-            {
-                Destroy(cpuPreviewTexture);
-                cpuPreviewTexture = null;
-            }
-
-            if (gpuRenderTexture != null)
-            {
-                gpuRenderTexture.Release();
-                Destroy(gpuRenderTexture);
-                gpuRenderTexture = null;
-            }
-
-            if (gpuPreviewTexture != null)
-            {
-                gpuPreviewTexture.Release();
-                Destroy(gpuPreviewTexture);
-                gpuPreviewTexture = null;
-            }
-
-            currentTextureWidth = 0;
-            currentTextureHeight = 0;
-            currentRenderScale = -1f;
-        }
-
-        private void PushTexture()
-        {
-            if (targetImage != null)
-            {
-                targetImage.texture = lastFrameGpu && gpuRenderTexture != null ? gpuRenderTexture : cpuRenderTexture;
-                if (transitionPreviewTexture != null)
-                {
-                    Destroy(transitionPreviewTexture);
-                    transitionPreviewTexture = null;
-                }
-            }
-        }
-
-        private void CaptureTransitionPreview()
-        {
-            if (targetImage == null)
+            if (text == null)
             {
                 return;
             }
 
-            if (transitionPreviewTexture != null)
-            {
-                Destroy(transitionPreviewTexture);
-                transitionPreviewTexture = null;
-            }
-
-            if (lastFrameGpu && gpuRenderTexture != null && gpuRenderTexture.width > 0 && gpuRenderTexture.height > 0)
-            {
-                transitionPreviewTexture = new Texture2D(gpuRenderTexture.width, gpuRenderTexture.height, TextureFormat.RGBA32, false);
-                CopyRenderTextureToCpu(gpuRenderTexture, transitionPreviewTexture);
-                targetImage.texture = transitionPreviewTexture;
-                targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
-                return;
-            }
-
-            if (cpuRenderTexture == null || cpuRenderTexture.width <= 0 || cpuRenderTexture.height <= 0)
-            {
-                return;
-            }
-
-            transitionPreviewTexture = new Texture2D(cpuRenderTexture.width, cpuRenderTexture.height, TextureFormat.RGBA32, false);
-            transitionPreviewTexture.SetPixels32(cpuRenderTexture.GetPixels32());
-            transitionPreviewTexture.Apply(false, false);
-            targetImage.texture = transitionPreviewTexture;
-            targetImage.uvRect = new Rect(-0.02f, -0.02f, 1.04f, 1.04f);
+            var rect = text.rectTransform;
+            rect.anchorMin = Vector2.one;
+            rect.anchorMax = Vector2.one;
+            rect.pivot = Vector2.one;
+            rect.anchoredPosition = anchoredPosition;
+            rect.sizeDelta = new Vector2(460f, 34f);
+            text.alignment = TextAnchor.MiddleRight;
+            text.fontSize = 24;
+            text.color = Color.white;
+            text.raycastTarget = false;
         }
 
-        private float ResolveDesiredRenderScale()
+        private static void Stretch(RectTransform rect)
         {
-            return Mathf.Clamp01(settleRenderScale);
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
         }
 
-        private float ResolveInteractRenderScale()
+        private static Gradient BuildDefaultGradient()
         {
-            var defaultScale = Mathf.Clamp(interactRenderScale, 0.1f, 1f);
-            if (!Application.isMobilePlatform)
-            {
-                adaptiveInteractRenderScale = defaultScale;
-                return defaultScale;
-            }
-
-            var minScale = Mathf.Min(mobileMinInteractScale, mobileMaxInteractScale);
-            var maxScale = Mathf.Max(mobileMinInteractScale, mobileMaxInteractScale);
-            adaptiveInteractRenderScale = Mathf.Clamp(adaptiveInteractRenderScale, minScale, maxScale);
-
-            var targetMs = Mathf.Max(8f, mobileTargetFrameTimeMs);
-            if (smoothedFrameTimeMs > targetMs + 0.75f)
-            {
-                adaptiveInteractRenderScale -= mobileScaleAdjustSpeed * Time.unscaledDeltaTime;
-            }
-            else if (smoothedFrameTimeMs < targetMs - 1f)
-            {
-                adaptiveInteractRenderScale += mobileScaleAdjustSpeed * Time.unscaledDeltaTime;
-            }
-
-            return Mathf.Clamp(adaptiveInteractRenderScale, minScale, maxScale);
-        }
-
-        private void TrackFrameTiming()
-        {
-            var frameTimeMs = Mathf.Max(0.1f, Time.unscaledDeltaTime * 1000f);
-            smoothedFrameTimeMs = Mathf.Lerp(smoothedFrameTimeMs, frameTimeMs, 0.12f);
-        }
-
-        private static void BuildDefaultGradient(out Gradient gradient)
-        {
-            gradient = new Gradient();
+            var gradient = new Gradient();
             gradient.SetKeys(
                 new[]
                 {
-                    new GradientColorKey(new Color(0.05f, 0.1f, 0.3f), 0f),
-                    new GradientColorKey(new Color(0.2f, 0.8f, 1f), 0.35f),
-                    new GradientColorKey(new Color(1f, 0.8f, 0.2f), 0.7f),
-                    new GradientColorKey(new Color(1f, 1f, 1f), 1f)
+                    new GradientColorKey(new Color(0.015f, 0.025f, 0.12f), 0f),
+                    new GradientColorKey(new Color(0.04f, 0.42f, 0.95f), 0.25f),
+                    new GradientColorKey(new Color(0.15f, 0.95f, 0.85f), 0.5f),
+                    new GradientColorKey(new Color(1f, 0.78f, 0.12f), 0.75f),
+                    new GradientColorKey(new Color(0.9f, 0.08f, 0.24f), 1f)
                 },
                 new[]
                 {
                     new GradientAlphaKey(1f, 0f),
                     new GradientAlphaKey(1f, 1f)
                 });
+            return gradient;
         }
     }
 }

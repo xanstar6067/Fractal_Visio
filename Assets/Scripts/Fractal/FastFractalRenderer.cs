@@ -1,81 +1,80 @@
+using System;
 using UnityEngine;
 
 namespace FractalVisio.Fractal
 {
-    public sealed class FastFractalRenderer : IFractalRenderer
+    /// <summary>Single-pass fp32 renderer used only while pixel spacing is safe for the GPU.</summary>
+    internal sealed class FractalGpuRenderer : IDisposable
     {
         private const string ShaderName = "FractalVisio/MandelbrotFloat";
         private const int PaletteResolution = 256;
 
-        private readonly Gradient gradient;
-        private readonly Material fractalMaterial;
-        private readonly Texture2D paletteTexture;
-        private readonly bool gpuAvailable;
-        private Color32[] cpuTileBuffer;
+        private readonly Material material;
+        private readonly Texture2D palette;
 
-        public FastFractalRenderer(Gradient gradient)
+        public FractalGpuRenderer(Gradient gradient)
         {
-            this.gradient = gradient;
-
             var shader = Shader.Find(ShaderName);
-            if (shader != null && shader.isSupported)
-            {
-                fractalMaterial = new Material(shader);
-                fractalMaterial.hideFlags = HideFlags.HideAndDontSave;
-                paletteTexture = BuildPaletteTexture(gradient);
-                fractalMaterial.SetTexture("_PaletteTex", paletteTexture);
-                gpuAvailable = true;
-            }
-        }
-
-        public RenderMode Mode => RenderMode.Fast;
-
-        public void Render(in FractalRenderRequest request, Texture target, TileDescriptor tile)
-        {
-            if (gpuAvailable && target is RenderTexture renderTexture)
-            {
-                fractalMaterial.SetVector("_Center", new Vector4((float)request.View.x.AsDouble, (float)request.View.y.AsDouble, 0f, 0f));
-                fractalMaterial.SetFloat("_Scale", (float)request.View.scale.AsDouble);
-                fractalMaterial.SetFloat("_Iterations", request.View.iterations);
-                Graphics.Blit(null, renderTexture, fractalMaterial, 0);
-                return;
-            }
-
-            if (target is not Texture2D texture2D)
+            if (shader == null || !shader.isSupported)
             {
                 return;
             }
 
-            var sampleStep = request.IsInteracting ? 2 : 1;
-            EnsureCpuTileBuffer(tile.PixelRect.width * tile.PixelRect.height);
-            FractalCpuKernels.RenderMandelbrotTile(cpuTileBuffer, texture2D.width, texture2D.height, tile, request.View, request.View.iterations, sampleStep, gradient);
-            FractalCpuKernels.BlitTile(texture2D, tile, cpuTileBuffer);
+            material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+            palette = BuildPalette(gradient);
+            material.SetTexture("_PaletteTex", palette);
         }
 
-        private static Texture2D BuildPaletteTexture(Gradient gradient)
+        public bool IsAvailable => material != null;
+
+        public void Render(in FractalView view, int iterations, RenderTexture target)
         {
-            var texture = new Texture2D(PaletteResolution, 1, TextureFormat.RGBA32, false, true);
-            texture.wrapMode = TextureWrapMode.Clamp;
-            texture.filterMode = FilterMode.Bilinear;
+            if (!IsAvailable || target == null)
+            {
+                return;
+            }
+
+            material.SetVector("_Center", new Vector4(
+                (float)view.x.AsDouble,
+                (float)view.y.AsDouble,
+                0f,
+                0f));
+            material.SetFloat("_Scale", (float)view.scale.AsDouble);
+            material.SetFloat("_Aspect", target.width / (float)Mathf.Max(1, target.height));
+            material.SetInt("_Iterations", Mathf.Max(1, iterations));
+            Graphics.Blit(null, target, material, 0);
+        }
+
+        public void Dispose()
+        {
+            if (material != null)
+            {
+                UnityEngine.Object.Destroy(material);
+            }
+
+            if (palette != null)
+            {
+                UnityEngine.Object.Destroy(palette);
+            }
+        }
+
+        private static Texture2D BuildPalette(Gradient gradient)
+        {
+            var texture = new Texture2D(PaletteResolution, 1, TextureFormat.RGBA32, false, true)
+            {
+                name = "Fractal Palette",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+                hideFlags = HideFlags.HideAndDontSave
+            };
 
             for (var i = 0; i < PaletteResolution; i++)
             {
-                var t = i / (PaletteResolution - 1f);
-                texture.SetPixel(i, 0, gradient.Evaluate(t));
+                texture.SetPixel(i, 0, gradient.Evaluate(i / (PaletteResolution - 1f)));
             }
 
             texture.Apply(false, true);
             return texture;
-        }
-
-        private void EnsureCpuTileBuffer(int requiredLength)
-        {
-            if (cpuTileBuffer != null && cpuTileBuffer.Length == requiredLength)
-            {
-                return;
-            }
-
-            cpuTileBuffer = new Color32[requiredLength];
         }
     }
 }

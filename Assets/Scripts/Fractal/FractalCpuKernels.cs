@@ -1,116 +1,281 @@
-using UnityEngine;
+using System;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
+using UnityEngine;
 
 namespace FractalVisio.Fractal
 {
-    internal static class FractalCpuKernels
+    /// <summary>
+    /// Progressive CPU renderer. One parallel tile is in flight at a time so a
+    /// new gesture never blocks the main thread waiting for a full image.
+    /// </summary>
+    internal sealed class FractalCpuRenderer : IDisposable
     {
-        public static void RenderMandelbrotTile(
-            Color32[] tileBuffer,
-            int targetWidth,
-            int targetHeight,
-            TileDescriptor tile,
-            in FractalView view,
-            int maxIterations,
-            int sampleStep,
-            Gradient gradient)
+        private const int PaletteResolution = 256;
+
+        private readonly NativeArray<Color32> palette;
+        private NativeArray<Color32> nativeTile;
+        private Color32[] managedTile;
+        private JobHandle tileHandle;
+        private bool tileScheduled;
+        private bool discardActiveFrame;
+        private bool hasQueuedFrame;
+        private FrameRequest activeFrame;
+        private FrameRequest queuedFrame;
+        private int nextTileIndex;
+        private int tilesSinceApply;
+        private int tileScheduledFrame;
+
+        public FractalCpuRenderer(Gradient gradient)
         {
-            var rect = tile.PixelRect;
-            var width = targetWidth;
-            var height = targetHeight;
-            var halfScale = view.scale.AsDouble * 0.5d;
-            var aspect = (double)width / height;
-
-            var rectWidth = rect.width;
-            var rectHeight = rect.height;
-            ClearTile(tileBuffer, rectWidth, rectHeight);
-
-            for (var y = rect.yMin; y < rect.yMax; y += sampleStep)
+            palette = new NativeArray<Color32>(PaletteResolution, Allocator.Persistent);
+            for (var i = 0; i < PaletteResolution; i++)
             {
-                for (var x = rect.xMin; x < rect.xMax; x += sampleStep)
-                {
-                    var nx = (x + 0.5d) / width;
-                    var ny = (y + 0.5d) / height;
-
-                    var cx = view.x.AsDouble + ((nx - 0.5d) * 2d * halfScale * aspect);
-                    var cy = view.y.AsDouble + ((ny - 0.5d) * 2d * halfScale);
-
-                    var color = EvaluateMandelbrot(cx, cy, maxIterations, gradient);
-                    FillBlock(tileBuffer, rectWidth, rectHeight, x - rect.xMin, y - rect.yMin, sampleStep, sampleStep, color);
-                }
+                palette[i] = (Color32)gradient.Evaluate(i / (PaletteResolution - 1f));
             }
         }
 
-        public static void BlitTile(Texture2D target, TileDescriptor tile, Color32[] tileBuffer)
+        public bool IsBusy => tileScheduled || hasQueuedFrame || activeFrame.Target != null;
+        public float Progress { get; private set; }
+        public bool UsesExtendedPrecision => activeFrame.ExtendedPrecision;
+
+        public void Request(Texture2D target, in FractalView view, int iterations, int tileSize, bool extendedPrecision)
         {
-            var rect = tile.PixelRect;
-            target.SetPixels32(rect.x, rect.y, rect.width, rect.height, tileBuffer);
+            queuedFrame = new FrameRequest(
+                target,
+                view,
+                Mathf.Max(1, iterations),
+                Mathf.Max(32, tileSize),
+                extendedPrecision);
+            hasQueuedFrame = true;
+
+            if (tileScheduled)
+            {
+                discardActiveFrame = true;
+                return;
+            }
+
+            StartQueuedFrame();
         }
 
-        public static void RenderMandelbrotTileBurst(
-            Color32[] managedTileBuffer,
-            ref NativeArray<Color32> nativeTileBuffer,
-            NativeArray<Color32> palette,
-            int targetWidth,
-            int targetHeight,
-            TileDescriptor tile,
-            in FractalView view,
-            int maxIterations)
+        /// <summary>Poll once per Update. Returns true when visible pixels were uploaded.</summary>
+        public bool Update()
         {
-            var rect = tile.PixelRect;
-            var requiredLength = rect.width * rect.height;
-            if (!nativeTileBuffer.IsCreated || nativeTileBuffer.Length != requiredLength)
+            if (!tileScheduled)
             {
-                if (nativeTileBuffer.IsCreated)
+                if (hasQueuedFrame)
                 {
-                    nativeTileBuffer.Dispose();
+                    StartQueuedFrame();
                 }
 
-                nativeTileBuffer = new NativeArray<Color32>(requiredLength, Allocator.Persistent);
+                return false;
             }
+
+            // Some Unity runtimes defer an unconsumed job batch for longer than
+            // expected. Give workers two frames, then establish a dependency on
+            // the small tile so progressive rendering always moves forward.
+            if (!tileHandle.IsCompleted && Time.frameCount - tileScheduledFrame < 2)
+            {
+                return false;
+            }
+
+            tileHandle.Complete();
+            tileScheduled = false;
+
+            if (discardActiveFrame)
+            {
+                discardActiveFrame = false;
+                StartQueuedFrame();
+                return false;
+            }
+
+            var rect = GetTileRect(activeFrame, nextTileIndex);
+            nativeTile.CopyTo(managedTile);
+            activeFrame.Target.SetPixels32(rect.x, rect.y, rect.width, rect.height, managedTile);
+            nextTileIndex++;
+            tilesSinceApply++;
+
+            var tileCount = GetTileCount(activeFrame);
+            var frameComplete = nextTileIndex >= tileCount;
+            var shouldUpload = frameComplete || tilesSinceApply >= 2;
+            if (shouldUpload)
+            {
+                activeFrame.Target.Apply(false, false);
+                tilesSinceApply = 0;
+            }
+
+            Progress = tileCount > 0 ? nextTileIndex / (float)tileCount : 1f;
+
+            if (hasQueuedFrame)
+            {
+                StartQueuedFrame();
+            }
+            else if (frameComplete)
+            {
+                activeFrame = default;
+            }
+            else
+            {
+                ScheduleCurrentTile();
+            }
+
+            return shouldUpload;
+        }
+
+        public void Invalidate()
+        {
+            hasQueuedFrame = false;
+            if (tileScheduled)
+            {
+                discardActiveFrame = true;
+            }
+            else
+            {
+                activeFrame = default;
+                Progress = 0f;
+            }
+        }
+
+        public void CompletePendingWork()
+        {
+            if (!tileScheduled)
+            {
+                return;
+            }
+
+            tileHandle.Complete();
+            tileScheduled = false;
+            activeFrame = default;
+            hasQueuedFrame = false;
+            discardActiveFrame = false;
+        }
+
+        public void Dispose()
+        {
+            CompletePendingWork();
+
+            if (nativeTile.IsCreated)
+            {
+                nativeTile.Dispose();
+            }
+
+            if (palette.IsCreated)
+            {
+                palette.Dispose();
+            }
+        }
+
+        private void StartQueuedFrame()
+        {
+            if (!hasQueuedFrame)
+            {
+                return;
+            }
+
+            activeFrame = queuedFrame;
+            hasQueuedFrame = false;
+            discardActiveFrame = false;
+            nextTileIndex = 0;
+            tilesSinceApply = 0;
+            Progress = 0f;
+            ScheduleCurrentTile();
+        }
+
+        private void ScheduleCurrentTile()
+        {
+            if (activeFrame.Target == null)
+            {
+                activeFrame = default;
+                return;
+            }
+
+            var rect = GetTileRect(activeFrame, nextTileIndex);
+            var length = rect.width * rect.height;
+            EnsureTileBuffers(length);
 
             var job = new MandelbrotTileJob
             {
-                Output = nativeTileBuffer,
+                Output = nativeTile,
                 Palette = palette,
-                TargetWidth = targetWidth,
-                TargetHeight = targetHeight,
+                TargetWidth = activeFrame.Target.width,
+                TargetHeight = activeFrame.Target.height,
                 RectX = rect.x,
                 RectY = rect.y,
                 RectWidth = rect.width,
-                CenterX = view.x.AsDouble,
-                CenterY = view.y.AsDouble,
-                Scale = view.scale.AsDouble,
-                MaxIterations = maxIterations
+                CenterX = DoubleDouble.FromDecimal(activeFrame.View.x.AsDecimal),
+                CenterY = DoubleDouble.FromDecimal(activeFrame.View.y.AsDecimal),
+                Scale = DoubleDouble.FromDecimal(activeFrame.View.scale.AsDecimal),
+                MaxIterations = activeFrame.Iterations,
+                ExtendedPrecision = activeFrame.ExtendedPrecision ? (byte)1 : (byte)0
             };
 
-            job.Schedule(requiredLength, 64).Complete();
-            nativeTileBuffer.CopyTo(managedTileBuffer);
+            tileHandle = job.Schedule(length, 64);
+            JobHandle.ScheduleBatchedJobs();
+            tileScheduledFrame = Time.frameCount;
+            tileScheduled = true;
         }
 
-        private static Color32 EvaluateMandelbrot(double cx, double cy, int maxIterations, Gradient gradient)
+        private void EnsureTileBuffers(int length)
         {
-            var zx = 0d;
-            var zy = 0d;
-            var iteration = 0;
-
-            while (zx * zx + zy * zy <= 4d && iteration < maxIterations)
+            if (!nativeTile.IsCreated || nativeTile.Length != length)
             {
-                var xt = zx * zx - zy * zy + cx;
-                zy = 2d * zx * zy + cy;
-                zx = xt;
-                iteration++;
+                if (nativeTile.IsCreated)
+                {
+                    nativeTile.Dispose();
+                }
+
+                nativeTile = new NativeArray<Color32>(length, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             }
 
-            if (iteration >= maxIterations)
+            if (managedTile == null || managedTile.Length != length)
             {
-                return new Color32(0, 0, 0, 255);
+                managedTile = new Color32[length];
+            }
+        }
+
+        private static int GetTileCount(in FrameRequest request)
+        {
+            if (request.Target == null)
+            {
+                return 0;
             }
 
-            var t = iteration / (float)maxIterations;
-            return (Color32)gradient.Evaluate(t);
+            var columns = (request.Target.width + request.TileSize - 1) / request.TileSize;
+            var rows = (request.Target.height + request.TileSize - 1) / request.TileSize;
+            return columns * rows;
+        }
+
+        private static RectInt GetTileRect(in FrameRequest request, int tileIndex)
+        {
+            var columns = (request.Target.width + request.TileSize - 1) / request.TileSize;
+            var column = tileIndex % columns;
+            var row = tileIndex / columns;
+            var x = column * request.TileSize;
+            var y = row * request.TileSize;
+            return new RectInt(
+                x,
+                y,
+                Mathf.Min(request.TileSize, request.Target.width - x),
+                Mathf.Min(request.TileSize, request.Target.height - y));
+        }
+
+        private readonly struct FrameRequest
+        {
+            public FrameRequest(Texture2D target, FractalView view, int iterations, int tileSize, bool extendedPrecision)
+            {
+                Target = target;
+                View = view;
+                Iterations = iterations;
+                TileSize = tileSize;
+                ExtendedPrecision = extendedPrecision;
+            }
+
+            public Texture2D Target { get; }
+            public FractalView View { get; }
+            public int Iterations { get; }
+            public int TileSize { get; }
+            public bool ExtendedPrecision { get; }
         }
 
         [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
@@ -124,88 +289,118 @@ namespace FractalVisio.Fractal
             public int RectX;
             public int RectY;
             public int RectWidth;
-            public double CenterX;
-            public double CenterY;
-            public double Scale;
+            public DoubleDouble CenterX;
+            public DoubleDouble CenterY;
+            public DoubleDouble Scale;
             public int MaxIterations;
+            public byte ExtendedPrecision;
 
             public void Execute(int index)
             {
                 var localX = index % RectWidth;
                 var localY = index / RectWidth;
-                var x = RectX + localX;
-                var y = RectY + localY;
+                var pixelX = RectX + localX;
+                var pixelY = RectY + localY;
+                var aspect = TargetWidth / (double)TargetHeight;
+                var normalizedX = (((pixelX + 0.5d) / TargetWidth) - 0.5d) * aspect;
+                var normalizedY = ((pixelY + 0.5d) / TargetHeight) - 0.5d;
 
-                var halfScale = Scale * 0.5d;
-                var aspect = (double)TargetWidth / TargetHeight;
-                var nx = (x + 0.5d) / TargetWidth;
-                var ny = (y + 0.5d) / TargetHeight;
-                var cx = CenterX + ((nx - 0.5d) * 2d * halfScale * aspect);
-                var cy = CenterY + ((ny - 0.5d) * 2d * halfScale);
+                int iteration;
+                if (ExtendedPrecision != 0)
+                {
+                    var cx = DoubleDouble.Add(CenterX, DoubleDouble.Multiply(Scale, normalizedX));
+                    var cy = DoubleDouble.Add(CenterY, DoubleDouble.Multiply(Scale, normalizedY));
+                    iteration = EvaluateExtended(cx, cy, MaxIterations);
+                }
+                else
+                {
+                    var scale = Scale.ToDouble();
+                    var cx = CenterX.ToDouble() + scale * normalizedX;
+                    var cy = CenterY.ToDouble() + scale * normalizedY;
+                    iteration = EvaluateDouble(cx, cy, MaxIterations);
+                }
+
+                Output[index] = ResolveColor(iteration, MaxIterations, Palette);
+            }
+
+            private static int EvaluateDouble(double cx, double cy, int maxIterations)
+            {
+                var x = cx - 0.25d;
+                var y2 = cy * cy;
+                var q = x * x + y2;
+                if (q * (q + x) <= 0.25d * y2 || (cx + 1d) * (cx + 1d) + y2 <= 0.0625d)
+                {
+                    return maxIterations;
+                }
 
                 var zx = 0d;
                 var zy = 0d;
                 var iteration = 0;
-
-                while (zx * zx + zy * zy <= 4d && iteration < MaxIterations)
+                while (iteration < maxIterations && zx * zx + zy * zy <= 4d)
                 {
-                    var xt = zx * zx - zy * zy + cx;
+                    var nextX = zx * zx - zy * zy + cx;
                     zy = 2d * zx * zy + cy;
-                    zx = xt;
+                    zx = nextX;
                     iteration++;
                 }
 
-                if (iteration >= MaxIterations)
+                return iteration;
+            }
+
+            private static int EvaluateExtended(DoubleDouble cx, DoubleDouble cy, int maxIterations)
+            {
+                var zx = new DoubleDouble(0d);
+                var zy = new DoubleDouble(0d);
+                var iteration = 0;
+
+                while (iteration < maxIterations)
                 {
-                    Output[index] = new Color32(0, 0, 0, 255);
-                    return;
+                    var xSquared = DoubleDouble.Square(zx);
+                    var ySquared = DoubleDouble.Square(zy);
+                    if (DoubleDouble.Add(xSquared, ySquared).ToDouble() > 4d)
+                    {
+                        break;
+                    }
+
+                    var nextX = DoubleDouble.Add(DoubleDouble.Subtract(xSquared, ySquared), cx);
+                    zy = DoubleDouble.Add(DoubleDouble.Multiply(DoubleDouble.Multiply(zx, zy), 2d), cy);
+                    zx = nextX;
+                    iteration++;
                 }
 
-                var palettePosition = (iteration * (double)(Palette.Length - 1)) / MaxIterations;
-                var paletteIndex = (int)palettePosition;
-                var nextPaletteIndex = paletteIndex + 1;
-                if (nextPaletteIndex >= Palette.Length)
+                return iteration;
+            }
+
+            private static Color32 ResolveColor(int iteration, int maxIterations, NativeArray<Color32> colors)
+            {
+                if (iteration >= maxIterations)
                 {
-                    nextPaletteIndex = paletteIndex;
+                    return new Color32(3, 5, 12, 255);
                 }
 
-                var t = palettePosition - paletteIndex;
-                var a = Palette[paletteIndex];
-                var b = Palette[nextPaletteIndex];
-                Output[index] = new Color32(
+                var palettePosition = iteration * 0.021d;
+                palettePosition -= Math.Floor(palettePosition);
+                var scaled = palettePosition * (colors.Length - 1);
+                var firstIndex = (int)scaled;
+                var secondIndex = firstIndex + 1;
+                if (secondIndex >= colors.Length)
+                {
+                    secondIndex = 0;
+                }
+
+                var t = scaled - firstIndex;
+                var a = colors[firstIndex];
+                var b = colors[secondIndex];
+                return new Color32(
                     LerpByte(a.r, b.r, t),
                     LerpByte(a.g, b.g, t),
                     LerpByte(a.b, b.b, t),
-                    LerpByte(a.a, b.a, t));
+                    255);
             }
 
             private static byte LerpByte(byte a, byte b, double t)
             {
-                return (byte)(a + ((b - a) * t) + 0.5d);
-            }
-        }
-
-        private static void FillBlock(Color32[] tileBuffer, int tileWidth, int tileHeight, int xStart, int yStart, int blockWidth, int blockHeight, Color32 color)
-        {
-            var maxX = Mathf.Min(tileWidth, xStart + blockWidth);
-            var maxY = Mathf.Min(tileHeight, yStart + blockHeight);
-
-            for (var y = yStart; y < maxY; y++)
-            {
-                var row = y * tileWidth;
-                for (var x = xStart; x < maxX; x++)
-                {
-                    tileBuffer[row + x] = color;
-                }
-            }
-        }
-
-        private static void ClearTile(Color32[] tileBuffer, int tileWidth, int tileHeight)
-        {
-            var length = tileWidth * tileHeight;
-            for (var i = 0; i < length; i++)
-            {
-                tileBuffer[i] = new Color32(0, 0, 0, 255);
+                return (byte)(a + (b - a) * t + 0.5d);
             }
         }
     }
