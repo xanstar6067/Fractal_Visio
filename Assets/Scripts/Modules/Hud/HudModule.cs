@@ -66,7 +66,7 @@ namespace FractalVisio.Modules
             if (scaleValueText != null)
             {
                 var scale = view.scale.AsDouble;
-                var reference = ViewState.Default.scale.AsDouble;
+                var reference = context.Session.Definition.DefaultView.scale.AsDouble;
                 var zoom = scale > 0d ? reference / scale : 0d;
                 var rotationDegrees = view.rotation * (180d / Math.PI);
                 rotationDegrees -= Math.Floor(rotationDegrees / 360d) * 360d;

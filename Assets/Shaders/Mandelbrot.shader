@@ -1,4 +1,4 @@
-Shader "FractalVisio/MandelbrotFloat"
+Shader "FractalVisio/Mandelbrot"
 {
     Properties
     {
@@ -23,46 +23,11 @@ Shader "FractalVisio/MandelbrotFloat"
             #pragma target 3.0
             #pragma vertex Vert
             #pragma fragment Frag
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
-
-            TEXTURE2D(_PaletteTex);
-            SAMPLER(sampler_PaletteTex);
-
-            CBUFFER_START(UnityPerMaterial)
-            float4 _Center;
-            float _Scale;
-            float _Aspect;
-            float _Rotation;
-            int _Iterations;
-            CBUFFER_END
-
-            struct Attributes
-            {
-                uint vertexID : SV_VertexID;
-            };
-
-            struct Varyings
-            {
-                float4 positionCS : SV_POSITION;
-                float2 uv : TEXCOORD0;
-            };
-
-            Varyings Vert(Attributes input)
-            {
-                Varyings output;
-                output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
-                output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
-                return output;
-            }
+            #include "Common/FractalCommon.hlsl"
 
             half4 Frag(Varyings input) : SV_Target
             {
-                float2 offset = input.uv - 0.5;
-                float2 d = float2(offset.x * _Aspect, offset.y);
-                float sinR, cosR;
-                sincos(_Rotation, sinR, cosR);
-                d = float2(d.x * cosR - d.y * sinR, d.x * sinR + d.y * cosR);
-                float2 c = _Center.xy + d * _Scale;
+                float2 c = FractalPlanePoint(input.uv);
 
                 // Main cardioid and period-2 bulb: very cheap on mobile GPUs.
                 float cardioidX = c.x - 0.25;
@@ -70,11 +35,11 @@ Shader "FractalVisio/MandelbrotFloat"
                 float q = cardioidX * cardioidX + y2;
                 if (q * (q + cardioidX) <= 0.25 * y2 || dot(c + float2(1.0, 0.0), c + float2(1.0, 0.0)) <= 0.0625)
                 {
-                    return half4(0.012, 0.02, 0.047, 1.0);
+                    return FRACTAL_INTERIOR_COLOR;
                 }
 
                 float2 z = 0.0;
-                int maxIterations = clamp(_Iterations, 1, 2048);
+                int maxIterations = FractalMaxIterations();
                 int iteration = 0;
                 bool escaped = false;
 
@@ -97,11 +62,10 @@ Shader "FractalVisio/MandelbrotFloat"
 
                 if (!escaped)
                 {
-                    return half4(0.012, 0.02, 0.047, 1.0);
+                    return FRACTAL_INTERIOR_COLOR;
                 }
 
-                float palettePosition = frac(iteration * 0.021);
-                return SAMPLE_TEXTURE2D(_PaletteTex, sampler_PaletteTex, float2(palettePosition, 0.5));
+                return FractalEscapeColor(iteration);
             }
             ENDHLSL
         }

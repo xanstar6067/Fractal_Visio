@@ -13,13 +13,5 @@ namespace FractalVisio.Core
         public double rotation;
         public int iterations;
 
-        public static ViewState Default => new()
-        {
-            x = -0.5m,
-            y = 0m,
-            scale = 3m,
-            rotation = 0d,
-            iterations = 128
-        };
     }
 }

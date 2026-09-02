@@ -109,7 +109,13 @@ any feature that is not a bug fix, and update it when a design decision changes.
   rename only while file name and class name change together.
 - Per-pixel work is dispatched through generic struct samplers
   (`where TSampler : struct, IEscapeSamplerD`), never through interface or delegate calls
-  inside the pixel loop. This is also the seam for the Burst migration below.
+  inside the pixel loop. The fractal hands its sampler to the renderer by calling back into
+  `ICpuPassHost` - a generic visitor, used so the pass loop is instantiated per sampler type
+  while `Rendering` still cannot see `Fractals`. Keep samplers `struct`; a `class` sampler
+  compiles and silently runs several times slower. This is also the Burst seam: only
+  `ICpuPassHost`'s two methods have to learn to schedule jobs.
+- Only `Bootstrap` references `Fractals`. `App` reaches fractals through
+  `IFractalDefinition` in `Core`, and `Rendering` likewise - do not add the reference.
 - Render math takes an explicit `Viewport`; do not read `Screen.width/height` inside
   `Core`, `Rendering` or `Fractals` — off-screen capture (save image) depends on this.
 - `Viewport` carries an `Overscan` margin: buffers cover more than the screen and the

@@ -32,6 +32,7 @@ namespace FractalVisio.App
         private bool renderDirty;
         private bool hasRequestedView;
         private bool lastRequestWasInteractive;
+        private bool lastUsedExtendedPrecision;
         private int cachedScreenWidth;
         private int cachedScreenHeight;
 
@@ -63,7 +64,7 @@ namespace FractalVisio.App
                     currentBackend,
                     lastRequestWasInteractive,
                     session.View.iterations,
-                    session.View.scale.AsDouble < session.Quality.ExtendedPrecisionScale,
+                    lastUsedExtendedPrecision,
                     busy,
                     cpuRenderer != null ? cpuRenderer.CurrentPass : 0,
                     cpuRenderer != null ? cpuRenderer.PassCount : 0,
@@ -125,9 +126,12 @@ namespace FractalVisio.App
         {
             var view = session.View;
             var quality = session.Quality;
+            var definition = session.Definition;
             var scale = view.scale.AsDouble;
 
-            currentBackend = gpuRenderer != null && gpuRenderer.IsAvailable && scale >= quality.GpuMinimumScale
+            currentBackend = gpuRenderer != null &&
+                             scale >= quality.GpuMinimumScale &&
+                             gpuRenderer.Supports(definition)
                 ? RenderBackend.GpuFloat
                 : RenderBackend.Cpu;
 
@@ -136,7 +140,13 @@ namespace FractalVisio.App
                 cpuRenderer?.Invalidate();
                 var viewport = interacting ? interactiveViewport : settledViewport;
                 var target = interacting ? interactiveGpuTexture : settledGpuTexture;
-                gpuRenderer.Render(ViewNavigator.ForViewport(view, viewport), view.iterations, target);
+                lastUsedExtendedPrecision = false;
+                gpuRenderer.Render(
+                    definition,
+                    session.Parameters,
+                    ViewNavigator.ForViewport(view, viewport),
+                    view.iterations,
+                    target);
                 targetImage.texture = target;
                 targetImage.uvRect = viewport.VisibleUvRect;
             }
@@ -144,10 +154,14 @@ namespace FractalVisio.App
             {
                 // The CPU path always draws into the settled-size buffer; interaction only
                 // changes how many progressive passes it runs.
-                var useExtendedPrecision = scale < quality.ExtendedPrecisionScale;
+                var useExtendedPrecision = scale < quality.ExtendedPrecisionScale &&
+                                           (definition.SupportedPrecision & PrecisionTier.DoubleDouble) != 0;
+                lastUsedExtendedPrecision = useExtendedPrecision;
                 cpuRenderer.Request(
                     cpuTexture,
                     cpuViewport,
+                    definition,
+                    session.Parameters,
                     ViewNavigator.ForViewport(view, cpuViewport),
                     view.iterations,
                     useExtendedPrecision,

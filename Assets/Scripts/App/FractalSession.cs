@@ -59,18 +59,22 @@ namespace FractalVisio.App
     /// funnels through <see cref="SetView"/>, so clamping and the iteration budget are decided in
     /// exactly one place.
     ///
-    /// Later stages add the active fractal definition, its parameters, palette and colouring here;
-    /// the <see cref="SessionChange"/> flags already carry them.
+    /// It owns the active fractal definition and its parameters; palette and colouring land here
+    /// too in the next stage, and the <see cref="SessionChange"/> flags already carry them.
     /// </summary>
     public sealed class FractalSession
     {
         private ViewState view;
         private RenderQuality quality;
+        private IFractalDefinition definition;
+        private FractalParameterSet parameters;
 
-        public FractalSession(in RenderQuality quality)
+        public FractalSession(IFractalDefinition definition, in RenderQuality quality)
         {
+            this.definition = definition ?? throw new ArgumentNullException(nameof(definition));
             this.quality = quality.Sanitized();
-            view = ViewState.Default;
+            parameters = FractalParameterSet.Defaults(definition.Parameters);
+            view = definition.DefaultView;
             ApplyBudget(ref view);
         }
 
@@ -78,6 +82,44 @@ namespace FractalVisio.App
 
         public ViewState View => view;
         public RenderQuality Quality => quality;
+
+        /// <summary>The active fractal. Everything fractal-specific goes through it.</summary>
+        public IFractalDefinition Definition => definition;
+
+        public FractalParameterSet Parameters => parameters;
+
+        /// <summary>Switch fractal: view and parameters return to that fractal's own defaults.</summary>
+        public void SetDefinition(IFractalDefinition value)
+        {
+            if (value == null || ReferenceEquals(value, definition))
+            {
+                return;
+            }
+
+            definition = value;
+            parameters = FractalParameterSet.Defaults(value.Parameters);
+            view = value.DefaultView;
+            ApplyBudget(ref view);
+            Raise(SessionChange.Definition | SessionChange.Parameters | SessionChange.View);
+        }
+
+        public void SetParameter(string key, double value)
+        {
+            var index = parameters.IndexOf(key);
+            if (index < 0)
+            {
+                return;
+            }
+
+            var next = parameters.With(key, value);
+            if (next[index] == parameters[index])
+            {
+                return;
+            }
+
+            parameters = next;
+            Raise(SessionChange.Parameters);
+        }
 
         public void SetQuality(in RenderQuality value)
         {
@@ -123,7 +165,7 @@ namespace FractalVisio.App
 
         public void ResetView()
         {
-            SetView(ViewState.Default);
+            SetView(definition.DefaultView);
         }
 
         private void ApplyBudget(ref ViewState target)

@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using FractalVisio.App;
 using FractalVisio.Core;
+using FractalVisio.Fractals;
 using FractalVisio.Gestures;
 using FractalVisio.Modules;
 
@@ -156,7 +157,7 @@ namespace FractalVisio.Bootstrap
                 gestureInput = gameObject.AddComponent<FractalGestureInput>();
             }
 
-            session ??= new FractalSession(BuildQuality());
+            session ??= new FractalSession(FractalCatalog.Default, BuildQuality());
             presenter ??= new FractalPresenter(targetImage, session);
             context ??= new AppServices(session, presenter, transform);
 

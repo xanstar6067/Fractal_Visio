@@ -105,12 +105,15 @@ namespace FractalVisio.Rendering
         public void Request(
             Texture2D texture,
             in Viewport viewport,
+            IFractalDefinition definition,
+            in FractalParameterSet parameters,
             in ViewState view,
             int iterations,
             bool extendedPrecision,
             bool interacting)
         {
-            queued = new FrameRequest(texture, viewport, view, Mathf.Max(1, iterations), extendedPrecision, interacting);
+            queued = new FrameRequest(
+                texture, viewport, definition, parameters, view, Mathf.Max(1, iterations), extendedPrecision, interacting);
             hasQueued = true;
 
             if (renderActive)
@@ -614,6 +617,97 @@ namespace FractalVisio.Rendering
 
         private static void RenderProgressive(RenderJob job, CancellationToken token)
         {
+            // The definition calls back into the host with its own sampler struct; everything from
+            // there down is compiled once per sampler type. See ICpuPassHost for why.
+            var host = new PassHost(job, token);
+            job.Definition.RunCpuPass(host, job.Parameters, job.ExtendedPrecision);
+        }
+
+        /// <summary>
+        /// Bridges the fractal's sampler type into the generic pass machinery: one virtual call per
+        /// render, and specialised code for every pixel after it.
+        /// </summary>
+        private sealed class PassHost : ICpuPassHost
+        {
+            private readonly RenderJob job;
+            private readonly CancellationToken token;
+
+            public PassHost(RenderJob job, CancellationToken token)
+            {
+                this.job = job;
+                this.token = token;
+            }
+
+            public void Run<TSampler>(TSampler sampler) where TSampler : struct, IEscapeSamplerD
+            {
+                RunPasses(job, new PlaneSamplerD<TSampler>(sampler), token);
+            }
+
+            public void RunExtended<TSampler>(TSampler sampler) where TSampler : struct, IEscapeSamplerDD
+            {
+                RunPasses(job, new PlaneSamplerDD<TSampler>(sampler), token);
+            }
+        }
+
+        /// <summary>Pixel to plane point to iteration count. Structs only - see IEscapeSamplerD.</summary>
+        private interface IPlaneSampler
+        {
+            int SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token);
+        }
+
+        private readonly struct PlaneSamplerD<TSampler> : IPlaneSampler
+            where TSampler : struct, IEscapeSamplerD
+        {
+            private readonly TSampler sampler;
+
+            public PlaneSamplerD(TSampler sampler)
+            {
+                this.sampler = sampler;
+            }
+
+            public int SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token)
+            {
+                Normalize(job, pixelX, pixelY, out var rotatedX, out var rotatedY);
+                var cx = job.CenterXDouble + job.ScaleDouble * rotatedX;
+                var cy = job.CenterYDouble + job.ScaleDouble * rotatedY;
+                return sampler.Sample(cx, cy, job.MaxIterations, token);
+            }
+        }
+
+        private readonly struct PlaneSamplerDD<TSampler> : IPlaneSampler
+            where TSampler : struct, IEscapeSamplerDD
+        {
+            private readonly TSampler sampler;
+
+            public PlaneSamplerDD(TSampler sampler)
+            {
+                this.sampler = sampler;
+            }
+
+            public int SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token)
+            {
+                Normalize(job, pixelX, pixelY, out var rotatedX, out var rotatedY);
+                var cx = DoubleDouble.Add(job.CenterX, DoubleDouble.Multiply(job.Scale, rotatedX));
+                var cy = DoubleDouble.Add(job.CenterY, DoubleDouble.Multiply(job.Scale, rotatedY));
+                return sampler.Sample(cx, cy, job.MaxIterations, token);
+            }
+        }
+
+        /// <summary>
+        /// Pixel centre into view space. This applies the same screen-space rotation the GPU shader
+        /// does, so the two backends agree across the fp32 -> fp64 handoff.
+        /// </summary>
+        private static void Normalize(RenderJob job, int pixelX, int pixelY, out double rotatedX, out double rotatedY)
+        {
+            var normalizedX = ((pixelX + 0.5d) / job.Width - 0.5d) * job.Aspect;
+            var normalizedY = (pixelY + 0.5d) / job.Height - 0.5d;
+            rotatedX = normalizedX * job.RotationCos - normalizedY * job.RotationSin;
+            rotatedY = normalizedX * job.RotationSin + normalizedY * job.RotationCos;
+        }
+
+        private static void RunPasses<TPlane>(RenderJob job, TPlane sampler, CancellationToken token)
+            where TPlane : struct, IPlaneSampler
+        {
             var fullBands = BuildBands(new RectInt(0, 0, job.Width, job.Height), job.Workers * 3, StepPlan[0]);
             var visibleBands = job.HasMargin
                 ? BuildBands(job.VisibleRect, job.Workers * 3, StepPlan[0])
@@ -642,14 +736,14 @@ namespace FractalVisio.Rendering
                     // Blocks the reprojection could not fill are the stretched edge. Rendering
                     // them before everything else turns that smear into real pixels almost at
                     // once, instead of after a whole sweep over the image.
-                    RenderPass(job, bands, options, step, true, PassFilter.UncoveredOnly, token);
+                    RenderPass(job, bands, options, step, true, PassFilter.UncoveredOnly, sampler, token);
                     token.ThrowIfCancellationRequested();
                     job.Owner.PublishPass(job.Frame);
-                    RenderPass(job, bands, options, step, true, PassFilter.CoveredOnly, token);
+                    RenderPass(job, bands, options, step, true, PassFilter.CoveredOnly, sampler, token);
                 }
                 else
                 {
-                    RenderPass(job, bands, options, step, false, PassFilter.All, token);
+                    RenderPass(job, bands, options, step, false, PassFilter.All, sampler, token);
                 }
 
                 // Whole frame now covered at this step: publish it as one piece.
@@ -670,14 +764,16 @@ namespace FractalVisio.Rendering
             CoveredOnly
         }
 
-        private static void RenderPass(
+        private static void RenderPass<TPlane>(
             RenderJob job,
             RectInt[] bands,
             ParallelOptions options,
             int step,
             bool first,
             PassFilter filter,
+            TPlane sampler,
             CancellationToken token)
+            where TPlane : struct, IPlaneSampler
         {
             var coarse = step << 1;
 
@@ -717,7 +813,7 @@ namespace FractalVisio.Rendering
                             sy = job.Height - 1;
                         }
 
-                        var iteration = ComputeIteration(job, sx, sy, token);
+                        var iteration = sampler.SampleAt(job, sx, sy, token);
                         produced++;
 
                         if (!job.TrustInterior && iteration >= job.MaxIterations)
@@ -735,28 +831,6 @@ namespace FractalVisio.Rendering
 
                 job.Owner.AddSamples(produced);
             });
-        }
-
-        private static int ComputeIteration(RenderJob job, int pixelX, int pixelY, CancellationToken token)
-        {
-            var normalizedX = (((pixelX + 0.5d) / job.Width) - 0.5d) * job.Aspect;
-            var normalizedY = ((pixelY + 0.5d) / job.Height) - 0.5d;
-
-            // Same screen-space rotation the GPU shader applies, so the two backends
-            // agree across the fp32 -> fp64 handoff.
-            var rotatedX = normalizedX * job.RotationCos - normalizedY * job.RotationSin;
-            var rotatedY = normalizedX * job.RotationSin + normalizedY * job.RotationCos;
-
-            if (job.ExtendedPrecision)
-            {
-                var cx = DoubleDouble.Add(job.CenterX, DoubleDouble.Multiply(job.Scale, rotatedX));
-                var cy = DoubleDouble.Add(job.CenterY, DoubleDouble.Multiply(job.Scale, rotatedY));
-                return EvaluateExtended(cx, cy, job.MaxIterations, token);
-            }
-
-            var doubleCx = job.CenterXDouble + job.ScaleDouble * rotatedX;
-            var doubleCy = job.CenterYDouble + job.ScaleDouble * rotatedY;
-            return EvaluateDouble(doubleCx, doubleCy, job.MaxIterations, token);
         }
 
         private static void FillBlock(Color32[] buffer, int width, int height, int originX, int originY, int step, Color32 color)
@@ -781,68 +855,6 @@ namespace FractalVisio.Rendering
                     buffer[row + x] = color;
                 }
             }
-        }
-
-        private static int EvaluateDouble(double cx, double cy, int maxIterations, CancellationToken token)
-        {
-            var x = cx - 0.25d;
-            var y2 = cy * cy;
-            var q = x * x + y2;
-            if (q * (q + x) <= 0.25d * y2 || (cx + 1d) * (cx + 1d) + y2 <= 0.0625d)
-            {
-                return maxIterations;
-            }
-
-            var zx = 0d;
-            var zy = 0d;
-            var iteration = 0;
-            while (iteration < maxIterations && zx * zx + zy * zy <= 4d)
-            {
-                if ((iteration & 127) == 0 && token.IsCancellationRequested)
-                {
-                    token.ThrowIfCancellationRequested();
-                }
-
-                var nextX = zx * zx - zy * zy + cx;
-                zy = 2d * zx * zy + cy;
-                zx = nextX;
-                iteration++;
-            }
-
-            return iteration;
-        }
-
-        private static int EvaluateExtended(
-            DoubleDouble cx,
-            DoubleDouble cy,
-            int maxIterations,
-            CancellationToken token)
-        {
-            var zx = new DoubleDouble(0d);
-            var zy = new DoubleDouble(0d);
-            var iteration = 0;
-
-            while (iteration < maxIterations)
-            {
-                if ((iteration & 63) == 0 && token.IsCancellationRequested)
-                {
-                    token.ThrowIfCancellationRequested();
-                }
-
-                var xSquared = DoubleDouble.Square(zx);
-                var ySquared = DoubleDouble.Square(zy);
-                if (DoubleDouble.Add(xSquared, ySquared).ToDouble() > 4d)
-                {
-                    break;
-                }
-
-                var nextX = DoubleDouble.Add(DoubleDouble.Subtract(xSquared, ySquared), cx);
-                zy = DoubleDouble.Add(DoubleDouble.Multiply(DoubleDouble.Multiply(zx, zy), 2d), cy);
-                zx = nextX;
-                iteration++;
-            }
-
-            return iteration;
         }
 
         private static Color32 ResolveColor(int iteration, int maxIterations, Color32[] colors)
@@ -879,10 +891,20 @@ namespace FractalVisio.Rendering
 
         private readonly struct FrameRequest
         {
-            public FrameRequest(Texture2D target, Viewport viewport, ViewState view, int iterations, bool extendedPrecision, bool interacting)
+            public FrameRequest(
+                Texture2D target,
+                Viewport viewport,
+                IFractalDefinition definition,
+                FractalParameterSet parameters,
+                ViewState view,
+                int iterations,
+                bool extendedPrecision,
+                bool interacting)
             {
                 Target = target;
                 Viewport = viewport;
+                Definition = definition;
+                Parameters = parameters;
                 View = view;
                 Iterations = iterations;
                 ExtendedPrecision = extendedPrecision;
@@ -891,6 +913,8 @@ namespace FractalVisio.Rendering
 
             public Texture2D Target { get; }
             public Viewport Viewport { get; }
+            public IFractalDefinition Definition { get; }
+            public FractalParameterSet Parameters { get; }
             public ViewState View { get; }
             public int Iterations { get; }
             public bool ExtendedPrecision { get; }
@@ -914,6 +938,8 @@ namespace FractalVisio.Rendering
                 Frame = frame;
                 Width = width;
                 Height = height;
+                Definition = request.Definition;
+                Parameters = request.Parameters;
                 VisibleRect = visibleRect;
                 HasMargin = visibleRect.width < width || visibleRect.height < height;
                 Uncovered = owner.uncoveredBlocks;
@@ -939,6 +965,12 @@ namespace FractalVisio.Rendering
             }
 
             public FractalCpuRenderer Owner { get; }
+
+            /// <summary>Which fractal to evaluate. The renderer never looks inside it.</summary>
+            public IFractalDefinition Definition { get; }
+
+            public FractalParameterSet Parameters { get; }
+
             public Color32[] Frame { get; }
             public int Width { get; }
             public int Height { get; }

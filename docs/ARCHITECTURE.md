@@ -36,7 +36,7 @@ Core ──▶ (никого)
 Rendering ──▶ Core
 Fractals ──▶ Core                 (определения фракталов и ядра)
 Gestures ──▶ Core
-App ──▶ Core, Rendering, Fractals
+App ──▶ Core, Rendering            (фракталы видит только через IFractalDefinition)
 UI ──▶ Core, App
 Modules ──▶ Core, App
 Bootstrap ──▶ всё вышеперечисленное
@@ -148,8 +148,8 @@ public interface IFractalDefinition
     double GpuMinimumScale { get; }
     void BindMaterial(Material material, in FractalParameterSet parameters);
 
-    // CPU: возвращает уже специализированный по типу ядра проход
-    CpuPassRunner CreateCpuPass(PrecisionTier tier, in FractalParameterSet parameters);
+    // CPU: вызывает host.Run / host.RunExtended ровно один раз, отдавая свой семплер
+    void RunCpuPass(ICpuPassHost host, in FractalParameterSet parameters, bool extendedPrecision);
 }
 ```
 
@@ -194,14 +194,19 @@ public interface IEscapeSamplerDD
     int Sample(in DoubleDouble cx, in DoubleDouble cy, int maxIterations, CancellationToken token);
 }
 
-public delegate void CpuPassRunner(in CpuPassContext context);   // один проход по полосе
-
-public static class ProgressivePass
+// Рендерер реализует это и передаёт определению; определение зовёт обратно со своей
+// структурой. Обобщённый визитёр — нужен ровно затем, чтобы горячий цикл остался мономорфным.
+public interface ICpuPassHost
 {
-    public static CpuPassRunner Create<TSampler>(TSampler sampler)
-        where TSampler : struct, IEscapeSamplerD;      // + перегрузка для DD
+    void Run<TSampler>(TSampler sampler) where TSampler : struct, IEscapeSamplerD;
+    void RunExtended<TSampler>(TSampler sampler) where TSampler : struct, IEscapeSamplerDD;
 }
 ```
+
+Почему callback, а не «определение возвращает делегат»: тип семплера известен только фракталу,
+а цикл прохода живёт в рендерере. Обратный вызов — единственный способ дать компилятору
+инстанцировать цикл по конкретному типу, не заставляя `Rendering` знать про `Fractals`. Цена —
+один виртуальный вызов на рендер, дальше только специализированный код.
 
 Прогрессивная сетка (шаги 16→1), разбиение на полосы, отмена, публикация кадра — всё это
 остаётся в `Rendering` **один раз** и не дублируется по фракталам. Фрактал реализует
@@ -434,11 +439,12 @@ public sealed class AppServices
 1. `Assets/Scripts/Fractals/BurningShip/BurningShipSamplers.cs` — структуры
    `BurningShipSamplerD` / `BurningShipSamplerDD` с телом итерации.
 2. `Assets/Scripts/Fractals/BurningShip/BurningShipDefinition.cs` — `Id`, `DisplayName`,
-   `DefaultView`, дескрипторы параметров, `CreateCpuPass`, `BindMaterial`.
+   `DefaultView`, дескрипторы параметров, `RunCpuPass`, `BindMaterial`.
 3. `Assets/Shaders/BurningShip.shader` — `#include "Common/FractalCommon.hlsl"`, только
    функция итерации.
 
-Плюс asset `Assets/Settings/Fractals/BurningShip.asset` и строка в `FractalCatalog`.
+Плюс одна строка в массиве `FractalCatalog.Definitions`. Ассеты-определения появятся вместе с
+меню выбора фрактала; интерфейс, который видит остальной код, от этого не изменится.
 Меню выбора фрактала, экран настроек, сохранение состояния, скриншоты и палитры
 начинают работать автоматически.
 
@@ -459,7 +465,7 @@ public sealed class AppServices
 | 1 | ✅ **Сделано.** `ViewState`, `Viewport`, `ViewNavigator` в `Core/View`; вся математика жестов ушла из контроллера, `Screen.*` остался только в сборке `DisplayViewport` и размеров текстур | низкий |
 | 2 | ✅ **Сделано.** Оверскан (см. 4.7): поля в `Viewport`, `ResolveCpuViewport`, `ViewNavigator.ForViewport`, `uvRect` в контроллере, маска непокрытых блоков с приоритетной волной в первом проходе, поля только в грубых проходах. Не делалось: билинейная репроекция (необязательна) | средний |
 | 3 | ✅ **Сделано.** `FractalSession` (владелец вида и `RenderQuality`, события `SessionChange`), `AppServices`, `IAppModule`, `RenderStatus`/`IRenderStatusSource`; `FractalSceneController` разделён на `FractalPresenter` (обычный класс, только рендер) и `AppBootstrap` (MonoBehaviour сцены, композиционный корень); HUD вынесен в `HudModule` | средний |
-| 4 | `IFractalDefinition` + `MandelbrotDefinition`; обобщённый `ProgressivePass<TSampler>`; `FractalCommon.hlsl` | средний — здесь трогается горячий цикл, замерить FPS до/после |
+| 4 | ✅ **Сделано.** `IFractalDefinition`, `ICpuPassHost`, `IEscapeSamplerD/DD`, `FractalParameterSet`/дескрипторы, `PrecisionTier`; `MandelbrotDefinition` + два семплера-структуры + `FractalCatalog`; CPU-проход обобщён по типу семплера, GPU-рендерер берёт шейдер и уникформы у определения; `Shaders/Common/FractalCommon.hlsl` | средний |
 | 5 | Буфер итераций + `IColorMapper` + `PaletteAsset`; палитры как ассеты | средний |
 | 6 | `IUiRouter`, `HudScreen`, `MainMenuScreen`, `SettingsScreen` c авто-генерацией по дескрипторам | низкий |
 | 7 | Модули: `ScreenshotModule`, `StateStoreModule`, `BookmarksModule` | низкий |
