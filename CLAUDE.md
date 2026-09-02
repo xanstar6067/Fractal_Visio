@@ -42,3 +42,17 @@ These instructions are specific to this Windows PC and this Unity project.
 - Before any scene mutation, confirm the active scene and intended target through Pipeline.
 - After requested changes, verify through Pipeline and report whether the active scene is dirty; save only when requested or clearly part of the task.
 - Warnings alone do not imply Safe Mode. Diagnose using structured Pipeline output and actual `error CS####` lines.
+
+## Rendering notes
+
+- The CPU fractal kernel (`Assets\Scripts\Fractal\FractalCpuKernels.cs`) runs on plain
+  managed `Parallel.ForEach` over horizontal bands, coarse-to-fine (steps 16 -> 1). This
+  is a deliberate interim choice: it matches the WPF prototype, keeps `decimal`/`double`
+  math available, and adds no packages.
+- **Future improvement:** move the per-pixel escape/delta iteration into Burst + Unity.Jobs
+  (`com.unity.burst`, `com.unity.collections`, `com.unity.mathematics`) as an
+  `IJobParallelFor` over a `NativeArray<Color32>`, scheduled per progressive pass.
+  Expected ~5-10x on the CPU path. Keep the perturbation reference orbit in managed code
+  (`decimal` is not Burst-compatible); only the `double`/`float` delta loop goes into the job.
+- GPU stays fp32-only by decision (deep-zoom perturbation on the GPU was unstable in Unity);
+  deep zoom is CPU-only.

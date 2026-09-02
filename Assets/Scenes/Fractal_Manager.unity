@@ -429,11 +429,11 @@ MonoBehaviour:
   targetImage: {fileID: 2044567330}
   scaleValueText: {fileID: 555555555555555557}
   computeBackendText: {fileID: 666666666666666663}
+  hudFontSize: 110
   interactionIterations: 96
   settledIterations: 320
   maximumIterations: 2048
   settleDelay: 0.15
-  overrideTileSize: 0
   gpuMinimumScale: 0.00025
   extendedPrecisionScale: 0.000000000001
   minimumScale: 1e-24

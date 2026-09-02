@@ -24,12 +24,14 @@ namespace FractalVisio.Fractal
         [SerializeField] private Text scaleValueText;
         [SerializeField] private Text computeBackendText;
 
+        [Header("Debug HUD")]
+        [SerializeField, Min(8)] private int hudFontSize = 110;
+
         [Header("Quality")]
         [SerializeField, Min(16)] private int interactionIterations = 96;
         [SerializeField, Min(32)] private int settledIterations = 320;
         [SerializeField, Min(64)] private int maximumIterations = 2048;
         [SerializeField, Min(0.05f)] private float settleDelay = 0.18f;
-        [SerializeField, Min(32)] private int overrideTileSize;
 
         [Header("Precision")]
         [SerializeField] private double gpuMinimumScale = 2.5e-4d;
@@ -55,8 +57,7 @@ namespace FractalVisio.Fractal
 
         private RenderTexture interactiveGpuTexture;
         private RenderTexture settledGpuTexture;
-        private Texture2D interactiveCpuTexture;
-        private Texture2D settledCpuTexture;
+        private Texture2D cpuTexture;
 
         public double CurrentScale => view.scale.AsDouble;
         public double CurrentCenterX => view.x.AsDouble;
@@ -261,14 +262,14 @@ namespace FractalVisio.Fractal
         private void RequestRender(bool interacting)
         {
             var scale = view.scale.AsDouble;
-            var iterations = ResolveIterations(scale, interacting);
-            view.iterations = iterations;
             currentBackend = gpuRenderer != null && gpuRenderer.IsAvailable && scale >= gpuMinimumScale
                 ? RenderBackend.GpuFloat
                 : RenderBackend.Cpu;
 
             if (currentBackend == RenderBackend.GpuFloat)
             {
+                var iterations = ResolveIterations(scale, interacting);
+                view.iterations = iterations;
                 cpuRenderer?.Invalidate();
                 var target = interacting ? interactiveGpuTexture : settledGpuTexture;
                 gpuRenderer.Render(view, iterations, target);
@@ -276,11 +277,14 @@ namespace FractalVisio.Fractal
             }
             else
             {
-                var target = interacting ? interactiveCpuTexture : settledCpuTexture;
+                // CPU keeps the full (settled) iteration budget even while interacting.
+                // A gesture is kept responsive by the coarse-pass cap, not by fewer
+                // iterations: too small a budget paints large "interior" areas black.
+                var iterations = ResolveIterations(scale, false);
+                view.iterations = iterations;
                 var useExtendedPrecision = scale < extendedPrecisionScale;
-                var tileSize = overrideTileSize > 0 ? overrideTileSize : profile.TileSize;
-                cpuRenderer.Request(target, view, iterations, tileSize, useExtendedPrecision);
-                targetImage.texture = target;
+                cpuRenderer.Request(cpuTexture, view, iterations, useExtendedPrecision, interacting);
+                targetImage.texture = cpuTexture;
             }
 
             targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
@@ -308,9 +312,19 @@ namespace FractalVisio.Fractal
             }
 
             nextHudUpdateTime = Time.unscaledTime + 0.1f;
+
+            var scale = view.scale.AsDouble;
+            var reference = FractalView.Default.scale.AsDouble;
+            var zoom = scale > 0d ? reference / scale : 0d;
+
             if (scaleValueText != null)
             {
-                scaleValueText.text = "Масштаб  " + view.scale.AsDouble.ToString("0.00e+0", CultureInfo.InvariantCulture);
+                // Full-precision centre so a view can be reproduced on the PC via SetView().
+                scaleValueText.text = string.Concat(
+                    "scale  ", scale.ToString("0.000000e+00", CultureInfo.InvariantCulture), "\n",
+                    "zoom   x", zoom.ToString("0.###e+00", CultureInfo.InvariantCulture), "\n",
+                    "X  ", view.x.AsDecimal.ToString("G29", CultureInfo.InvariantCulture), "\n",
+                    "Y  ", view.y.AsDecimal.ToString("G29", CultureInfo.InvariantCulture));
             }
 
             if (computeBackendText == null)
@@ -318,17 +332,32 @@ namespace FractalVisio.Fractal
                 return;
             }
 
+            string engineLine;
+            string detailLine;
             if (currentBackend == RenderBackend.GpuFloat)
             {
-                computeBackendText.text = "GPU · fp32" + (interacting ? " · интерактивно" : string.Empty);
-                return;
+                engineLine = "GPU fp32" + (interacting ? "  interactive" : string.Empty);
+                detailLine = "iter " + view.iterations;
+            }
+            else
+            {
+                var precision = scale < extendedPrecisionScale ? "double-double" : "fp64";
+                engineLine = "CPU Parallel  " + precision + (interacting ? "  interactive" : string.Empty);
+                if (cpuRenderer != null && cpuRenderer.IsBusy)
+                {
+                    detailLine = string.Concat(
+                        "iter ", view.iterations.ToString(CultureInfo.InvariantCulture),
+                        "  pass ", cpuRenderer.CurrentPass.ToString(CultureInfo.InvariantCulture),
+                        "/", cpuRenderer.PassCount.ToString(CultureInfo.InvariantCulture),
+                        "  ", Mathf.RoundToInt(cpuRenderer.Progress * 100f).ToString(CultureInfo.InvariantCulture), "%");
+                }
+                else
+                {
+                    detailLine = "iter " + view.iterations + "  done";
+                }
             }
 
-            var precision = view.scale.AsDouble < extendedPrecisionScale ? "double-double" : "fp64";
-            var progress = cpuRenderer != null && cpuRenderer.IsBusy
-                ? " · " + Mathf.RoundToInt(cpuRenderer.Progress * 100f) + "%"
-                : string.Empty;
-            computeBackendText.text = "CPU Parallel · " + precision + progress;
+            computeBackendText.text = engineLine + "\n" + detailLine;
         }
 
         private void RecreateTextures()
@@ -346,8 +375,7 @@ namespace FractalVisio.Fractal
 
             interactiveGpuTexture = CreateRenderTexture(interactiveSize, "Fractal GPU Interactive");
             settledGpuTexture = CreateRenderTexture(settledSize, "Fractal GPU Settled");
-            interactiveCpuTexture = CreateCpuTexture(interactiveSize, "Fractal CPU Interactive");
-            settledCpuTexture = CreateCpuTexture(settledSize, "Fractal CPU Settled");
+            cpuTexture = CreateCpuTexture(settledSize, "Fractal CPU");
             hasRequestedView = false;
         }
 
@@ -355,8 +383,7 @@ namespace FractalVisio.Fractal
         {
             ReleaseRenderTexture(ref interactiveGpuTexture);
             ReleaseRenderTexture(ref settledGpuTexture);
-            DestroyTexture(ref interactiveCpuTexture);
-            DestroyTexture(ref settledCpuTexture);
+            DestroyTexture(ref cpuTexture);
         }
 
         private static RenderTexture CreateRenderTexture(Vector2Int size, string textureName)
@@ -426,16 +453,16 @@ namespace FractalVisio.Fractal
 
             if (scaleValueText == null)
             {
-                scaleValueText = CreateHudText("Scale", new Vector2(-24f, -24f));
+                scaleValueText = CreateHudText("Scale", new Vector2(24f, -24f));
             }
 
             if (computeBackendText == null)
             {
-                computeBackendText = CreateHudText("Backend", new Vector2(-24f, -62f));
+                computeBackendText = CreateHudText("Backend", new Vector2(24f, -24f - 4.6f * hudFontSize));
             }
 
-            ConfigureHudText(scaleValueText, new Vector2(-24f, -24f));
-            ConfigureHudText(computeBackendText, new Vector2(-24f, -62f));
+            ConfigureHudText(scaleValueText, new Vector2(24f, -24f));
+            ConfigureHudText(computeBackendText, new Vector2(24f, -24f - 4.6f * hudFontSize));
         }
 
         private Text CreateHudText(string objectName, Vector2 anchoredPosition)
@@ -448,23 +475,47 @@ namespace FractalVisio.Fractal
             return text;
         }
 
-        private static void ConfigureHudText(Text text, Vector2 anchoredPosition)
+        private void ConfigureHudText(Text text, Vector2 anchoredPosition)
         {
             if (text == null)
             {
                 return;
             }
 
+            // The scene's Text objects point at the old built-in Arial (removed in
+            // Unity 6), so they render nothing. Force a font that ships at runtime.
+            if (text.font == null || text.font.name != "LegacyRuntime")
+            {
+                var runtimeFont = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                if (runtimeFont != null)
+                {
+                    text.font = runtimeFont;
+                }
+            }
+
             var rect = text.rectTransform;
-            rect.anchorMin = Vector2.one;
-            rect.anchorMax = Vector2.one;
-            rect.pivot = Vector2.one;
+            rect.anchorMin = new Vector2(0f, 1f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 1f);
             rect.anchoredPosition = anchoredPosition;
-            rect.sizeDelta = new Vector2(460f, 34f);
-            text.alignment = TextAnchor.MiddleRight;
-            text.fontSize = 24;
+            rect.sizeDelta = new Vector2(3600f, 8f * hudFontSize);
+            text.alignment = TextAnchor.UpperLeft;
+            text.fontSize = Mathf.Max(8, hudFontSize);
+            text.fontStyle = FontStyle.Bold;
+            text.horizontalOverflow = HorizontalWrapMode.Overflow;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
             text.color = Color.white;
             text.raycastTarget = false;
+
+            // High-contrast edge so the readout stays legible over any fractal colour.
+            var outline = text.GetComponent<Outline>();
+            if (outline == null)
+            {
+                outline = text.gameObject.AddComponent<Outline>();
+            }
+
+            outline.effectColor = Color.black;
+            outline.effectDistance = new Vector2(4f, -4f);
         }
 
         private static void Stretch(RectTransform rect)

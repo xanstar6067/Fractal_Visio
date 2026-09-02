@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -7,26 +6,49 @@ using UnityEngine;
 namespace FractalVisio.Fractal
 {
     /// <summary>
-    /// Progressive CPU renderer. A small tile is calculated on background
-    /// workers, so neither a deep zoom nor cancellation can stall Unity's main
-    /// thread. Parallel.For adapts naturally to the processor count.
+    /// Progressive full-frame CPU renderer. Every pass covers the whole image at
+    /// once on background workers, going coarse to fine: pass 0 paints one sample
+    /// per 16x16 block, then 8x8, 4x4, 2x2 and finally every pixel. Work is split
+    /// into horizontal bands ordered from the centre outward, so the middle of the
+    /// screen sharpens first. A shared buffer is uploaded to the texture a few
+    /// times per second while the render runs, then once more when it settles.
+    ///
+    /// NOTE (see CLAUDE.md "Rendering notes"): the kernel is deliberately plain
+    /// managed <see cref="Parallel.ForEach"/> for now, matching the WPF prototype
+    /// and avoiding new packages. The planned speed-up is Burst + Unity.Jobs with
+    /// the per-pixel iteration moved into an IJobParallelFor.
     /// </summary>
     internal sealed class FractalCpuRenderer : IDisposable
     {
         private const int PaletteResolution = 256;
+        private const int InteractivePassCount = 2;      // steps 16, 8 while the view keeps moving
+        private const double UploadIntervalSeconds = 0.04d;
+
+        internal static readonly int[] StepPlan = { 16, 8, 4, 2, 1 };
 
         private readonly Color32[] palette;
-        private readonly Dictionary<int, Color32[]> tileBuffers = new();
         private readonly int workerCount;
-        private CancellationTokenSource tileCancellation;
-        private Task<TileResult> tileTask;
-        private bool discardActiveFrame;
-        private bool hasQueuedFrame;
-        private FrameRequest activeFrame;
-        private FrameRequest queuedFrame;
-        private RectInt activeRect;
-        private int nextTileIndex;
-        private int tilesSinceApply;
+
+        private Color32[] frame = Array.Empty<Color32>();
+        private int frameWidth;
+        private int frameHeight;
+
+        private Texture2D target;
+        private Task renderTask;
+        private CancellationTokenSource cancellation;
+
+        private FrameRequest queued;
+        private FrameRequest activeRequest;
+        private bool hasQueued;
+        private volatile bool renderActive;
+
+        private volatile bool frameDirty;
+        private volatile int passCursor;
+        private volatile int passFloorIndex;
+        private volatile int passCeilingIndex;
+        private long samplesDone;
+        private long samplesTotal;
+        private double lastUploadTime;
 
         public FractalCpuRenderer(Gradient gradient)
         {
@@ -40,271 +62,433 @@ namespace FractalVisio.Fractal
             workerCount = Math.Max(1, SystemInfo.processorCount - 1);
         }
 
-        public bool IsBusy => tileTask != null || hasQueuedFrame || activeFrame.Target != null;
+        public bool IsBusy => renderActive || hasQueued;
         public float Progress { get; private set; }
-        public bool UsesExtendedPrecision => activeFrame.ExtendedPrecision;
+        public bool UsesExtendedPrecision => activeRequest.ExtendedPrecision;
+        public int PassCount => Mathf.Max(1, passCeilingIndex - passFloorIndex);
+        public int CurrentPass => Mathf.Clamp(passCursor - passFloorIndex + 1, 1, PassCount);
 
-        public void Request(Texture2D target, in FractalView view, int iterations, int tileSize, bool extendedPrecision)
+        public void Request(Texture2D texture, in FractalView view, int iterations, bool extendedPrecision, bool interacting)
         {
-            queuedFrame = new FrameRequest(
-                target,
-                view,
-                Mathf.Max(1, iterations),
-                Mathf.Max(32, tileSize),
-                extendedPrecision);
-            hasQueuedFrame = true;
+            queued = new FrameRequest(texture, view, Mathf.Max(1, iterations), extendedPrecision, interacting);
+            hasQueued = true;
 
-            if (tileTask != null)
+            if (renderActive)
             {
-                discardActiveFrame = true;
-                tileCancellation?.Cancel();
+                // Update() picks up the queued frame once the running task unwinds.
+                cancellation?.Cancel();
                 return;
             }
 
-            StartQueuedFrame();
+            StartQueued();
         }
 
         /// <summary>Poll once per Update. Returns true when visible pixels were uploaded.</summary>
         public bool Update()
         {
-            if (tileTask == null)
+            var uploaded = false;
+
+            if (renderActive && renderTask != null && renderTask.IsCompleted)
             {
-                if (hasQueuedFrame)
+                DrainTask();
+                renderTask = null;
+                cancellation?.Dispose();
+                cancellation = null;
+                renderActive = false;
+
+                if (!hasQueued)
                 {
-                    StartQueuedFrame();
+                    UploadFrame();
+                    Progress = 1f;
+                    uploaded = true;
                 }
-
-                return false;
             }
 
-            if (!tileTask.IsCompleted)
+            if (!renderActive && hasQueued)
             {
-                return false;
+                StartQueued();
             }
 
-            TileResult result;
-            try
+            if (renderActive && frameDirty)
             {
-                result = tileTask.GetAwaiter().GetResult();
-            }
-            catch (OperationCanceledException)
-            {
-                result = new TileResult(null, true, null);
-            }
-            catch (Exception exception)
-            {
-                result = new TileResult(null, false, exception.ToString());
+                var now = Time.realtimeSinceStartupAsDouble;
+                if (now - lastUploadTime >= UploadIntervalSeconds)
+                {
+                    lastUploadTime = now;
+                    UploadFrame();
+                    uploaded = true;
+                }
             }
 
-            tileTask = null;
-            tileCancellation?.Dispose();
-            tileCancellation = null;
-
-            if (!string.IsNullOrEmpty(result.Error))
-            {
-                Debug.LogError("CPU fractal tile failed: " + result.Error);
-                activeFrame = default;
-                discardActiveFrame = false;
-                StartQueuedFrame();
-                return false;
-            }
-
-            if (discardActiveFrame || result.Cancelled)
-            {
-                discardActiveFrame = false;
-                activeFrame = default;
-                StartQueuedFrame();
-                return false;
-            }
-
-            activeFrame.Target.SetPixels32(
-                activeRect.x,
-                activeRect.y,
-                activeRect.width,
-                activeRect.height,
-                result.Pixels);
-            nextTileIndex++;
-            tilesSinceApply++;
-
-            var tileCount = GetTileCount(activeFrame);
-            var frameComplete = nextTileIndex >= tileCount;
-            var shouldUpload = frameComplete || tilesSinceApply >= 2;
-            if (shouldUpload)
-            {
-                activeFrame.Target.Apply(false, false);
-                tilesSinceApply = 0;
-            }
-
-            Progress = tileCount > 0 ? nextTileIndex / (float)tileCount : 1f;
-
-            if (hasQueuedFrame)
-            {
-                activeFrame = default;
-                StartQueuedFrame();
-            }
-            else if (frameComplete)
-            {
-                activeFrame = default;
-            }
-            else
-            {
-                ScheduleCurrentTile();
-            }
-
-            return shouldUpload;
+            return uploaded;
         }
 
         public void Invalidate()
         {
-            hasQueuedFrame = false;
-            if (tileTask != null)
+            hasQueued = false;
+            if (renderActive)
             {
-                discardActiveFrame = true;
-                tileCancellation?.Cancel();
+                cancellation?.Cancel();
             }
             else
             {
-                activeFrame = default;
                 Progress = 0f;
             }
         }
 
         public void CompletePendingWork()
         {
-            activeFrame = default;
-            hasQueuedFrame = false;
+            hasQueued = false;
+            target = null;
             Progress = 0f;
-
-            if (tileTask != null)
+            if (renderActive)
             {
-                discardActiveFrame = true;
-                tileCancellation?.Cancel();
-            }
-            else
-            {
-                discardActiveFrame = false;
+                cancellation?.Cancel();
             }
         }
 
         public void Dispose()
         {
-            CompletePendingWork();
-            if (tileTask != null)
+            hasQueued = false;
+            target = null;
+
+            if (cancellation != null)
             {
-                var cancellationToDispose = tileCancellation;
-                tileTask.ContinueWith(
-                    _ => cancellationToDispose?.Dispose(),
-                    CancellationToken.None,
-                    TaskContinuationOptions.ExecuteSynchronously,
-                    TaskScheduler.Default);
-                tileTask = null;
-                tileCancellation = null;
+                cancellation.Cancel();
+                var toDispose = cancellation;
+                var task = renderTask;
+                if (task != null)
+                {
+                    task.ContinueWith(
+                        _ => toDispose.Dispose(),
+                        CancellationToken.None,
+                        TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+                }
+                else
+                {
+                    toDispose.Dispose();
+                }
             }
 
-            tileBuffers.Clear();
+            cancellation = null;
+            renderTask = null;
+            renderActive = false;
+            frame = Array.Empty<Color32>();
+            frameWidth = 0;
+            frameHeight = 0;
         }
 
-        private void StartQueuedFrame()
+        internal void SetPassCursor(int index) => passCursor = index;
+        internal void MarkFrameDirty() => frameDirty = true;
+        internal void AddSamples(long count) => Interlocked.Add(ref samplesDone, count);
+
+        private void StartQueued()
         {
-            if (!hasQueuedFrame || tileTask != null)
+            if (!hasQueued)
             {
                 return;
             }
 
-            activeFrame = queuedFrame;
-            hasQueuedFrame = false;
-            discardActiveFrame = false;
-            nextTileIndex = 0;
-            tilesSinceApply = 0;
+            activeRequest = queued;
+            hasQueued = false;
+            target = activeRequest.Target;
+            if (target == null)
+            {
+                renderActive = false;
+                Progress = 0f;
+                return;
+            }
+
+            EnsureFrameBuffer(target.width, target.height);
+
+            var minDim = Math.Min(frameWidth, frameHeight);
+            var floor = 0;
+            while (floor < StepPlan.Length - 1 && StepPlan[floor] > Math.Max(1, minDim / 4))
+            {
+                floor++;
+            }
+
+            // Only the double-double range is heavy enough to need a cap during a
+            // gesture. Plain fp64 ("medium depth") renders every pass live.
+            var capPasses = activeRequest.Interacting && activeRequest.ExtendedPrecision;
+            var ceiling = capPasses
+                ? Math.Min(StepPlan.Length, floor + InteractivePassCount)
+                : StepPlan.Length;
+
+            passFloorIndex = floor;
+            passCeilingIndex = ceiling;
+            passCursor = floor;
+            samplesDone = 0;
+            samplesTotal = 0;
+            for (var p = floor; p < ceiling; p++)
+            {
+                samplesTotal += CountNewSamples(frameWidth, frameHeight, StepPlan[p], p == floor);
+            }
+
             Progress = 0f;
-            ScheduleCurrentTile();
+            frameDirty = true;              // push the placeholder / previous image right away
+            lastUploadTime = 0d;
+
+            cancellation = new CancellationTokenSource();
+            var token = cancellation.Token;
+            var job = new RenderJob(this, frame, frameWidth, frameHeight, activeRequest, workerCount, floor, ceiling);
+            renderActive = true;
+            renderTask = Task.Run(() => RenderProgressive(job, token), token);
         }
 
-        private void ScheduleCurrentTile()
-        {
-            if (activeFrame.Target == null)
-            {
-                activeFrame = default;
-                return;
-            }
-
-            activeRect = GetTileRect(activeFrame, nextTileIndex);
-            var length = activeRect.width * activeRect.height;
-            if (!tileBuffers.TryGetValue(length, out var pixels))
-            {
-                pixels = new Color32[length];
-                tileBuffers.Add(length, pixels);
-            }
-
-            var request = new TileRequest(
-                pixels,
-                palette,
-                activeFrame.Target.width,
-                activeFrame.Target.height,
-                activeRect,
-                activeFrame.View,
-                activeFrame.Iterations,
-                activeFrame.ExtendedPrecision,
-                workerCount);
-
-            tileCancellation = new CancellationTokenSource();
-            var token = tileCancellation.Token;
-            tileTask = Task.Run(() => CalculateTile(request, token), token);
-        }
-
-        private static TileResult CalculateTile(TileRequest request, CancellationToken token)
+        private void DrainTask()
         {
             try
             {
-                var options = new ParallelOptions
+                renderTask.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (AggregateException aggregate)
+            {
+                foreach (var inner in aggregate.InnerExceptions)
                 {
-                    CancellationToken = token,
-                    MaxDegreeOfParallelism = request.WorkerCount
-                };
-
-                Parallel.For(0, request.Rect.height, options, localY =>
-                {
-                    var pixelY = request.Rect.y + localY;
-                    for (var localX = 0; localX < request.Rect.width; localX++)
+                    if (inner is OperationCanceledException)
                     {
-                        if ((localX & 15) == 0)
+                        continue;
+                    }
+
+                    Debug.LogError("CPU fractal render failed: " + inner);
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError("CPU fractal render failed: " + exception);
+            }
+        }
+
+        private void UploadFrame()
+        {
+            if (target == null || target.width != frameWidth || target.height != frameHeight)
+            {
+                return;
+            }
+
+            // Workers may still be writing individual pixels; a torn Color32 shows a
+            // single stale pixel for one interval and is corrected on the next upload.
+            target.SetPixels32(frame);
+            target.Apply(false, false);
+            frameDirty = false;
+
+            var done = Interlocked.Read(ref samplesDone);
+            Progress = samplesTotal > 0
+                ? Mathf.Clamp01((float)(done / (double)samplesTotal))
+                : (renderActive ? 0f : 1f);
+        }
+
+        private void EnsureFrameBuffer(int width, int height)
+        {
+            var required = width * height;
+            if (frameWidth == width && frameHeight == height && frame.Length == required)
+            {
+                return; // keep the previous image as a placeholder under the new render
+            }
+
+            var previous = frame;
+            var previousWidth = frameWidth;
+            var previousHeight = frameHeight;
+            frame = new Color32[required];
+
+            if (previous.Length == previousWidth * previousHeight && previousWidth > 0 && previousHeight > 0)
+            {
+                ResampleNearest(previous, previousWidth, previousHeight, frame, width, height);
+            }
+            else
+            {
+                var fill = new Color32(3, 5, 12, 255);
+                for (var i = 0; i < frame.Length; i++)
+                {
+                    frame[i] = fill;
+                }
+            }
+
+            frameWidth = width;
+            frameHeight = height;
+        }
+
+        private static void ResampleNearest(Color32[] src, int srcWidth, int srcHeight, Color32[] dst, int dstWidth, int dstHeight)
+        {
+            for (var y = 0; y < dstHeight; y++)
+            {
+                var sy = (int)((long)y * srcHeight / dstHeight);
+                if (sy >= srcHeight)
+                {
+                    sy = srcHeight - 1;
+                }
+
+                var dstRow = y * dstWidth;
+                var srcRow = sy * srcWidth;
+                for (var x = 0; x < dstWidth; x++)
+                {
+                    var sx = (int)((long)x * srcWidth / dstWidth);
+                    if (sx >= srcWidth)
+                    {
+                        sx = srcWidth - 1;
+                    }
+
+                    dst[dstRow + x] = src[srcRow + sx];
+                }
+            }
+        }
+
+        private static long CountNewSamples(int width, int height, int step, bool first)
+        {
+            var columns = (width + step - 1L) / step;
+            var rows = (height + step - 1L) / step;
+            var total = columns * rows;
+            if (first)
+            {
+                return total;
+            }
+
+            var coarse = step << 1;
+            var coarseColumns = (width + coarse - 1L) / coarse;
+            var coarseRows = (height + coarse - 1L) / coarse;
+            return total - coarseColumns * coarseRows;
+        }
+
+        private static RectInt[] BuildBands(int width, int height, int desiredCount, int align)
+        {
+            // Band boundaries must land on the coarsest sample grid, otherwise the
+            // per-pass "already computed" skip in RenderProgressive drifts out of phase.
+            var safeAlign = Mathf.Max(1, align);
+            var count = Mathf.Clamp(desiredCount, 1, Mathf.Max(1, height));
+            var raw = Mathf.Max(1, Mathf.CeilToInt(height / (float)count));
+            var bandHeight = ((raw + safeAlign - 1) / safeAlign) * safeAlign;
+            var actual = Mathf.CeilToInt(height / (float)bandHeight);
+            var bands = new RectInt[actual];
+            for (var i = 0; i < actual; i++)
+            {
+                var y0 = i * bandHeight;
+                var y1 = Mathf.Min(height, y0 + bandHeight);
+                bands[i] = new RectInt(0, y0, width, y1 - y0);
+            }
+
+            var mid = height * 0.5f;
+            Array.Sort(bands, (a, b) =>
+            {
+                var da = Mathf.Abs((a.yMin + a.yMax) * 0.5f - mid);
+                var db = Mathf.Abs((b.yMin + b.yMax) * 0.5f - mid);
+                return da.CompareTo(db);
+            });
+            return bands;
+        }
+
+        private static void RenderProgressive(RenderJob job, CancellationToken token)
+        {
+            var bands = BuildBands(job.Width, job.Height, job.Workers * 3, StepPlan[0]);
+            var options = new ParallelOptions
+            {
+                CancellationToken = token,
+                MaxDegreeOfParallelism = job.Workers
+            };
+
+            for (var p = job.PassFloor; p < job.PassCeiling; p++)
+            {
+                token.ThrowIfCancellationRequested();
+                job.Owner.SetPassCursor(p);
+
+                var step = StepPlan[p];
+                var coarse = step << 1;
+                var first = p == job.PassFloor;
+
+                Parallel.ForEach(bands, options, band =>
+                {
+                    long produced = 0;
+                    for (var by = band.yMin; by < band.yMax; by += step)
+                    {
+                        if ((by & 31) == 0)
                         {
                             token.ThrowIfCancellationRequested();
                         }
 
-                        var pixelX = request.Rect.x + localX;
-                        var normalizedX = (((pixelX + 0.5d) / request.TargetWidth) - 0.5d) * request.Aspect;
-                        var normalizedY = ((pixelY + 0.5d) / request.TargetHeight) - 0.5d;
-
-                        int iteration;
-                        if (request.ExtendedPrecision)
+                        var rowOnCoarse = !first && (by % coarse == 0);
+                        for (var bx = 0; bx < job.Width; bx += step)
                         {
-                            var cx = DoubleDouble.Add(request.CenterX, DoubleDouble.Multiply(request.Scale, normalizedX));
-                            var cy = DoubleDouble.Add(request.CenterY, DoubleDouble.Multiply(request.Scale, normalizedY));
-                            iteration = EvaluateExtended(cx, cy, request.MaxIterations, token);
-                        }
-                        else
-                        {
-                            var scale = request.Scale.ToDouble();
-                            var cx = request.CenterX.ToDouble() + scale * normalizedX;
-                            var cy = request.CenterY.ToDouble() + scale * normalizedY;
-                            iteration = EvaluateDouble(cx, cy, request.MaxIterations, token);
-                        }
+                            if (rowOnCoarse && (bx % coarse == 0))
+                            {
+                                continue; // this sample was already computed in a coarser pass
+                            }
 
-                        request.Pixels[localY * request.Rect.width + localX] =
-                            ResolveColor(iteration, request.MaxIterations, request.Palette);
+                            var sx = bx + (step >> 1);
+                            if (sx >= job.Width)
+                            {
+                                sx = job.Width - 1;
+                            }
+
+                            var sy = by + (step >> 1);
+                            if (sy >= job.Height)
+                            {
+                                sy = job.Height - 1;
+                            }
+
+                            var iteration = ComputeIteration(job, sx, sy, token);
+                            produced++;
+
+                            if (!job.TrustInterior && iteration >= job.MaxIterations)
+                            {
+                                // A budget-capped "did not escape" is unknown, not proven
+                                // interior. Keep whatever is already on screen (previous
+                                // frame / coarser pass) instead of stamping it black.
+                                continue;
+                            }
+
+                            var color = ResolveColor(iteration, job.MaxIterations, job.Palette);
+                            FillBlock(job.Frame, job.Width, job.Height, bx, by, step, color);
+                        }
                     }
-                });
 
-                return new TileResult(request.Pixels, false, null);
+                    job.Owner.AddSamples(produced);
+                    job.Owner.MarkFrameDirty();
+                });
             }
-            catch (OperationCanceledException)
+        }
+
+        private static int ComputeIteration(RenderJob job, int pixelX, int pixelY, CancellationToken token)
+        {
+            var normalizedX = (((pixelX + 0.5d) / job.Width) - 0.5d) * job.Aspect;
+            var normalizedY = ((pixelY + 0.5d) / job.Height) - 0.5d;
+
+            if (job.ExtendedPrecision)
             {
-                return new TileResult(request.Pixels, true, null);
+                var cx = DoubleDouble.Add(job.CenterX, DoubleDouble.Multiply(job.Scale, normalizedX));
+                var cy = DoubleDouble.Add(job.CenterY, DoubleDouble.Multiply(job.Scale, normalizedY));
+                return EvaluateExtended(cx, cy, job.MaxIterations, token);
             }
-            catch (Exception exception)
+
+            var doubleCx = job.CenterXDouble + job.ScaleDouble * normalizedX;
+            var doubleCy = job.CenterYDouble + job.ScaleDouble * normalizedY;
+            return EvaluateDouble(doubleCx, doubleCy, job.MaxIterations, token);
+        }
+
+        private static void FillBlock(Color32[] buffer, int width, int height, int originX, int originY, int step, Color32 color)
+        {
+            var x1 = originX + step;
+            if (x1 > width)
             {
-                return new TileResult(request.Pixels, false, exception.ToString());
+                x1 = width;
+            }
+
+            var y1 = originY + step;
+            if (y1 > height)
+            {
+                y1 = height;
+            }
+
+            for (var y = originY; y < y1; y++)
+            {
+                var row = y * width;
+                for (var x = originX; x < x1; x++)
+                {
+                    buffer[row + x] = color;
+                }
             }
         }
 
@@ -402,103 +586,76 @@ namespace FractalVisio.Fractal
             return (byte)(a + (b - a) * t + 0.5d);
         }
 
-        private static int GetTileCount(in FrameRequest request)
-        {
-            if (request.Target == null)
-            {
-                return 0;
-            }
-
-            var columns = (request.Target.width + request.TileSize - 1) / request.TileSize;
-            var rows = (request.Target.height + request.TileSize - 1) / request.TileSize;
-            return columns * rows;
-        }
-
-        private static RectInt GetTileRect(in FrameRequest request, int tileIndex)
-        {
-            var columns = (request.Target.width + request.TileSize - 1) / request.TileSize;
-            var column = tileIndex % columns;
-            var row = tileIndex / columns;
-            var x = column * request.TileSize;
-            var y = row * request.TileSize;
-            return new RectInt(
-                x,
-                y,
-                Mathf.Min(request.TileSize, request.Target.width - x),
-                Mathf.Min(request.TileSize, request.Target.height - y));
-        }
-
         private readonly struct FrameRequest
         {
-            public FrameRequest(Texture2D target, FractalView view, int iterations, int tileSize, bool extendedPrecision)
+            public FrameRequest(Texture2D target, FractalView view, int iterations, bool extendedPrecision, bool interacting)
             {
                 Target = target;
                 View = view;
                 Iterations = iterations;
-                TileSize = tileSize;
                 ExtendedPrecision = extendedPrecision;
+                Interacting = interacting;
             }
 
             public Texture2D Target { get; }
             public FractalView View { get; }
             public int Iterations { get; }
-            public int TileSize { get; }
             public bool ExtendedPrecision { get; }
+            public bool Interacting { get; }
         }
 
-        private readonly struct TileRequest
+        private sealed class RenderJob
         {
-            public TileRequest(
-                Color32[] pixels,
-                Color32[] palette,
-                int targetWidth,
-                int targetHeight,
-                RectInt rect,
-                FractalView view,
-                int maxIterations,
-                bool extendedPrecision,
-                int workerCount)
+            public RenderJob(
+                FractalCpuRenderer owner,
+                Color32[] frame,
+                int width,
+                int height,
+                in FrameRequest request,
+                int workers,
+                int passFloor,
+                int passCeiling)
             {
-                Pixels = pixels;
-                Palette = palette;
-                TargetWidth = targetWidth;
-                TargetHeight = targetHeight;
-                Rect = rect;
-                CenterX = DoubleDouble.FromDecimal(view.x.AsDecimal);
-                CenterY = DoubleDouble.FromDecimal(view.y.AsDecimal);
-                Scale = DoubleDouble.FromDecimal(view.scale.AsDecimal);
-                MaxIterations = maxIterations;
-                ExtendedPrecision = extendedPrecision;
-                WorkerCount = workerCount;
-                Aspect = targetWidth / (double)targetHeight;
+                Owner = owner;
+                Frame = frame;
+                Width = width;
+                Height = height;
+                Aspect = width / (double)height;
+                Palette = owner.palette;
+                CenterX = DoubleDouble.FromDecimal(request.View.x.AsDecimal);
+                CenterY = DoubleDouble.FromDecimal(request.View.y.AsDecimal);
+                Scale = DoubleDouble.FromDecimal(request.View.scale.AsDecimal);
+                CenterXDouble = CenterX.ToDouble();
+                CenterYDouble = CenterY.ToDouble();
+                ScaleDouble = Scale.ToDouble();
+                MaxIterations = request.Iterations;
+                ExtendedPrecision = request.ExtendedPrecision;
+                // Distrust "interior" only where a gesture forces a capped budget
+                // (deep double-double). Plain fp64 interaction paints real verdicts.
+                TrustInterior = !(request.Interacting && request.ExtendedPrecision);
+                Workers = workers;
+                PassFloor = passFloor;
+                PassCeiling = passCeiling;
             }
 
-            public Color32[] Pixels { get; }
+            public FractalCpuRenderer Owner { get; }
+            public Color32[] Frame { get; }
+            public int Width { get; }
+            public int Height { get; }
+            public double Aspect { get; }
             public Color32[] Palette { get; }
-            public int TargetWidth { get; }
-            public int TargetHeight { get; }
-            public RectInt Rect { get; }
             public DoubleDouble CenterX { get; }
             public DoubleDouble CenterY { get; }
             public DoubleDouble Scale { get; }
+            public double CenterXDouble { get; }
+            public double CenterYDouble { get; }
+            public double ScaleDouble { get; }
             public int MaxIterations { get; }
             public bool ExtendedPrecision { get; }
-            public int WorkerCount { get; }
-            public double Aspect { get; }
-        }
-
-        private readonly struct TileResult
-        {
-            public TileResult(Color32[] pixels, bool cancelled, string error)
-            {
-                Pixels = pixels;
-                Cancelled = cancelled;
-                Error = error;
-            }
-
-            public Color32[] Pixels { get; }
-            public bool Cancelled { get; }
-            public string Error { get; }
+            public bool TrustInterior { get; }
+            public int Workers { get; }
+            public int PassFloor { get; }
+            public int PassCeiling { get; }
         }
     }
 }
