@@ -265,6 +265,7 @@ namespace FractalVisio.App
                 var useExtendedPrecision = scale < extendedPrecisionScale;
                 cpuRenderer.Request(
                     cpuTexture,
+                    cpuViewport,
                     ViewNavigator.ForViewport(view, cpuViewport),
                     iterations,
                     useExtendedPrecision,

@@ -27,11 +27,28 @@ namespace FractalVisio.Rendering
 
         internal static readonly int[] StepPlan = { 16, 8, 4, 2, 1 };
 
+        // Cell of the "reprojection had no source pixel here" grid. Matches the coarsest step,
+        // so one flagged cell is exactly one first-pass sample block.
+        private const int UncoveredCell = 16;
+
+        // Passes at or above this step also cover the overscan margin; finer passes stay inside
+        // the visible rectangle. The margin is only ever seen mid-gesture, where a coarse but
+        // correct edge is enough, and refining it at every step would spend a quarter of the
+        // render on pixels nobody is looking at.
+        private const int MarginStepThreshold = 4;
+
         private readonly Color32[] palette;
         private readonly int workerCount;
 
         private Color32[] frame = Array.Empty<Color32>();
         private Color32[] reprojectScratch = Array.Empty<Color32>();
+
+        // One flag per UncoveredCell block, set when reprojection found no source pixel for it.
+        // Those blocks are the stretched edge: the first pass renders them before anything else,
+        // so a smear is replaced by real pixels in milliseconds instead of seconds.
+        private bool[] uncoveredBlocks = Array.Empty<bool>();
+        private int blockGridWidth;
+        private int blockGridHeight;
 
         // What the main thread actually uploads. The render worker copies `frame`
         // into it only between passes - i.e. when `frame` is a whole-image render
@@ -85,9 +102,15 @@ namespace FractalVisio.Rendering
         public int PassCount => Mathf.Max(1, passCeilingIndex - passFloorIndex);
         public int CurrentPass => Mathf.Clamp(passCursor - passFloorIndex + 1, 1, PassCount);
 
-        public void Request(Texture2D texture, in ViewState view, int iterations, bool extendedPrecision, bool interacting)
+        public void Request(
+            Texture2D texture,
+            in Viewport viewport,
+            in ViewState view,
+            int iterations,
+            bool extendedPrecision,
+            bool interacting)
         {
-            queued = new FrameRequest(texture, view, Mathf.Max(1, iterations), extendedPrecision, interacting);
+            queued = new FrameRequest(texture, viewport, view, Mathf.Max(1, iterations), extendedPrecision, interacting);
             hasQueued = true;
 
             if (renderActive)
@@ -252,6 +275,10 @@ namespace FractalVisio.Rendering
             {
                 ReprojectFrame(frameView, activeRequest.View);
             }
+            else
+            {
+                MarkEverythingUncovered();
+            }
 
             frameView = activeRequest.View;
             frameViewValid = true;
@@ -279,9 +306,12 @@ namespace FractalVisio.Rendering
             passCursor = floor;
             samplesDone = 0;
             samplesTotal = 0;
+            var visibleRect = ResolveVisibleRect(activeRequest.Viewport);
+            var fullRect = new RectInt(0, 0, frameWidth, frameHeight);
             for (var p = floor; p < ceiling; p++)
             {
-                samplesTotal += CountNewSamples(frameWidth, frameHeight, StepPlan[p], p == floor);
+                var region = StepPlan[p] >= MarginStepThreshold ? fullRect : visibleRect;
+                samplesTotal += CountNewSamples(region.width, region.height, StepPlan[p], p == floor);
             }
 
             Progress = 0f;
@@ -290,7 +320,8 @@ namespace FractalVisio.Rendering
 
             cancellation = new CancellationTokenSource();
             var token = cancellation.Token;
-            var job = new RenderJob(this, frame, frameWidth, frameHeight, activeRequest, workerCount, floor, ceiling);
+            var job = new RenderJob(
+                this, frame, frameWidth, frameHeight, visibleRect, activeRequest, workerCount, floor, ceiling);
             renderActive = true;
             renderTask = Task.Run(() => RenderProgressive(job, token), token);
         }
@@ -380,7 +411,40 @@ namespace FractalVisio.Rendering
 
             frameWidth = width;
             frameHeight = height;
+            blockGridWidth = (width + UncoveredCell - 1) / UncoveredCell;
+            blockGridHeight = (height + UncoveredCell - 1) / UncoveredCell;
+            uncoveredBlocks = new bool[Math.Max(1, blockGridWidth * blockGridHeight)];
         }
+
+        private void MarkEverythingUncovered()
+        {
+            Array.Fill(uncoveredBlocks, true);
+        }
+
+        /// <summary>
+        /// The part of the buffer the viewer actually sees, snapped outwards to the coarse sample
+        /// grid so that restricting a pass to it keeps every sample on the same grid as a
+        /// full-frame pass - otherwise the margin and the visible area would sample different
+        /// points and show a seam between them.
+        /// </summary>
+        private RectInt ResolveVisibleRect(in Viewport viewport)
+        {
+            if (!viewport.HasOverscan || viewport.Width != frameWidth || viewport.Height != frameHeight)
+            {
+                return new RectInt(0, 0, frameWidth, frameHeight);
+            }
+
+            var rect = viewport.VisibleRect;
+            var x0 = Mathf.Clamp(AlignDown(rect.xMin), 0, frameWidth);
+            var y0 = Mathf.Clamp(AlignDown(rect.yMin), 0, frameHeight);
+            var x1 = Mathf.Clamp(AlignUp(rect.xMax), x0, frameWidth);
+            var y1 = Mathf.Clamp(AlignUp(rect.yMax), y0, frameHeight);
+            return new RectInt(x0, y0, x1 - x0, y1 - y0);
+        }
+
+        private static int AlignDown(int value) => value - value % UncoveredCell;
+
+        private static int AlignUp(int value) => (value + UncoveredCell - 1) / UncoveredCell * UncoveredCell;
 
         private static void ResampleNearest(Color32[] src, int srcWidth, int srcHeight, Color32[] dst, int dstWidth, int dstHeight)
         {
@@ -414,9 +478,12 @@ namespace FractalVisio.Rendering
         /// </summary>
         private void ReprojectFrame(in ViewState from, in ViewState to)
         {
+            Array.Clear(uncoveredBlocks, 0, uncoveredBlocks.Length);
+
             var count = frameWidth * frameHeight;
             if (count <= 0 || frame.Length != count)
             {
+                MarkEverythingUncovered();
                 return;
             }
 
@@ -424,13 +491,14 @@ namespace FractalVisio.Rendering
             var scaleTo = to.scale.AsDouble;
             if (!(scaleFrom > 0d) || !(scaleTo > 0d) || double.IsNaN(scaleFrom) || double.IsNaN(scaleTo))
             {
+                MarkEverythingUncovered();
                 return;
             }
 
             if (from.x.Equals(to.x) && from.y.Equals(to.y) &&
                 scaleFrom == scaleTo && from.rotation == to.rotation)
             {
-                return;
+                return; // nothing moved: every pixel still stands for its own place
             }
 
             // dst pixel (view 'to') -> D_to -> fractal point -> D_from -> src pixel.
@@ -461,6 +529,8 @@ namespace FractalVisio.Rendering
 
             var src = frame;
             var dst = reprojectScratch;
+            var blocks = uncoveredBlocks;
+            var gridWidth = blockGridWidth;
             var options = new ParallelOptions { MaxDegreeOfParallelism = workerCount };
 
             Parallel.For(0, h, options, py =>
@@ -479,8 +549,16 @@ namespace FractalVisio.Rendering
 
                     var sx = (int)Math.Round(srcXf);
                     var sy = (int)Math.Round(srcYf);
-                    if (sx < 0) sx = 0; else if (sx >= w) sx = w - 1;
-                    if (sy < 0) sy = 0; else if (sy >= h) sy = h - 1;
+                    if (sx < 0 || sx >= w || sy < 0 || sy >= h)
+                    {
+                        // No source pixel for this one: flag its block so the first pass renders
+                        // it before anything else. The clamped colour below is only a stand-in
+                        // for the few milliseconds until that happens - it is the smear that
+                        // used to sit at the edge for the whole render.
+                        blocks[py / UncoveredCell * gridWidth + px / UncoveredCell] = true;
+                        if (sx < 0) sx = 0; else if (sx >= w) sx = w - 1;
+                        if (sy < 0) sy = 0; else if (sy >= h) sy = h - 1;
+                    }
 
                     dst[rowBase + px] = src[sy * w + sx];
                 }
@@ -506,24 +584,25 @@ namespace FractalVisio.Rendering
             return total - coarseColumns * coarseRows;
         }
 
-        private static RectInt[] BuildBands(int width, int height, int desiredCount, int align)
+        private static RectInt[] BuildBands(RectInt region, int desiredCount, int align)
         {
             // Band boundaries must land on the coarsest sample grid, otherwise the
             // per-pass "already computed" skip in RenderProgressive drifts out of phase.
             var safeAlign = Mathf.Max(1, align);
-            var count = Mathf.Clamp(desiredCount, 1, Mathf.Max(1, height));
+            var height = Mathf.Max(1, region.height);
+            var count = Mathf.Clamp(desiredCount, 1, height);
             var raw = Mathf.Max(1, Mathf.CeilToInt(height / (float)count));
             var bandHeight = ((raw + safeAlign - 1) / safeAlign) * safeAlign;
             var actual = Mathf.CeilToInt(height / (float)bandHeight);
             var bands = new RectInt[actual];
             for (var i = 0; i < actual; i++)
             {
-                var y0 = i * bandHeight;
-                var y1 = Mathf.Min(height, y0 + bandHeight);
-                bands[i] = new RectInt(0, y0, width, y1 - y0);
+                var y0 = region.yMin + i * bandHeight;
+                var y1 = Mathf.Min(region.yMax, y0 + bandHeight);
+                bands[i] = new RectInt(region.xMin, y0, region.width, y1 - y0);
             }
 
-            var mid = height * 0.5f;
+            var mid = region.yMin + height * 0.5f;
             Array.Sort(bands, (a, b) =>
             {
                 var da = Mathf.Abs((a.yMin + a.yMax) * 0.5f - mid);
@@ -535,7 +614,11 @@ namespace FractalVisio.Rendering
 
         private static void RenderProgressive(RenderJob job, CancellationToken token)
         {
-            var bands = BuildBands(job.Width, job.Height, job.Workers * 3, StepPlan[0]);
+            var fullBands = BuildBands(new RectInt(0, 0, job.Width, job.Height), job.Workers * 3, StepPlan[0]);
+            var visibleBands = job.HasMargin
+                ? BuildBands(job.VisibleRect, job.Workers * 3, StepPlan[0])
+                : fullBands;
+
             var options = new ParallelOptions
             {
                 CancellationToken = token,
@@ -548,57 +631,26 @@ namespace FractalVisio.Rendering
                 job.Owner.SetPassCursor(p);
 
                 var step = StepPlan[p];
-                var coarse = step << 1;
                 var first = p == job.PassFloor;
 
-                Parallel.ForEach(bands, options, band =>
+                // Coarse passes cover the overscan margin as well; fine passes stay inside the
+                // visible rectangle. See MarginStepThreshold.
+                var bands = step >= MarginStepThreshold ? fullBands : visibleBands;
+
+                if (first)
                 {
-                    long produced = 0;
-                    for (var by = band.yMin; by < band.yMax; by += step)
-                    {
-                        if ((by & 31) == 0)
-                        {
-                            token.ThrowIfCancellationRequested();
-                        }
-
-                        var rowOnCoarse = !first && (by % coarse == 0);
-                        for (var bx = 0; bx < job.Width; bx += step)
-                        {
-                            if (rowOnCoarse && (bx % coarse == 0))
-                            {
-                                continue; // this sample was already computed in a coarser pass
-                            }
-
-                            var sx = bx + (step >> 1);
-                            if (sx >= job.Width)
-                            {
-                                sx = job.Width - 1;
-                            }
-
-                            var sy = by + (step >> 1);
-                            if (sy >= job.Height)
-                            {
-                                sy = job.Height - 1;
-                            }
-
-                            var iteration = ComputeIteration(job, sx, sy, token);
-                            produced++;
-
-                            if (!job.TrustInterior && iteration >= job.MaxIterations)
-                            {
-                                // A budget-capped "did not escape" is unknown, not proven
-                                // interior. Keep whatever is already on screen (previous
-                                // frame / coarser pass) instead of stamping it black.
-                                continue;
-                            }
-
-                            var color = ResolveColor(iteration, job.MaxIterations, job.Palette);
-                            FillBlock(job.Frame, job.Width, job.Height, bx, by, step, color);
-                        }
-                    }
-
-                    job.Owner.AddSamples(produced);
-                });
+                    // Blocks the reprojection could not fill are the stretched edge. Rendering
+                    // them before everything else turns that smear into real pixels almost at
+                    // once, instead of after a whole sweep over the image.
+                    RenderPass(job, bands, options, step, true, PassFilter.UncoveredOnly, token);
+                    token.ThrowIfCancellationRequested();
+                    job.Owner.PublishPass(job.Frame);
+                    RenderPass(job, bands, options, step, true, PassFilter.CoveredOnly, token);
+                }
+                else
+                {
+                    RenderPass(job, bands, options, step, false, PassFilter.All, token);
+                }
 
                 // Whole frame now covered at this step: publish it as one piece.
                 // Marking dirty per band instead uploaded a frame that was part
@@ -609,6 +661,80 @@ namespace FractalVisio.Rendering
                 token.ThrowIfCancellationRequested();
                 job.Owner.PublishPass(job.Frame);
             }
+        }
+
+        private enum PassFilter
+        {
+            All,
+            UncoveredOnly,
+            CoveredOnly
+        }
+
+        private static void RenderPass(
+            RenderJob job,
+            RectInt[] bands,
+            ParallelOptions options,
+            int step,
+            bool first,
+            PassFilter filter,
+            CancellationToken token)
+        {
+            var coarse = step << 1;
+
+            Parallel.ForEach(bands, options, band =>
+            {
+                long produced = 0;
+                for (var by = band.yMin; by < band.yMax; by += step)
+                {
+                    if ((by & 31) == 0)
+                    {
+                        token.ThrowIfCancellationRequested();
+                    }
+
+                    var rowOnCoarse = !first && (by % coarse == 0);
+                    for (var bx = band.xMin; bx < band.xMax; bx += step)
+                    {
+                        if (rowOnCoarse && (bx % coarse == 0))
+                        {
+                            continue; // this sample was already computed in a coarser pass
+                        }
+
+                        if (filter != PassFilter.All &&
+                            job.IsBlockUncovered(bx, by) != (filter == PassFilter.UncoveredOnly))
+                        {
+                            continue;
+                        }
+
+                        var sx = bx + (step >> 1);
+                        if (sx >= job.Width)
+                        {
+                            sx = job.Width - 1;
+                        }
+
+                        var sy = by + (step >> 1);
+                        if (sy >= job.Height)
+                        {
+                            sy = job.Height - 1;
+                        }
+
+                        var iteration = ComputeIteration(job, sx, sy, token);
+                        produced++;
+
+                        if (!job.TrustInterior && iteration >= job.MaxIterations)
+                        {
+                            // A budget-capped "did not escape" is unknown, not proven
+                            // interior. Keep whatever is already on screen (previous
+                            // frame / coarser pass) instead of stamping it black.
+                            continue;
+                        }
+
+                        var color = ResolveColor(iteration, job.MaxIterations, job.Palette);
+                        FillBlock(job.Frame, job.Width, job.Height, bx, by, step, color);
+                    }
+                }
+
+                job.Owner.AddSamples(produced);
+            });
         }
 
         private static int ComputeIteration(RenderJob job, int pixelX, int pixelY, CancellationToken token)
@@ -753,9 +879,10 @@ namespace FractalVisio.Rendering
 
         private readonly struct FrameRequest
         {
-            public FrameRequest(Texture2D target, ViewState view, int iterations, bool extendedPrecision, bool interacting)
+            public FrameRequest(Texture2D target, Viewport viewport, ViewState view, int iterations, bool extendedPrecision, bool interacting)
             {
                 Target = target;
+                Viewport = viewport;
                 View = view;
                 Iterations = iterations;
                 ExtendedPrecision = extendedPrecision;
@@ -763,6 +890,7 @@ namespace FractalVisio.Rendering
             }
 
             public Texture2D Target { get; }
+            public Viewport Viewport { get; }
             public ViewState View { get; }
             public int Iterations { get; }
             public bool ExtendedPrecision { get; }
@@ -776,6 +904,7 @@ namespace FractalVisio.Rendering
                 Color32[] frame,
                 int width,
                 int height,
+                RectInt visibleRect,
                 in FrameRequest request,
                 int workers,
                 int passFloor,
@@ -785,6 +914,10 @@ namespace FractalVisio.Rendering
                 Frame = frame;
                 Width = width;
                 Height = height;
+                VisibleRect = visibleRect;
+                HasMargin = visibleRect.width < width || visibleRect.height < height;
+                Uncovered = owner.uncoveredBlocks;
+                BlockGridWidth = owner.blockGridWidth;
                 Aspect = width / (double)height;
                 Palette = owner.palette;
                 CenterX = DoubleDouble.FromDecimal(request.View.x.AsDecimal);
@@ -825,6 +958,27 @@ namespace FractalVisio.Rendering
             public int Workers { get; }
             public int PassFloor { get; }
             public int PassCeiling { get; }
+
+            /// <summary>Part of the buffer the viewer sees; the rest is the overscan margin.</summary>
+            public RectInt VisibleRect { get; }
+
+            public bool HasMargin { get; }
+
+            /// <summary>Blocks the reprojection could not fill. See FractalCpuRenderer.uncoveredBlocks.</summary>
+            public bool[] Uncovered { get; }
+
+            public int BlockGridWidth { get; }
+
+            public bool IsBlockUncovered(int x, int y)
+            {
+                if (BlockGridWidth <= 0 || Uncovered.Length == 0)
+                {
+                    return true;
+                }
+
+                var index = y / UncoveredCell * BlockGridWidth + x / UncoveredCell;
+                return (uint)index < (uint)Uncovered.Length && Uncovered[index];
+            }
         }
     }
 }

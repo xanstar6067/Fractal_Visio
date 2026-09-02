@@ -107,7 +107,12 @@ any feature that is not a bug fix, and update it when a design decision changes.
   presenter shows the centre through `RawImage.uvRect`. This is what removes the stretched
   edge bars during pan and zoom-out. Overscan exists only in `Viewport` and the presenter —
   navigator, kernels and shaders treat the widened viewport as an ordinary one. Never
-  reintroduce edge clamping as the fill for uncovered pixels in reprojection.
+  reintroduce edge clamping as the fill for uncovered pixels in reprojection: pixels the
+  reprojection cannot source are flagged per 16x16 block and rendered in a priority wave
+  before the rest of the first pass. Only coarse passes (step >= MarginStepThreshold) render
+  the margin; finer passes stay inside the viewport's visible rect, which is what keeps the
+  margin nearly free. A pass restricted to that rect must keep the rect snapped outwards to
+  the coarse sample grid, or margin and visible area sample different points and seam.
 - The CPU renderer publishes an iteration buffer; palette and colouring changes remap that
   buffer instead of recomputing the fractal.
 - Saved state (`FractalStateDto`) stores centre/scale as `decimal` strings and parameters by

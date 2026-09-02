@@ -65,6 +65,13 @@ namespace FractalVisio.Core
             }
         }
 
+        /// <summary>The visible area as a pixel rectangle inside the buffer, centred in it.</summary>
+        public RectInt VisibleRect => new(
+            (Width - VisibleWidth) / 2,
+            (Height - VisibleHeight) / 2,
+            VisibleWidth,
+            VisibleHeight);
+
         /// <summary>The visible part of this viewport, as a viewport of its own (no overscan).</summary>
         public Viewport Visible => new(VisibleWidth, VisibleHeight);
     }
