@@ -7,7 +7,7 @@ namespace FractalVisio.Fractal
 {
     /// <summary>
     /// Small application coordinator: gestures -> precise view -> one of two
-    /// renderers. It intentionally contains no Lean/CW dependencies.
+    /// renderers, with no third-party input or UI dependency.
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Canvas))]
@@ -69,6 +69,24 @@ namespace FractalVisio.Fractal
 
         private void Awake()
         {
+            InitializeRuntime();
+        }
+
+        private void OnEnable()
+        {
+            if (gpuRenderer == null || cpuRenderer == null)
+            {
+                InitializeRuntime();
+            }
+        }
+
+        private void InitializeRuntime()
+        {
+            if (gpuRenderer != null && cpuRenderer != null)
+            {
+                return;
+            }
+
             Application.targetFrameRate = Application.isMobilePlatform ? 60 : -1;
             profile = MobileRenderProfile.Detect();
             EnsureUi();
@@ -90,6 +108,15 @@ namespace FractalVisio.Fractal
 
         private void Update()
         {
+            if (gpuRenderer == null || cpuRenderer == null || targetImage == null)
+            {
+                InitializeRuntime();
+                if (gpuRenderer == null || cpuRenderer == null || targetImage == null)
+                {
+                    return;
+                }
+            }
+
             if (Screen.width != cachedScreenWidth || Screen.height != cachedScreenHeight)
             {
                 RecreateTextures();
@@ -267,7 +294,9 @@ namespace FractalVisio.Fractal
         {
             var baseIterations = interacting ? interactionIterations : settledIterations;
             var depth = Math.Max(0d, -Math.Log10(Math.Max(scale, 1e-28d)) - 3d);
-            var depthBudget = interacting ? depth * 10d : depth * 64d;
+            var depthBudget = interacting
+                ? depth * 10d
+                : depth * 96d + Math.Max(0d, depth - 6d) * 192d;
             return Mathf.Clamp(baseIterations + Mathf.RoundToInt((float)depthBudget), 16, maximumIterations);
         }
 
@@ -299,7 +328,7 @@ namespace FractalVisio.Fractal
             var progress = cpuRenderer != null && cpuRenderer.IsBusy
                 ? " · " + Mathf.RoundToInt(cpuRenderer.Progress * 100f) + "%"
                 : string.Empty;
-            computeBackendText.text = "CPU Burst · " + precision + progress;
+            computeBackendText.text = "CPU Parallel · " + precision + progress;
         }
 
         private void RecreateTextures()

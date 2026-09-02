@@ -1,42 +1,46 @@
 using System;
-using Unity.Burst;
-using Unity.Collections;
-using Unity.Jobs;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace FractalVisio.Fractal
 {
     /// <summary>
-    /// Progressive CPU renderer. One parallel tile is in flight at a time so a
-    /// new gesture never blocks the main thread waiting for a full image.
+    /// Progressive CPU renderer. A small tile is calculated on background
+    /// workers, so neither a deep zoom nor cancellation can stall Unity's main
+    /// thread. Parallel.For adapts naturally to the processor count.
     /// </summary>
     internal sealed class FractalCpuRenderer : IDisposable
     {
         private const int PaletteResolution = 256;
 
-        private readonly NativeArray<Color32> palette;
-        private NativeArray<Color32> nativeTile;
-        private Color32[] managedTile;
-        private JobHandle tileHandle;
-        private bool tileScheduled;
+        private readonly Color32[] palette;
+        private readonly Dictionary<int, Color32[]> tileBuffers = new();
+        private readonly int workerCount;
+        private CancellationTokenSource tileCancellation;
+        private Task<TileResult> tileTask;
         private bool discardActiveFrame;
         private bool hasQueuedFrame;
         private FrameRequest activeFrame;
         private FrameRequest queuedFrame;
+        private RectInt activeRect;
         private int nextTileIndex;
         private int tilesSinceApply;
-        private int tileScheduledFrame;
 
         public FractalCpuRenderer(Gradient gradient)
         {
-            palette = new NativeArray<Color32>(PaletteResolution, Allocator.Persistent);
+            palette = new Color32[PaletteResolution];
             for (var i = 0; i < PaletteResolution; i++)
             {
                 palette[i] = (Color32)gradient.Evaluate(i / (PaletteResolution - 1f));
             }
+
+            // Keep one logical core free for Unity, rendering and Android OS work.
+            workerCount = Math.Max(1, SystemInfo.processorCount - 1);
         }
 
-        public bool IsBusy => tileScheduled || hasQueuedFrame || activeFrame.Target != null;
+        public bool IsBusy => tileTask != null || hasQueuedFrame || activeFrame.Target != null;
         public float Progress { get; private set; }
         public bool UsesExtendedPrecision => activeFrame.ExtendedPrecision;
 
@@ -50,9 +54,10 @@ namespace FractalVisio.Fractal
                 extendedPrecision);
             hasQueuedFrame = true;
 
-            if (tileScheduled)
+            if (tileTask != null)
             {
                 discardActiveFrame = true;
+                tileCancellation?.Cancel();
                 return;
             }
 
@@ -62,7 +67,7 @@ namespace FractalVisio.Fractal
         /// <summary>Poll once per Update. Returns true when visible pixels were uploaded.</summary>
         public bool Update()
         {
-            if (!tileScheduled)
+            if (tileTask == null)
             {
                 if (hasQueuedFrame)
                 {
@@ -72,27 +77,52 @@ namespace FractalVisio.Fractal
                 return false;
             }
 
-            // Some Unity runtimes defer an unconsumed job batch for longer than
-            // expected. Give workers two frames, then establish a dependency on
-            // the small tile so progressive rendering always moves forward.
-            if (!tileHandle.IsCompleted && Time.frameCount - tileScheduledFrame < 2)
+            if (!tileTask.IsCompleted)
             {
                 return false;
             }
 
-            tileHandle.Complete();
-            tileScheduled = false;
-
-            if (discardActiveFrame)
+            TileResult result;
+            try
             {
+                result = tileTask.GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException)
+            {
+                result = new TileResult(null, true, null);
+            }
+            catch (Exception exception)
+            {
+                result = new TileResult(null, false, exception.ToString());
+            }
+
+            tileTask = null;
+            tileCancellation?.Dispose();
+            tileCancellation = null;
+
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                Debug.LogError("CPU fractal tile failed: " + result.Error);
+                activeFrame = default;
                 discardActiveFrame = false;
                 StartQueuedFrame();
                 return false;
             }
 
-            var rect = GetTileRect(activeFrame, nextTileIndex);
-            nativeTile.CopyTo(managedTile);
-            activeFrame.Target.SetPixels32(rect.x, rect.y, rect.width, rect.height, managedTile);
+            if (discardActiveFrame || result.Cancelled)
+            {
+                discardActiveFrame = false;
+                activeFrame = default;
+                StartQueuedFrame();
+                return false;
+            }
+
+            activeFrame.Target.SetPixels32(
+                activeRect.x,
+                activeRect.y,
+                activeRect.width,
+                activeRect.height,
+                result.Pixels);
             nextTileIndex++;
             tilesSinceApply++;
 
@@ -109,6 +139,7 @@ namespace FractalVisio.Fractal
 
             if (hasQueuedFrame)
             {
+                activeFrame = default;
                 StartQueuedFrame();
             }
             else if (frameComplete)
@@ -126,9 +157,10 @@ namespace FractalVisio.Fractal
         public void Invalidate()
         {
             hasQueuedFrame = false;
-            if (tileScheduled)
+            if (tileTask != null)
             {
                 discardActiveFrame = true;
+                tileCancellation?.Cancel();
             }
             else
             {
@@ -139,36 +171,42 @@ namespace FractalVisio.Fractal
 
         public void CompletePendingWork()
         {
-            if (!tileScheduled)
-            {
-                return;
-            }
-
-            tileHandle.Complete();
-            tileScheduled = false;
             activeFrame = default;
             hasQueuedFrame = false;
-            discardActiveFrame = false;
+            Progress = 0f;
+
+            if (tileTask != null)
+            {
+                discardActiveFrame = true;
+                tileCancellation?.Cancel();
+            }
+            else
+            {
+                discardActiveFrame = false;
+            }
         }
 
         public void Dispose()
         {
             CompletePendingWork();
-
-            if (nativeTile.IsCreated)
+            if (tileTask != null)
             {
-                nativeTile.Dispose();
+                var cancellationToDispose = tileCancellation;
+                tileTask.ContinueWith(
+                    _ => cancellationToDispose?.Dispose(),
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+                tileTask = null;
+                tileCancellation = null;
             }
 
-            if (palette.IsCreated)
-            {
-                palette.Dispose();
-            }
+            tileBuffers.Clear();
         }
 
         private void StartQueuedFrame()
         {
-            if (!hasQueuedFrame)
+            if (!hasQueuedFrame || tileTask != null)
             {
                 return;
             }
@@ -190,48 +228,178 @@ namespace FractalVisio.Fractal
                 return;
             }
 
-            var rect = GetTileRect(activeFrame, nextTileIndex);
-            var length = rect.width * rect.height;
-            EnsureTileBuffers(length);
-
-            var job = new MandelbrotTileJob
+            activeRect = GetTileRect(activeFrame, nextTileIndex);
+            var length = activeRect.width * activeRect.height;
+            if (!tileBuffers.TryGetValue(length, out var pixels))
             {
-                Output = nativeTile,
-                Palette = palette,
-                TargetWidth = activeFrame.Target.width,
-                TargetHeight = activeFrame.Target.height,
-                RectX = rect.x,
-                RectY = rect.y,
-                RectWidth = rect.width,
-                CenterX = DoubleDouble.FromDecimal(activeFrame.View.x.AsDecimal),
-                CenterY = DoubleDouble.FromDecimal(activeFrame.View.y.AsDecimal),
-                Scale = DoubleDouble.FromDecimal(activeFrame.View.scale.AsDecimal),
-                MaxIterations = activeFrame.Iterations,
-                ExtendedPrecision = activeFrame.ExtendedPrecision ? (byte)1 : (byte)0
-            };
+                pixels = new Color32[length];
+                tileBuffers.Add(length, pixels);
+            }
 
-            tileHandle = job.Schedule(length, 64);
-            JobHandle.ScheduleBatchedJobs();
-            tileScheduledFrame = Time.frameCount;
-            tileScheduled = true;
+            var request = new TileRequest(
+                pixels,
+                palette,
+                activeFrame.Target.width,
+                activeFrame.Target.height,
+                activeRect,
+                activeFrame.View,
+                activeFrame.Iterations,
+                activeFrame.ExtendedPrecision,
+                workerCount);
+
+            tileCancellation = new CancellationTokenSource();
+            var token = tileCancellation.Token;
+            tileTask = Task.Run(() => CalculateTile(request, token), token);
         }
 
-        private void EnsureTileBuffers(int length)
+        private static TileResult CalculateTile(TileRequest request, CancellationToken token)
         {
-            if (!nativeTile.IsCreated || nativeTile.Length != length)
+            try
             {
-                if (nativeTile.IsCreated)
+                var options = new ParallelOptions
                 {
-                    nativeTile.Dispose();
+                    CancellationToken = token,
+                    MaxDegreeOfParallelism = request.WorkerCount
+                };
+
+                Parallel.For(0, request.Rect.height, options, localY =>
+                {
+                    var pixelY = request.Rect.y + localY;
+                    for (var localX = 0; localX < request.Rect.width; localX++)
+                    {
+                        if ((localX & 15) == 0)
+                        {
+                            token.ThrowIfCancellationRequested();
+                        }
+
+                        var pixelX = request.Rect.x + localX;
+                        var normalizedX = (((pixelX + 0.5d) / request.TargetWidth) - 0.5d) * request.Aspect;
+                        var normalizedY = ((pixelY + 0.5d) / request.TargetHeight) - 0.5d;
+
+                        int iteration;
+                        if (request.ExtendedPrecision)
+                        {
+                            var cx = DoubleDouble.Add(request.CenterX, DoubleDouble.Multiply(request.Scale, normalizedX));
+                            var cy = DoubleDouble.Add(request.CenterY, DoubleDouble.Multiply(request.Scale, normalizedY));
+                            iteration = EvaluateExtended(cx, cy, request.MaxIterations, token);
+                        }
+                        else
+                        {
+                            var scale = request.Scale.ToDouble();
+                            var cx = request.CenterX.ToDouble() + scale * normalizedX;
+                            var cy = request.CenterY.ToDouble() + scale * normalizedY;
+                            iteration = EvaluateDouble(cx, cy, request.MaxIterations, token);
+                        }
+
+                        request.Pixels[localY * request.Rect.width + localX] =
+                            ResolveColor(iteration, request.MaxIterations, request.Palette);
+                    }
+                });
+
+                return new TileResult(request.Pixels, false, null);
+            }
+            catch (OperationCanceledException)
+            {
+                return new TileResult(request.Pixels, true, null);
+            }
+            catch (Exception exception)
+            {
+                return new TileResult(request.Pixels, false, exception.ToString());
+            }
+        }
+
+        private static int EvaluateDouble(double cx, double cy, int maxIterations, CancellationToken token)
+        {
+            var x = cx - 0.25d;
+            var y2 = cy * cy;
+            var q = x * x + y2;
+            if (q * (q + x) <= 0.25d * y2 || (cx + 1d) * (cx + 1d) + y2 <= 0.0625d)
+            {
+                return maxIterations;
+            }
+
+            var zx = 0d;
+            var zy = 0d;
+            var iteration = 0;
+            while (iteration < maxIterations && zx * zx + zy * zy <= 4d)
+            {
+                if ((iteration & 127) == 0 && token.IsCancellationRequested)
+                {
+                    token.ThrowIfCancellationRequested();
                 }
 
-                nativeTile = new NativeArray<Color32>(length, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                var nextX = zx * zx - zy * zy + cx;
+                zy = 2d * zx * zy + cy;
+                zx = nextX;
+                iteration++;
             }
 
-            if (managedTile == null || managedTile.Length != length)
+            return iteration;
+        }
+
+        private static int EvaluateExtended(
+            DoubleDouble cx,
+            DoubleDouble cy,
+            int maxIterations,
+            CancellationToken token)
+        {
+            var zx = new DoubleDouble(0d);
+            var zy = new DoubleDouble(0d);
+            var iteration = 0;
+
+            while (iteration < maxIterations)
             {
-                managedTile = new Color32[length];
+                if ((iteration & 63) == 0 && token.IsCancellationRequested)
+                {
+                    token.ThrowIfCancellationRequested();
+                }
+
+                var xSquared = DoubleDouble.Square(zx);
+                var ySquared = DoubleDouble.Square(zy);
+                if (DoubleDouble.Add(xSquared, ySquared).ToDouble() > 4d)
+                {
+                    break;
+                }
+
+                var nextX = DoubleDouble.Add(DoubleDouble.Subtract(xSquared, ySquared), cx);
+                zy = DoubleDouble.Add(DoubleDouble.Multiply(DoubleDouble.Multiply(zx, zy), 2d), cy);
+                zx = nextX;
+                iteration++;
             }
+
+            return iteration;
+        }
+
+        private static Color32 ResolveColor(int iteration, int maxIterations, Color32[] colors)
+        {
+            if (iteration >= maxIterations)
+            {
+                return new Color32(3, 5, 12, 255);
+            }
+
+            var palettePosition = iteration * 0.021d;
+            palettePosition -= Math.Floor(palettePosition);
+            var scaled = palettePosition * (colors.Length - 1);
+            var firstIndex = (int)scaled;
+            var secondIndex = firstIndex + 1;
+            if (secondIndex >= colors.Length)
+            {
+                secondIndex = 0;
+            }
+
+            var t = scaled - firstIndex;
+            var a = colors[firstIndex];
+            var b = colors[secondIndex];
+            return new Color32(
+                LerpByte(a.r, b.r, t),
+                LerpByte(a.g, b.g, t),
+                LerpByte(a.b, b.b, t),
+                255);
+        }
+
+        private static byte LerpByte(byte a, byte b, double t)
+        {
+            return (byte)(a + (b - a) * t + 0.5d);
         }
 
         private static int GetTileCount(in FrameRequest request)
@@ -278,130 +446,59 @@ namespace FractalVisio.Fractal
             public bool ExtendedPrecision { get; }
         }
 
-        [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
-        private struct MandelbrotTileJob : IJobParallelFor
+        private readonly struct TileRequest
         {
-            [WriteOnly] public NativeArray<Color32> Output;
-            [ReadOnly] public NativeArray<Color32> Palette;
-
-            public int TargetWidth;
-            public int TargetHeight;
-            public int RectX;
-            public int RectY;
-            public int RectWidth;
-            public DoubleDouble CenterX;
-            public DoubleDouble CenterY;
-            public DoubleDouble Scale;
-            public int MaxIterations;
-            public byte ExtendedPrecision;
-
-            public void Execute(int index)
+            public TileRequest(
+                Color32[] pixels,
+                Color32[] palette,
+                int targetWidth,
+                int targetHeight,
+                RectInt rect,
+                FractalView view,
+                int maxIterations,
+                bool extendedPrecision,
+                int workerCount)
             {
-                var localX = index % RectWidth;
-                var localY = index / RectWidth;
-                var pixelX = RectX + localX;
-                var pixelY = RectY + localY;
-                var aspect = TargetWidth / (double)TargetHeight;
-                var normalizedX = (((pixelX + 0.5d) / TargetWidth) - 0.5d) * aspect;
-                var normalizedY = ((pixelY + 0.5d) / TargetHeight) - 0.5d;
-
-                int iteration;
-                if (ExtendedPrecision != 0)
-                {
-                    var cx = DoubleDouble.Add(CenterX, DoubleDouble.Multiply(Scale, normalizedX));
-                    var cy = DoubleDouble.Add(CenterY, DoubleDouble.Multiply(Scale, normalizedY));
-                    iteration = EvaluateExtended(cx, cy, MaxIterations);
-                }
-                else
-                {
-                    var scale = Scale.ToDouble();
-                    var cx = CenterX.ToDouble() + scale * normalizedX;
-                    var cy = CenterY.ToDouble() + scale * normalizedY;
-                    iteration = EvaluateDouble(cx, cy, MaxIterations);
-                }
-
-                Output[index] = ResolveColor(iteration, MaxIterations, Palette);
+                Pixels = pixels;
+                Palette = palette;
+                TargetWidth = targetWidth;
+                TargetHeight = targetHeight;
+                Rect = rect;
+                CenterX = DoubleDouble.FromDecimal(view.x.AsDecimal);
+                CenterY = DoubleDouble.FromDecimal(view.y.AsDecimal);
+                Scale = DoubleDouble.FromDecimal(view.scale.AsDecimal);
+                MaxIterations = maxIterations;
+                ExtendedPrecision = extendedPrecision;
+                WorkerCount = workerCount;
+                Aspect = targetWidth / (double)targetHeight;
             }
 
-            private static int EvaluateDouble(double cx, double cy, int maxIterations)
+            public Color32[] Pixels { get; }
+            public Color32[] Palette { get; }
+            public int TargetWidth { get; }
+            public int TargetHeight { get; }
+            public RectInt Rect { get; }
+            public DoubleDouble CenterX { get; }
+            public DoubleDouble CenterY { get; }
+            public DoubleDouble Scale { get; }
+            public int MaxIterations { get; }
+            public bool ExtendedPrecision { get; }
+            public int WorkerCount { get; }
+            public double Aspect { get; }
+        }
+
+        private readonly struct TileResult
+        {
+            public TileResult(Color32[] pixels, bool cancelled, string error)
             {
-                var x = cx - 0.25d;
-                var y2 = cy * cy;
-                var q = x * x + y2;
-                if (q * (q + x) <= 0.25d * y2 || (cx + 1d) * (cx + 1d) + y2 <= 0.0625d)
-                {
-                    return maxIterations;
-                }
-
-                var zx = 0d;
-                var zy = 0d;
-                var iteration = 0;
-                while (iteration < maxIterations && zx * zx + zy * zy <= 4d)
-                {
-                    var nextX = zx * zx - zy * zy + cx;
-                    zy = 2d * zx * zy + cy;
-                    zx = nextX;
-                    iteration++;
-                }
-
-                return iteration;
+                Pixels = pixels;
+                Cancelled = cancelled;
+                Error = error;
             }
 
-            private static int EvaluateExtended(DoubleDouble cx, DoubleDouble cy, int maxIterations)
-            {
-                var zx = new DoubleDouble(0d);
-                var zy = new DoubleDouble(0d);
-                var iteration = 0;
-
-                while (iteration < maxIterations)
-                {
-                    var xSquared = DoubleDouble.Square(zx);
-                    var ySquared = DoubleDouble.Square(zy);
-                    if (DoubleDouble.Add(xSquared, ySquared).ToDouble() > 4d)
-                    {
-                        break;
-                    }
-
-                    var nextX = DoubleDouble.Add(DoubleDouble.Subtract(xSquared, ySquared), cx);
-                    zy = DoubleDouble.Add(DoubleDouble.Multiply(DoubleDouble.Multiply(zx, zy), 2d), cy);
-                    zx = nextX;
-                    iteration++;
-                }
-
-                return iteration;
-            }
-
-            private static Color32 ResolveColor(int iteration, int maxIterations, NativeArray<Color32> colors)
-            {
-                if (iteration >= maxIterations)
-                {
-                    return new Color32(3, 5, 12, 255);
-                }
-
-                var palettePosition = iteration * 0.021d;
-                palettePosition -= Math.Floor(palettePosition);
-                var scaled = palettePosition * (colors.Length - 1);
-                var firstIndex = (int)scaled;
-                var secondIndex = firstIndex + 1;
-                if (secondIndex >= colors.Length)
-                {
-                    secondIndex = 0;
-                }
-
-                var t = scaled - firstIndex;
-                var a = colors[firstIndex];
-                var b = colors[secondIndex];
-                return new Color32(
-                    LerpByte(a.r, b.r, t),
-                    LerpByte(a.g, b.g, t),
-                    LerpByte(a.b, b.b, t),
-                    255);
-            }
-
-            private static byte LerpByte(byte a, byte b, double t)
-            {
-                return (byte)(a + (b - a) * t + 0.5d);
-            }
+            public Color32[] Pixels { get; }
+            public bool Cancelled { get; }
+            public string Error { get; }
         }
     }
 }

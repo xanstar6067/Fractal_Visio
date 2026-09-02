@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 namespace FractalVisio.Fractal
 {
     /// <summary>
-    /// A Burst-friendly double-double value. The unevaluated hi + lo pair carries
+    /// An allocation-free double-double value. The unevaluated hi + lo pair carries
     /// roughly 30 decimal digits without allocating or relying on System.Decimal
     /// inside jobs.
     /// </summary>
