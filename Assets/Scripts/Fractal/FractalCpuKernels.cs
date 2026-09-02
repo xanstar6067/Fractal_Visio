@@ -31,6 +31,16 @@ namespace FractalVisio.Fractal
 
         private Color32[] frame = Array.Empty<Color32>();
         private Color32[] reprojectScratch = Array.Empty<Color32>();
+
+        // What the main thread actually uploads. The render worker copies `frame`
+        // into it only between passes - i.e. when `frame` is a whole-image render
+        // at one step size, never a half-updated mix of a pass and the coarser
+        // image beneath it. That mix is what showed up as a hard horizontal seam
+        // while panning. Guarded by `publishLock` so SetPixels32 never reads it
+        // mid-copy.
+        private Color32[] publishFrame = Array.Empty<Color32>();
+        private readonly object publishLock = new object();
+
         private int frameWidth;
         private int frameHeight;
 
@@ -183,14 +193,38 @@ namespace FractalVisio.Fractal
             renderActive = false;
             frame = Array.Empty<Color32>();
             reprojectScratch = Array.Empty<Color32>();
+            lock (publishLock)
+            {
+                publishFrame = Array.Empty<Color32>();
+            }
+
             frameViewValid = false;
             frameWidth = 0;
             frameHeight = 0;
         }
 
         internal void SetPassCursor(int index) => passCursor = index;
-        internal void MarkFrameDirty() => frameDirty = true;
         internal void AddSamples(long count) => Interlocked.Add(ref samplesDone, count);
+
+        /// <summary>
+        /// Snapshot <paramref name="source"/> as the next image to upload. The render
+        /// worker calls this only from its sequential section between passes, so the
+        /// buffer holds one coherent step size rather than a torn pass boundary.
+        /// </summary>
+        internal void PublishPass(Color32[] source)
+        {
+            lock (publishLock)
+            {
+                if (publishFrame.Length != source.Length)
+                {
+                    publishFrame = new Color32[source.Length];
+                }
+
+                Array.Copy(source, publishFrame, source.Length);
+            }
+
+            frameDirty = true;
+        }
 
         private void StartQueued()
         {
@@ -220,6 +254,10 @@ namespace FractalVisio.Fractal
 
             frameView = activeRequest.View;
             frameViewValid = true;
+
+            // Make the warped placeholder uploadable right away; passes replace it
+            // one whole step at a time from here.
+            PublishPass(frame);
 
             var minDim = Math.Min(frameWidth, frameHeight);
             var floor = 0;
@@ -290,9 +328,16 @@ namespace FractalVisio.Fractal
                 return;
             }
 
-            // Workers may still be writing individual pixels; a torn Color32 shows a
-            // single stale pixel for one interval and is corrected on the next upload.
-            target.SetPixels32(frame);
+            lock (publishLock)
+            {
+                if (publishFrame.Length != frameWidth * frameHeight)
+                {
+                    return;
+                }
+
+                target.SetPixels32(publishFrame);
+            }
+
             target.Apply(false, false);
             frameDirty = false;
 
@@ -314,6 +359,10 @@ namespace FractalVisio.Fractal
             var previousWidth = frameWidth;
             var previousHeight = frameHeight;
             frame = new Color32[required];
+            lock (publishLock)
+            {
+                publishFrame = new Color32[required];
+            }
 
             if (previous.Length == previousWidth * previousHeight && previousWidth > 0 && previousHeight > 0)
             {
@@ -548,8 +597,16 @@ namespace FractalVisio.Fractal
                     }
 
                     job.Owner.AddSamples(produced);
-                    job.Owner.MarkFrameDirty();
                 });
+
+                // Whole frame now covered at this step: publish it as one piece.
+                // Marking dirty per band instead uploaded a frame that was part
+                // this pass and part the coarser image / reprojected placeholder,
+                // and that boundary is the horizontal seam seen while panning -
+                // worst on the CPU-only deep-zoom path where a gesture keeps
+                // restarting the render before it can finish a pass.
+                token.ThrowIfCancellationRequested();
+                job.Owner.PublishPass(job.Frame);
             }
         }
 
