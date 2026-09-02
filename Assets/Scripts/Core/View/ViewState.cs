@@ -1,9 +1,9 @@
 using System;
 
-namespace FractalVisio.Fractal
+namespace FractalVisio.Core
 {
     [Serializable]
-    public struct FractalView
+    public struct ViewState
     {
         public HighPrecision x;
         public HighPrecision y;
@@ -13,7 +13,7 @@ namespace FractalVisio.Fractal
         public double rotation;
         public int iterations;
 
-        public static FractalView Default => new()
+        public static ViewState Default => new()
         {
             x = -0.5m,
             y = 0m,

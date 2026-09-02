@@ -2,8 +2,9 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using FractalVisio.Core;
 
-namespace FractalVisio.Fractal
+namespace FractalVisio.Rendering
 {
     /// <summary>
     /// Progressive full-frame CPU renderer. Every pass covers the whole image at
@@ -18,7 +19,7 @@ namespace FractalVisio.Fractal
     /// and avoiding new packages. The planned speed-up is Burst + Unity.Jobs with
     /// the per-pixel iteration moved into an IJobParallelFor.
     /// </summary>
-    internal sealed class FractalCpuRenderer : IDisposable
+    public sealed class FractalCpuRenderer : IDisposable
     {
         private const int PaletteResolution = 256;
         private const int InteractivePassCount = 2;      // steps 16, 8 while the view keeps moving
@@ -46,7 +47,7 @@ namespace FractalVisio.Fractal
 
         // The view `frame` currently represents, so a new request can warp the old
         // pixels into place (pan / zoom / rotation) as an instant placeholder.
-        private FractalView frameView;
+        private ViewState frameView;
         private bool frameViewValid;
 
         private Texture2D target;
@@ -84,7 +85,7 @@ namespace FractalVisio.Fractal
         public int PassCount => Mathf.Max(1, passCeilingIndex - passFloorIndex);
         public int CurrentPass => Mathf.Clamp(passCursor - passFloorIndex + 1, 1, PassCount);
 
-        public void Request(Texture2D texture, in FractalView view, int iterations, bool extendedPrecision, bool interacting)
+        public void Request(Texture2D texture, in ViewState view, int iterations, bool extendedPrecision, bool interacting)
         {
             queued = new FrameRequest(texture, view, Mathf.Max(1, iterations), extendedPrecision, interacting);
             hasQueued = true;
@@ -411,7 +412,7 @@ namespace FractalVisio.Fractal
         /// so it shows view <paramref name="to"/> instead: one similarity warp covering
         /// pan, zoom and rotation. Newly exposed pixels take the clamped edge colour.
         /// </summary>
-        private void ReprojectFrame(in FractalView from, in FractalView to)
+        private void ReprojectFrame(in ViewState from, in ViewState to)
         {
             var count = frameWidth * frameHeight;
             if (count <= 0 || frame.Length != count)
@@ -752,7 +753,7 @@ namespace FractalVisio.Fractal
 
         private readonly struct FrameRequest
         {
-            public FrameRequest(Texture2D target, FractalView view, int iterations, bool extendedPrecision, bool interacting)
+            public FrameRequest(Texture2D target, ViewState view, int iterations, bool extendedPrecision, bool interacting)
             {
                 Target = target;
                 View = view;
@@ -762,7 +763,7 @@ namespace FractalVisio.Fractal
             }
 
             public Texture2D Target { get; }
-            public FractalView View { get; }
+            public ViewState View { get; }
             public int Iterations { get; }
             public bool ExtendedPrecision { get; }
             public bool Interacting { get; }

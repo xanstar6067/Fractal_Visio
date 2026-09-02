@@ -2,8 +2,11 @@ using System;
 using System.Globalization;
 using UnityEngine;
 using UnityEngine.UI;
+using FractalVisio.Core;
+using FractalVisio.Gestures;
+using FractalVisio.Rendering;
 
-namespace FractalVisio.Fractal
+namespace FractalVisio.App
 {
     /// <summary>
     /// Small application coordinator: gestures -> precise view -> one of two
@@ -39,8 +42,8 @@ namespace FractalVisio.Fractal
         [SerializeField] private double maximumScale = 4d;
         [SerializeField, Range(0.2f, 2f)] private float pinchZoomSpeed = 1f;
 
-        private FractalView view;
-        private FractalView lastRequestedView;
+        private ViewState view;
+        private ViewState lastRequestedView;
         private MobileRenderProfile profile;
         private FractalGestureInput gestureInput;
         private FractalGpuRenderer gpuRenderer;
@@ -57,6 +60,9 @@ namespace FractalVisio.Fractal
         private RenderTexture interactiveGpuTexture;
         private RenderTexture settledGpuTexture;
         private Texture2D cpuTexture;
+        private Viewport interactiveViewport;
+        private Viewport settledViewport;
+        private Viewport cpuViewport;
 
         public double CurrentScale => view.scale.AsDouble;
         public double CurrentCenterX => view.x.AsDouble;
@@ -100,7 +106,7 @@ namespace FractalVisio.Fractal
             var gradient = BuildDefaultGradient();
             gpuRenderer = new FractalGpuRenderer(gradient);
             cpuRenderer = new FractalCpuRenderer(gradient);
-            view = FractalView.Default;
+            view = ViewState.Default;
             lastInteractionTime = -100f;
             RecreateTextures();
             renderDirty = true;
@@ -180,7 +186,7 @@ namespace FractalVisio.Fractal
 
         public void ResetView()
         {
-            view = FractalView.Default;
+            view = ViewState.Default;
             renderDirty = true;
             RenderExternalViewNow();
         }
@@ -203,72 +209,27 @@ namespace FractalVisio.Fractal
             var pinchMoved = (gesture.CurrentCenter - gesture.PreviousCenter).sqrMagnitude > 0.01f;
             if (gesture.HasZoom || gesture.HasRotation || pinchMoved)
             {
-                ApplyTwoFinger(gesture.PreviousCenter, gesture.CurrentCenter, gesture.ZoomRatio, gesture.RotationDelta);
+                ViewNavigator.PinchZoomRotate(
+                    ref view,
+                    DisplayViewport,
+                    gesture.PreviousCenter,
+                    gesture.CurrentCenter,
+                    gesture.ZoomRatio,
+                    pinchZoomSpeed,
+                    gesture.RotationDelta,
+                    minimumScale,
+                    maximumScale);
                 return;
             }
 
             if (gesture.PanDelta.sqrMagnitude > 0.01f)
             {
-                PanByPixels(gesture.PanDelta);
+                ViewNavigator.Pan(ref view, DisplayViewport, gesture.PanDelta);
             }
         }
 
-        private void PanByPixels(Vector2 delta)
-        {
-            var width = Math.Max(1, Screen.width);
-            var height = Math.Max(1, Screen.height);
-            var aspect = (double)width / height;
-
-            // Drag direction is screen-space; turn it into view-space by the rotation.
-            var ndx = -(double)delta.x / width * aspect;
-            var ndy = -(double)delta.y / height;
-            var cos = Math.Cos(view.rotation);
-            var sin = Math.Sin(view.rotation);
-            var rx = ndx * cos - ndy * sin;
-            var ry = ndx * sin + ndy * cos;
-
-            var scale = view.scale.AsDecimal;
-            view.x = new HighPrecision(view.x.AsDecimal + (decimal)rx * scale);
-            view.y = new HighPrecision(view.y.AsDecimal + (decimal)ry * scale);
-        }
-
-        private void ApplyTwoFinger(Vector2 previousPivot, Vector2 currentPivot, float rawZoomRatio, float rotationDelta)
-        {
-            var safeRatio = Mathf.Max(0.01f, rawZoomRatio);
-            var zoomRatio = Math.Pow(safeRatio, pinchZoomSpeed);
-
-            // Fractal point under the pivot before the transform.
-            var anchor = ScreenToFractal(previousPivot, view);
-
-            var newScaleDouble = Math.Clamp(view.scale.AsDouble / zoomRatio, minimumScale, maximumScale);
-            view.scale = HighPrecision.FromDouble(newScaleDouble);
-            view.rotation += rotationDelta;
-
-            // Slide the centre so that same fractal point sits under the pivot again;
-            // with a rotation-aware mapping this also turns the view about the pivot.
-            var moved = ScreenToFractal(currentPivot, view);
-            view.x = new HighPrecision(view.x.AsDecimal + anchor.x - moved.x);
-            view.y = new HighPrecision(view.y.AsDecimal + anchor.y - moved.y);
-        }
-
-        private static (decimal x, decimal y) ScreenToFractal(Vector2 point, in FractalView sourceView)
-        {
-            var width = Math.Max(1, Screen.width);
-            var height = Math.Max(1, Screen.height);
-            var aspect = (double)width / height;
-
-            var nx = ((double)point.x / width - 0.5d) * aspect;
-            var ny = (double)point.y / height - 0.5d;
-            var cos = Math.Cos(sourceView.rotation);
-            var sin = Math.Sin(sourceView.rotation);
-            var rx = nx * cos - ny * sin;
-            var ry = nx * sin + ny * cos;
-
-            var scale = sourceView.scale.AsDecimal;
-            return (
-                sourceView.x.AsDecimal + (decimal)rx * scale,
-                sourceView.y.AsDecimal + (decimal)ry * scale);
-        }
+        /// <summary>Viewport the user is looking at: gestures are expressed in these pixels.</summary>
+        private Viewport DisplayViewport => new(Screen.width, Screen.height);
 
         private bool ViewChanged()
         {
@@ -291,18 +252,26 @@ namespace FractalVisio.Fractal
             if (currentBackend == RenderBackend.GpuFloat)
             {
                 cpuRenderer?.Invalidate();
+                var viewport = interacting ? interactiveViewport : settledViewport;
                 var target = interacting ? interactiveGpuTexture : settledGpuTexture;
-                gpuRenderer.Render(view, iterations, target);
+                gpuRenderer.Render(ViewNavigator.ForViewport(view, viewport), iterations, target);
                 targetImage.texture = target;
+                targetImage.uvRect = viewport.VisibleUvRect;
             }
             else
             {
+                // The CPU path always draws into the settled-size buffer; interaction only
+                // changes how many progressive passes it runs.
                 var useExtendedPrecision = scale < extendedPrecisionScale;
-                cpuRenderer.Request(cpuTexture, view, iterations, useExtendedPrecision, interacting);
+                cpuRenderer.Request(
+                    cpuTexture,
+                    ViewNavigator.ForViewport(view, cpuViewport),
+                    iterations,
+                    useExtendedPrecision,
+                    interacting);
                 targetImage.texture = cpuTexture;
+                targetImage.uvRect = cpuViewport.VisibleUvRect;
             }
-
-            targetImage.uvRect = new Rect(0f, 0f, 1f, 1f);
             lastRequestedView = view;
             lastRequestWasInteractive = interacting;
             hasRequestedView = true;
@@ -329,7 +298,7 @@ namespace FractalVisio.Fractal
             nextHudUpdateTime = Time.unscaledTime + 0.1f;
 
             var scale = view.scale.AsDouble;
-            var reference = FractalView.Default.scale.AsDouble;
+            var reference = ViewState.Default.scale.AsDouble;
             var zoom = scale > 0d ? reference / scale : 0d;
 
             if (scaleValueText != null)
@@ -389,12 +358,13 @@ namespace FractalVisio.Fractal
             DestroyTextures();
             cachedScreenWidth = Mathf.Max(64, Screen.width);
             cachedScreenHeight = Mathf.Max(64, Screen.height);
-            var interactiveSize = profile.ResolveSize(cachedScreenWidth, cachedScreenHeight, true);
-            var settledSize = profile.ResolveSize(cachedScreenWidth, cachedScreenHeight, false);
+            interactiveViewport = profile.ResolveViewport(cachedScreenWidth, cachedScreenHeight, true);
+            settledViewport = profile.ResolveViewport(cachedScreenWidth, cachedScreenHeight, false);
+            cpuViewport = profile.ResolveCpuViewport(cachedScreenWidth, cachedScreenHeight);
 
-            interactiveGpuTexture = CreateRenderTexture(interactiveSize, "Fractal GPU Interactive");
-            settledGpuTexture = CreateRenderTexture(settledSize, "Fractal GPU Settled");
-            cpuTexture = CreateCpuTexture(settledSize, "Fractal CPU");
+            interactiveGpuTexture = CreateRenderTexture(interactiveViewport, "Fractal GPU Interactive");
+            settledGpuTexture = CreateRenderTexture(settledViewport, "Fractal GPU Settled");
+            cpuTexture = CreateCpuTexture(cpuViewport, "Fractal CPU");
             hasRequestedView = false;
         }
 
@@ -405,9 +375,9 @@ namespace FractalVisio.Fractal
             DestroyTexture(ref cpuTexture);
         }
 
-        private static RenderTexture CreateRenderTexture(Vector2Int size, string textureName)
+        private static RenderTexture CreateRenderTexture(in Viewport viewport, string textureName)
         {
-            var texture = new RenderTexture(size.x, size.y, 0, RenderTextureFormat.ARGB32)
+            var texture = new RenderTexture(viewport.Width, viewport.Height, 0, RenderTextureFormat.ARGB32)
             {
                 name = textureName,
                 filterMode = FilterMode.Bilinear,
@@ -419,9 +389,9 @@ namespace FractalVisio.Fractal
             return texture;
         }
 
-        private static Texture2D CreateCpuTexture(Vector2Int size, string textureName)
+        private static Texture2D CreateCpuTexture(in Viewport viewport, string textureName)
         {
-            var texture = new Texture2D(size.x, size.y, TextureFormat.RGBA32, false, false)
+            var texture = new Texture2D(viewport.Width, viewport.Height, TextureFormat.RGBA32, false, false)
             {
                 name = textureName,
                 filterMode = FilterMode.Bilinear,

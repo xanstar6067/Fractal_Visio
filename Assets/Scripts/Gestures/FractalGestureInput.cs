@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace FractalVisio.Fractal
+namespace FractalVisio.Gestures
 {
     public readonly struct FractalGestureFrame
     {

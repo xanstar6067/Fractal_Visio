@@ -1,0 +1,19 @@
+{
+    "name": "FractalVisio.App",
+    "rootNamespace": "FractalVisio.App",
+    "references": [
+        "FractalVisio.Core",
+        "FractalVisio.Rendering",
+        "FractalVisio.Gestures",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

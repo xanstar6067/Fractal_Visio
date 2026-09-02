@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace FractalVisio.Fractal
+namespace FractalVisio.Core
 {
     /// <summary>
     /// Lightweight high-precision wrapper used by the View layer.

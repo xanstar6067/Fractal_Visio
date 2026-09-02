@@ -1,14 +1,36 @@
-# Fractal_Visio: local agent instructions
+# FractalApp (namespace FractalVisio): local agent instructions
 
 These instructions are specific to this Windows PC and this Unity project.
 
-## Fixed paths
+## Machines and fixed paths
+
+Two machines share this project and Unity is installed differently on each. Identify the
+machine first, then use only that group. Never mix paths between groups, and never delete
+or "fix" the other machine's entries just because they do not resolve here.
+
+Identify by `$env:COMPUTERNAME`, or by which project root exists.
+
+### Home PC - `AIZEN-PC2`, user `Aizen-PC`
+
+- Project root: `Z:\Unity\FractalApp`
+- Unity Editor: `C:\Program Files\Unity\Hub\Editor\6000.6.0f1\Editor\Unity.exe` (Hub install)
+- Unity Hub: `C:\Program Files\Unity Hub\Unity Hub.exe`
+- Unity CLI: `C:\Users\Aizen-PC\AppData\Local\Unity\bin\unity.exe`
+- Editor version: `6000.6.0f1`
+
+### Work PC - user `pro`
 
 - Project root: `E:\VisualStudio_explore\Unity\Fractal_Visio`
-- Unity Editor: `E:\UnityEditors\6000.5.10f1\Editor\Unity.exe`
+- Unity Editor: `E:\UnityEditors\6000.5.10f1\Editor\Unity.exe` (standalone install, not under Hub)
 - Unity Hub: `C:\Program Files\Unity Hub\Unity Hub.exe`
 - Unity CLI: `C:\Users\pro\AppData\Local\Unity\bin\unity.exe`
+- Editor version: `6000.5.10f1`
+
+### Rules for both
+
 - Always invoke Unity CLI by its absolute path. Do not assume `unity` is on `PATH` and do not reinstall it merely because `unity` is not found.
+- The project root is also the current working directory; prefer it over the hard-coded root when passing `--project-path`.
+- `ProjectSettings\ProjectVersion.txt` is the source of truth for the editor version. If it does not match the machine entry above, say so instead of guessing a path.
 
 ## Administrator boundary
 
@@ -20,7 +42,7 @@ These instructions are specific to this Windows PC and this Unity project.
 
 ## Live Editor workflow
 
-1. Target this project explicitly with `--project-path 'E:\VisualStudio_explore\Unity\Fractal_Visio'` whenever the command supports it.
+1. Target this project explicitly with `--project-path` set to the current machine's project root (see Machines and fixed paths) whenever the command supports it.
 2. Check connectivity with the absolute CLI path and `pipeline list --format json` or `status --format json`.
 3. Discover commands with `command --format json`; filter with `--query` before requesting the full catalog when possible.
 4. Prefer live Pipeline commands over editing `.unity`, `.prefab`, or `.asset` YAML.
@@ -56,3 +78,40 @@ These instructions are specific to this Windows PC and this Unity project.
   (`decimal` is not Burst-compatible); only the `double`/`float` delta loop goes into the job.
 - GPU stays fp32-only by decision (deep-zoom perturbation on the GPU was unstable in Unity);
   deep zoom is CPU-only.
+
+## Architecture
+
+The project is being reshaped into an extensible template (multiple fractals, menus,
+settings, modules). The full plan lives in `docs\ARCHITECTURE.md` — read it before adding
+any feature that is not a bug fix, and update it when a design decision changes.
+
+- Layering is one-directional and enforced by `.asmdef` files:
+  `Core` <- `Rendering` / `Fractals` / `Gestures` <- `App` <- `UI` / `Modules`.
+- The gesture layer is `FractalVisio.Gestures`, never `FractalVisio.Input`: a namespace
+  segment named `Input` shadows `UnityEngine.Input` and breaks every `Input.GetTouch` call
+  in that assembly. The same trap applies to `Object`, `Random`, `Debug` and `Physics`.
+- **`Rendering` must never reference `Fractals`.** A fractal definition supplies its own
+  CPU pass delegate and material binder; the render engine stays fractal-agnostic.
+- Adding a fractal must cost exactly: one sampler struct, one `IFractalDefinition`, one
+  `.shader` including `Shaders\Common\FractalCommon.hlsl`, plus a definition asset and a
+  catalog entry. If a change to `CpuProgressiveRenderer`, `FractalPresenter` or
+  `SettingsScreen` is needed, the abstraction leaked — fix it there, not with a special case.
+- All mutable state belongs to `FractalSession`; UI and modules read it and call its
+  setters, never the renderers directly.
+- Per-pixel work is dispatched through generic struct samplers
+  (`where TSampler : struct, IEscapeSamplerD`), never through interface or delegate calls
+  inside the pixel loop. This is also the seam for the Burst migration below.
+- Render math takes an explicit `Viewport`; do not read `Screen.width/height` inside
+  `Core`, `Rendering` or `Fractals` — off-screen capture (save image) depends on this.
+- `Viewport` carries an `Overscan` margin: buffers cover more than the screen and the
+  presenter shows the centre through `RawImage.uvRect`. This is what removes the stretched
+  edge bars during pan and zoom-out. Overscan exists only in `Viewport` and the presenter —
+  navigator, kernels and shaders treat the widened viewport as an ordinary one. Never
+  reintroduce edge clamping as the fill for uncovered pixels in reprojection.
+- The CPU renderer publishes an iteration buffer; palette and colouring changes remap that
+  buffer instead of recomputing the fractal.
+- Saved state (`FractalStateDto`) stores centre/scale as `decimal` strings and parameters by
+  string key, with a `version` field. Never serialise the centre as `double`.
+
+Migration is staged (0 -> 9 in `docs\ARCHITECTURE.md`); each stage must leave the project
+compiling and visually unchanged.

@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 
-namespace FractalVisio.Fractal
+namespace FractalVisio.Core
 {
     /// <summary>
     /// An allocation-free double-double value. The unevaluated hi + lo pair carries
@@ -9,7 +9,7 @@ namespace FractalVisio.Fractal
     /// inside jobs.
     /// </summary>
     [Serializable]
-    internal readonly struct DoubleDouble
+    public readonly struct DoubleDouble
     {
         private const double Splitter = 134217729d; // 2^27 + 1
 

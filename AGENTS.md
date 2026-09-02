@@ -1,14 +1,36 @@
-# Fractal_Visio: local agent instructions
+# FractalApp (namespace FractalVisio): local agent instructions
 
 These instructions are specific to this Windows PC and this Unity project.
 
-## Fixed paths
+## Machines and fixed paths
+
+Two machines share this project and Unity is installed differently on each. Identify the
+machine first, then use only that group. Never mix paths between groups, and never delete
+or "fix" the other machine's entries just because they do not resolve here.
+
+Identify by `$env:COMPUTERNAME`, or by which project root exists.
+
+### Home PC - `AIZEN-PC2`, user `Aizen-PC`
+
+- Project root: `Z:\Unity\FractalApp`
+- Unity Editor: `C:\Program Files\Unity\Hub\Editor\6000.6.0f1\Editor\Unity.exe` (Hub install)
+- Unity Hub: `C:\Program Files\Unity Hub\Unity Hub.exe`
+- Unity CLI: `C:\Users\Aizen-PC\AppData\Local\Unity\bin\unity.exe`
+- Editor version: `6000.6.0f1`
+
+### Work PC - user `pro`
 
 - Project root: `E:\VisualStudio_explore\Unity\Fractal_Visio`
-- Unity Editor: `E:\UnityEditors\6000.5.10f1\Editor\Unity.exe`
+- Unity Editor: `E:\UnityEditors\6000.5.10f1\Editor\Unity.exe` (standalone install, not under Hub)
 - Unity Hub: `C:\Program Files\Unity Hub\Unity Hub.exe`
 - Unity CLI: `C:\Users\pro\AppData\Local\Unity\bin\unity.exe`
+- Editor version: `6000.5.10f1`
+
+### Rules for both
+
 - Always invoke Unity CLI by its absolute path. Do not assume `unity` is on `PATH` and do not reinstall it merely because `unity` is not found.
+- The project root is also the current working directory; prefer it over the hard-coded root when passing `--project-path`.
+- `ProjectSettings\ProjectVersion.txt` is the source of truth for the editor version. If it does not match the machine entry above, say so instead of guessing a path.
 
 ## Administrator boundary
 
@@ -20,7 +42,7 @@ These instructions are specific to this Windows PC and this Unity project.
 
 ## Live Editor workflow
 
-1. Target this project explicitly with `--project-path 'E:\VisualStudio_explore\Unity\Fractal_Visio'` whenever the command supports it.
+1. Target this project explicitly with `--project-path` set to the current machine's project root (see Machines and fixed paths) whenever the command supports it.
 2. Check connectivity with the absolute CLI path and `pipeline list --format json` or `status --format json`.
 3. Discover commands with `command --format json`; filter with `--query` before requesting the full catalog when possible.
 4. Prefer live Pipeline commands over editing `.unity`, `.prefab`, or `.asset` YAML.

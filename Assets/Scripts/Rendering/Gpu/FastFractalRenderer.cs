@@ -1,10 +1,11 @@
 using System;
 using UnityEngine;
+using FractalVisio.Core;
 
-namespace FractalVisio.Fractal
+namespace FractalVisio.Rendering
 {
     /// <summary>Single-pass fp32 renderer used only while pixel spacing is safe for the GPU.</summary>
-    internal sealed class FractalGpuRenderer : IDisposable
+    public sealed class FractalGpuRenderer : IDisposable
     {
         private const string ShaderName = "FractalVisio/MandelbrotFloat";
         private const int PaletteResolution = 256;
@@ -27,7 +28,7 @@ namespace FractalVisio.Fractal
 
         public bool IsAvailable => material != null;
 
-        public void Render(in FractalView view, int iterations, RenderTexture target)
+        public void Render(in ViewState view, int iterations, RenderTexture target)
         {
             if (!IsAvailable || target == null)
             {
