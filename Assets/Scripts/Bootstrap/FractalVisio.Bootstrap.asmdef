@@ -1,9 +1,11 @@
 {
-    "name": "FractalVisio.App",
-    "rootNamespace": "FractalVisio.App",
+    "name": "FractalVisio.Bootstrap",
+    "rootNamespace": "FractalVisio.Bootstrap",
     "references": [
         "FractalVisio.Core",
-        "FractalVisio.Rendering",
+        "FractalVisio.Gestures",
+        "FractalVisio.App",
+        "FractalVisio.Modules",
         "UnityEngine.UI"
     ],
     "includePlatforms": [],

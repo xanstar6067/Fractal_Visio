@@ -36,14 +36,20 @@ Core ──▶ (никого)
 Rendering ──▶ Core
 Fractals ──▶ Core                 (определения фракталов и ядра)
 Gestures ──▶ Core
-App ──▶ Core, Rendering, Fractals, Gestures
+App ──▶ Core, Rendering, Fractals
 UI ──▶ Core, App
 Modules ──▶ Core, App
+Bootstrap ──▶ всё вышеперечисленное
 ```
 
 Ключевое решение: **`Rendering` не знает про `Fractals`.** Определение фрактала само
 поставляет рендереру ядро (делегат прохода) и биндер материала. Поэтому добавление
 фрактала физически не может потребовать правки движка рендеринга.
+
+Второе: **композиционный корень — отдельная сборка `Bootstrap`.** Связывать слои может только
+тот, кто видит их все, а если посадить `AppBootstrap` в `App`, то `App` придётся сослаться на
+`Modules` — ровно тот цикл, ради запрета которого и заводились `.asmdef`. `Bootstrap` содержит
+единственный MonoBehaviour сцены и больше ничего.
 
 ---
 
@@ -74,8 +80,10 @@ Assets/
     Gestures/                          FractalVisio.Gestures.asmdef
       FractalGestureInput.cs  GestureFrame.cs
     App/                               FractalVisio.App.asmdef
-      FractalSession.cs  FractalPresenter.cs  AppContext.cs  AppBootstrap.cs
-      IAppModule.cs
+      FractalSession.cs  FractalPresenter.cs  AppServices.cs
+      IAppModule.cs  RenderStatus.cs
+    Bootstrap/                         FractalVisio.Bootstrap.asmdef
+      AppBootstrap.cs                  (единственный MonoBehaviour на сцене)
     Modules/                           FractalVisio.Modules.asmdef
       Screenshot/   ScreenshotModule.cs
       State/        StateStoreModule.cs  BookmarksModule.cs
@@ -379,23 +387,27 @@ public interface IFrameCapture
 public interface IAppModule
 {
     string Id { get; }
-    void Initialize(AppContext context);
+    void Initialize(AppServices services);
+    void Tick();                     // вызывается бутстрапом после презентера
     void Shutdown();
 }
 
-public sealed class AppContext
+public sealed class AppServices
 {
-    public FractalSession Session;
-    public FractalCatalog Catalog;
-    public PaletteLibrary Palettes;
-    public IFrameCapture Capture;
-    public IStateStore States;      // persistentDataPath, слоты + автосейв
-    public IUiRouter Ui;
+    public FractalSession Session { get; }
+    public IRenderStatusSource Render { get; }   // состояние рендера для HUD и прогресса
+    public Transform UiRoot { get; }
+    // дальше по мере роста: FractalCatalog, PaletteLibrary, IFrameCapture, IStateStore, IUiRouter
 }
 ```
 
-`AppBootstrap` (MonoBehaviour на сцене) держит список модулей и поднимает их в `Awake`.
-Добавить модуль = реализовать интерфейс и добавить в список. Модули не знают друг о друге.
+Тип называется `AppServices`, а не `AppContext`: `System.AppContext` существует, и в любом
+файле с `using System;` имя становится неоднозначным. Та же ловушка, что и с `Input` — см.
+раздел про `Gestures`.
+
+`AppBootstrap` держит список модулей и поднимает их при инициализации. Добавить модуль =
+реализовать интерфейс и добавить одну строку в список. Модули не знают друг о друге и не
+получают ни рендерер, ни другой модуль.
 
 Стартовый набор: `HudModule`, `ScreenshotModule`, `StateStoreModule`, `BookmarksModule`,
 `SettingsModule`.
@@ -446,7 +458,7 @@ public sealed class AppContext
 | 0 | ✅ **Сделано.** Папки + `.asmdef` (`Core`, `Rendering`, `Gestures`, `App`), перенос 8 файлов вместе с `.meta`, namespaces по слоям, `DoubleDouble`/`MobileRenderProfile`/оба рендерера сделаны `public`. Проект компилируется, компоненты в сцене на месте | низкий |
 | 1 | ✅ **Сделано.** `ViewState`, `Viewport`, `ViewNavigator` в `Core/View`; вся математика жестов ушла из контроллера, `Screen.*` остался только в сборке `DisplayViewport` и размеров текстур | низкий |
 | 2 | ✅ **Сделано.** Оверскан (см. 4.7): поля в `Viewport`, `ResolveCpuViewport`, `ViewNavigator.ForViewport`, `uvRect` в контроллере, маска непокрытых блоков с приоритетной волной в первом проходе, поля только в грубых проходах. Не делалось: билинейная репроекция (необязательна) | средний |
-| 3 | `FractalSession` + `AppContext`; `FractalSceneController` → `FractalPresenter`, HUD в `HudModule` | средний |
+| 3 | ✅ **Сделано.** `FractalSession` (владелец вида и `RenderQuality`, события `SessionChange`), `AppServices`, `IAppModule`, `RenderStatus`/`IRenderStatusSource`; `FractalSceneController` разделён на `FractalPresenter` (обычный класс, только рендер) и `AppBootstrap` (MonoBehaviour сцены, композиционный корень); HUD вынесен в `HudModule` | средний |
 | 4 | `IFractalDefinition` + `MandelbrotDefinition`; обобщённый `ProgressivePass<TSampler>`; `FractalCommon.hlsl` | средний — здесь трогается горячий цикл, замерить FPS до/после |
 | 5 | Буфер итераций + `IColorMapper` + `PaletteAsset`; палитры как ассеты | средний |
 | 6 | `IUiRouter`, `HudScreen`, `MainMenuScreen`, `SettingsScreen` c авто-генерацией по дескрипторам | низкий |

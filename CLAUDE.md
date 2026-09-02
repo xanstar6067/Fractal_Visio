@@ -86,10 +86,15 @@ settings, modules). The full plan lives in `docs\ARCHITECTURE.md` — read it be
 any feature that is not a bug fix, and update it when a design decision changes.
 
 - Layering is one-directional and enforced by `.asmdef` files:
-  `Core` <- `Rendering` / `Fractals` / `Gestures` <- `App` <- `UI` / `Modules`.
+  `Core` <- `Rendering` / `Fractals` / `Gestures` <- `App` <- `UI` / `Modules` <- `Bootstrap`.
+- The composition root is its own assembly (`FractalVisio.Bootstrap`, one MonoBehaviour on the
+  scene). Never move it into `App`: wiring must see `Modules`, and `App` referencing `Modules`
+  is the cycle the asmdefs exist to prevent.
 - The gesture layer is `FractalVisio.Gestures`, never `FractalVisio.Input`: a namespace
   segment named `Input` shadows `UnityEngine.Input` and breaks every `Input.GetTouch` call
-  in that assembly. The same trap applies to `Object`, `Random`, `Debug` and `Physics`.
+  in that assembly. The same trap applies to `Object`, `Random`, `Debug` and `Physics`. The
+  service bag is `AppServices` for the same reason - `System.AppContext` exists and makes
+  `AppContext` ambiguous in any file with `using System;`.
 - **`Rendering` must never reference `Fractals`.** A fractal definition supplies its own
   CPU pass delegate and material binder; the render engine stays fractal-agnostic.
 - Adding a fractal must cost exactly: one sampler struct, one `IFractalDefinition`, one
@@ -97,7 +102,11 @@ any feature that is not a bug fix, and update it when a design decision changes.
   catalog entry. If a change to `CpuProgressiveRenderer`, `FractalPresenter` or
   `SettingsScreen` is needed, the abstraction leaked — fix it there, not with a special case.
 - All mutable state belongs to `FractalSession`; UI and modules read it and call its
-  setters, never the renderers directly.
+  setters, never the renderers directly. Clamping and the iteration budget live in
+  `FractalSession.SetView` alone - do not recompute either at a call site.
+- `AppBootstrap` keeps its serialized field names (`targetImage`, `settleDelay`, ...). Renaming
+  one silently drops the value tuned in the scene; the scene link itself survives a class
+  rename only while file name and class name change together.
 - Per-pixel work is dispatched through generic struct samplers
   (`where TSampler : struct, IEscapeSamplerD`), never through interface or delegate calls
   inside the pixel loop. This is also the seam for the Burst migration below.
