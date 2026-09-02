@@ -28,7 +28,6 @@ namespace FractalVisio.Fractal
         [SerializeField, Min(8)] private int hudFontSize = 110;
 
         [Header("Quality")]
-        [SerializeField, Min(16)] private int interactionIterations = 96;
         [SerializeField, Min(32)] private int settledIterations = 320;
         [SerializeField, Min(64)] private int maximumIterations = 2048;
         [SerializeField, Min(0.05f)] private float settleDelay = 0.18f;
@@ -160,8 +159,7 @@ namespace FractalVisio.Fractal
 
         private void OnValidate()
         {
-            interactionIterations = Mathf.Max(16, interactionIterations);
-            settledIterations = Mathf.Max(interactionIterations, settledIterations);
+            settledIterations = Mathf.Max(32, settledIterations);
             maximumIterations = Mathf.Max(settledIterations, maximumIterations);
             gpuMinimumScale = Math.Max(1e-8d, gpuMinimumScale);
             extendedPrecisionScale = Math.Min(gpuMinimumScale, Math.Max(1e-20d, extendedPrecisionScale));
@@ -203,9 +201,9 @@ namespace FractalVisio.Fractal
         private void ApplyGesture(in FractalGestureFrame gesture)
         {
             var pinchMoved = (gesture.CurrentCenter - gesture.PreviousCenter).sqrMagnitude > 0.01f;
-            if (gesture.HasZoom || pinchMoved)
+            if (gesture.HasZoom || gesture.HasRotation || pinchMoved)
             {
-                ApplyPinch(gesture.PreviousCenter, gesture.CurrentCenter, gesture.ZoomRatio);
+                ApplyTwoFinger(gesture.PreviousCenter, gesture.CurrentCenter, gesture.ZoomRatio, gesture.RotationDelta);
                 return;
             }
 
@@ -219,44 +217,65 @@ namespace FractalVisio.Fractal
         {
             var width = Math.Max(1, Screen.width);
             var height = Math.Max(1, Screen.height);
+            var aspect = (double)width / height;
+
+            // Drag direction is screen-space; turn it into view-space by the rotation.
+            var ndx = -(double)delta.x / width * aspect;
+            var ndy = -(double)delta.y / height;
+            var cos = Math.Cos(view.rotation);
+            var sin = Math.Sin(view.rotation);
+            var rx = ndx * cos - ndy * sin;
+            var ry = ndx * sin + ndy * cos;
+
             var scale = view.scale.AsDecimal;
-            var aspect = (decimal)width / height;
-            var dx = -(decimal)delta.x / width * scale * aspect;
-            var dy = -(decimal)delta.y / height * scale;
-            view.x = new HighPrecision(view.x.AsDecimal + dx);
-            view.y = new HighPrecision(view.y.AsDecimal + dy);
+            view.x = new HighPrecision(view.x.AsDecimal + (decimal)rx * scale);
+            view.y = new HighPrecision(view.y.AsDecimal + (decimal)ry * scale);
         }
 
-        private void ApplyPinch(Vector2 previousCenter, Vector2 currentCenter, float rawZoomRatio)
+        private void ApplyTwoFinger(Vector2 previousPivot, Vector2 currentPivot, float rawZoomRatio, float rotationDelta)
         {
             var safeRatio = Mathf.Max(0.01f, rawZoomRatio);
             var zoomRatio = Math.Pow(safeRatio, pinchZoomSpeed);
-            var oldPoint = ScreenToFractal(previousCenter, view);
+
+            // Fractal point under the pivot before the transform.
+            var anchor = ScreenToFractal(previousPivot, view);
+
             var newScaleDouble = Math.Clamp(view.scale.AsDouble / zoomRatio, minimumScale, maximumScale);
             view.scale = HighPrecision.FromDouble(newScaleDouble);
-            var newPoint = ScreenToFractal(currentCenter, view);
-            view.x = new HighPrecision(view.x.AsDecimal + oldPoint.x - newPoint.x);
-            view.y = new HighPrecision(view.y.AsDecimal + oldPoint.y - newPoint.y);
+            view.rotation += rotationDelta;
+
+            // Slide the centre so that same fractal point sits under the pivot again;
+            // with a rotation-aware mapping this also turns the view about the pivot.
+            var moved = ScreenToFractal(currentPivot, view);
+            view.x = new HighPrecision(view.x.AsDecimal + anchor.x - moved.x);
+            view.y = new HighPrecision(view.y.AsDecimal + anchor.y - moved.y);
         }
 
         private static (decimal x, decimal y) ScreenToFractal(Vector2 point, in FractalView sourceView)
         {
             var width = Math.Max(1, Screen.width);
             var height = Math.Max(1, Screen.height);
-            var aspect = (decimal)width / height;
-            var normalizedX = (decimal)point.x / width - 0.5m;
-            var normalizedY = (decimal)point.y / height - 0.5m;
+            var aspect = (double)width / height;
+
+            var nx = ((double)point.x / width - 0.5d) * aspect;
+            var ny = (double)point.y / height - 0.5d;
+            var cos = Math.Cos(sourceView.rotation);
+            var sin = Math.Sin(sourceView.rotation);
+            var rx = nx * cos - ny * sin;
+            var ry = nx * sin + ny * cos;
+
             var scale = sourceView.scale.AsDecimal;
             return (
-                sourceView.x.AsDecimal + normalizedX * scale * aspect,
-                sourceView.y.AsDecimal + normalizedY * scale);
+                sourceView.x.AsDecimal + (decimal)rx * scale,
+                sourceView.y.AsDecimal + (decimal)ry * scale);
         }
 
         private bool ViewChanged()
         {
             return !lastRequestedView.x.Equals(view.x) ||
                    !lastRequestedView.y.Equals(view.y) ||
-                   !lastRequestedView.scale.Equals(view.scale);
+                   !lastRequestedView.scale.Equals(view.scale) ||
+                   lastRequestedView.rotation != view.rotation;
         }
 
         private void RequestRender(bool interacting)
@@ -266,10 +285,11 @@ namespace FractalVisio.Fractal
                 ? RenderBackend.GpuFloat
                 : RenderBackend.Cpu;
 
+            var iterations = ResolveIterations(scale);
+            view.iterations = iterations;
+
             if (currentBackend == RenderBackend.GpuFloat)
             {
-                var iterations = ResolveIterations(scale, interacting);
-                view.iterations = iterations;
                 cpuRenderer?.Invalidate();
                 var target = interacting ? interactiveGpuTexture : settledGpuTexture;
                 gpuRenderer.Render(view, iterations, target);
@@ -277,11 +297,6 @@ namespace FractalVisio.Fractal
             }
             else
             {
-                // CPU keeps the full (settled) iteration budget even while interacting.
-                // A gesture is kept responsive by the coarse-pass cap, not by fewer
-                // iterations: too small a budget paints large "interior" areas black.
-                var iterations = ResolveIterations(scale, false);
-                view.iterations = iterations;
                 var useExtendedPrecision = scale < extendedPrecisionScale;
                 cpuRenderer.Request(cpuTexture, view, iterations, useExtendedPrecision, interacting);
                 targetImage.texture = cpuTexture;
@@ -294,14 +309,14 @@ namespace FractalVisio.Fractal
             renderDirty = false;
         }
 
-        private int ResolveIterations(double scale, bool interacting)
+        // One budget for every state. The iteration count never drops during a
+        // gesture: responsiveness comes from coarse render passes, not fewer
+        // iterations (a reduced budget was visibly changing the image).
+        private int ResolveIterations(double scale)
         {
-            var baseIterations = interacting ? interactionIterations : settledIterations;
             var depth = Math.Max(0d, -Math.Log10(Math.Max(scale, 1e-28d)) - 3d);
-            var depthBudget = interacting
-                ? depth * 10d
-                : depth * 96d + Math.Max(0d, depth - 6d) * 192d;
-            return Mathf.Clamp(baseIterations + Mathf.RoundToInt((float)depthBudget), 16, maximumIterations);
+            var depthBudget = depth * 96d + Math.Max(0d, depth - 6d) * 192d;
+            return Mathf.Clamp(settledIterations + Mathf.RoundToInt((float)depthBudget), 16, maximumIterations);
         }
 
         private void UpdateHud(bool interacting)
@@ -319,10 +334,14 @@ namespace FractalVisio.Fractal
 
             if (scaleValueText != null)
             {
+                var rotationDegrees = view.rotation * (180d / Math.PI);
+                rotationDegrees -= Math.Floor(rotationDegrees / 360d) * 360d;
+
                 // Full-precision centre so a view can be reproduced on the PC via SetView().
                 scaleValueText.text = string.Concat(
                     "scale  ", scale.ToString("0.000000e+00", CultureInfo.InvariantCulture), "\n",
                     "zoom   x", zoom.ToString("0.###e+00", CultureInfo.InvariantCulture), "\n",
+                    "rot    ", rotationDegrees.ToString("0.0", CultureInfo.InvariantCulture), " deg\n",
                     "X  ", view.x.AsDecimal.ToString("G29", CultureInfo.InvariantCulture), "\n",
                     "Y  ", view.y.AsDecimal.ToString("G29", CultureInfo.InvariantCulture));
             }
@@ -458,11 +477,11 @@ namespace FractalVisio.Fractal
 
             if (computeBackendText == null)
             {
-                computeBackendText = CreateHudText("Backend", new Vector2(24f, -24f - 4.6f * hudFontSize));
+                computeBackendText = CreateHudText("Backend", new Vector2(24f, -24f - 5.6f * hudFontSize));
             }
 
             ConfigureHudText(scaleValueText, new Vector2(24f, -24f));
-            ConfigureHudText(computeBackendText, new Vector2(24f, -24f - 4.6f * hudFontSize));
+            ConfigureHudText(computeBackendText, new Vector2(24f, -24f - 5.6f * hudFontSize));
         }
 
         private Text CreateHudText(string objectName, Vector2 anchoredPosition)

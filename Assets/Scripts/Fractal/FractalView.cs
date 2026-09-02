@@ -8,6 +8,9 @@ namespace FractalVisio.Fractal
         public HighPrecision x;
         public HighPrecision y;
         public HighPrecision scale;
+
+        /// <summary>Screen rotation about the view centre, in radians, counter-clockwise.</summary>
+        public double rotation;
         public int iterations;
 
         public static FractalView Default => new()
@@ -15,6 +18,7 @@ namespace FractalVisio.Fractal
             x = -0.5m,
             y = 0m,
             scale = 3m,
+            rotation = 0d,
             iterations = 128
         };
     }

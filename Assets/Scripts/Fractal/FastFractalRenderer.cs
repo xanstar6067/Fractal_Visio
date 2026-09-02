@@ -41,6 +41,7 @@ namespace FractalVisio.Fractal
                 0f));
             material.SetFloat("_Scale", (float)view.scale.AsDouble);
             material.SetFloat("_Aspect", target.width / (float)Mathf.Max(1, target.height));
+            material.SetFloat("_Rotation", (float)view.rotation);
             material.SetInt("_Iterations", Mathf.Max(1, iterations));
             Graphics.Blit(null, target, material, 0);
         }

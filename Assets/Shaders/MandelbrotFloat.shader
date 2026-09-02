@@ -5,6 +5,7 @@ Shader "FractalVisio/MandelbrotFloat"
         _Center ("Center", Vector) = (-0.5, 0, 0, 0)
         _Scale ("Scale", Float) = 3
         _Aspect ("Aspect", Float) = 1
+        _Rotation ("Rotation", Float) = 0
         _Iterations ("Iterations", Int) = 128
         _PaletteTex ("Palette", 2D) = "white" {}
     }
@@ -31,6 +32,7 @@ Shader "FractalVisio/MandelbrotFloat"
             float4 _Center;
             float _Scale;
             float _Aspect;
+            float _Rotation;
             int _Iterations;
             CBUFFER_END
 
@@ -56,7 +58,11 @@ Shader "FractalVisio/MandelbrotFloat"
             half4 Frag(Varyings input) : SV_Target
             {
                 float2 offset = input.uv - 0.5;
-                float2 c = _Center.xy + float2(offset.x * _Aspect, offset.y) * _Scale;
+                float2 d = float2(offset.x * _Aspect, offset.y);
+                float sinR, cosR;
+                sincos(_Rotation, sinR, cosR);
+                d = float2(d.x * cosR - d.y * sinR, d.x * sinR + d.y * cosR);
+                float2 c = _Center.xy + d * _Scale;
 
                 // Main cardioid and period-2 bulb: very cheap on mobile GPUs.
                 float cardioidX = c.x - 0.25;

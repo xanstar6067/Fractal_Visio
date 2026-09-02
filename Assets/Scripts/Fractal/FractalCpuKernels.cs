@@ -30,8 +30,14 @@ namespace FractalVisio.Fractal
         private readonly int workerCount;
 
         private Color32[] frame = Array.Empty<Color32>();
+        private Color32[] reprojectScratch = Array.Empty<Color32>();
         private int frameWidth;
         private int frameHeight;
+
+        // The view `frame` currently represents, so a new request can warp the old
+        // pixels into place (pan / zoom / rotation) as an instant placeholder.
+        private FractalView frameView;
+        private bool frameViewValid;
 
         private Texture2D target;
         private Task renderTask;
@@ -141,6 +147,7 @@ namespace FractalVisio.Fractal
             hasQueued = false;
             target = null;
             Progress = 0f;
+            frameViewValid = false; // a texture rebuild follows; don't warp across it
             if (renderActive)
             {
                 cancellation?.Cancel();
@@ -175,6 +182,8 @@ namespace FractalVisio.Fractal
             renderTask = null;
             renderActive = false;
             frame = Array.Empty<Color32>();
+            reprojectScratch = Array.Empty<Color32>();
+            frameViewValid = false;
             frameWidth = 0;
             frameHeight = 0;
         }
@@ -201,6 +210,16 @@ namespace FractalVisio.Fractal
             }
 
             EnsureFrameBuffer(target.width, target.height);
+
+            // Warp the last image into the new view so the picture tracks the gesture
+            // instead of freezing while the fresh passes catch up.
+            if (frameViewValid)
+            {
+                ReprojectFrame(frameView, activeRequest.View);
+            }
+
+            frameView = activeRequest.View;
+            frameViewValid = true;
 
             var minDim = Math.Min(frameWidth, frameHeight);
             var floor = 0;
@@ -338,6 +357,89 @@ namespace FractalVisio.Fractal
             }
         }
 
+        /// <summary>
+        /// Resamples <see cref="frame"/> (currently showing view <paramref name="from"/>)
+        /// so it shows view <paramref name="to"/> instead: one similarity warp covering
+        /// pan, zoom and rotation. Newly exposed pixels take the clamped edge colour.
+        /// </summary>
+        private void ReprojectFrame(in FractalView from, in FractalView to)
+        {
+            var count = frameWidth * frameHeight;
+            if (count <= 0 || frame.Length != count)
+            {
+                return;
+            }
+
+            var scaleFrom = from.scale.AsDouble;
+            var scaleTo = to.scale.AsDouble;
+            if (!(scaleFrom > 0d) || !(scaleTo > 0d) || double.IsNaN(scaleFrom) || double.IsNaN(scaleTo))
+            {
+                return;
+            }
+
+            if (from.x.Equals(to.x) && from.y.Equals(to.y) &&
+                scaleFrom == scaleTo && from.rotation == to.rotation)
+            {
+                return;
+            }
+
+            // dst pixel (view 'to') -> D_to -> fractal point -> D_from -> src pixel.
+            //   D_from = b + M * D_to
+            //   M = (scaleTo / scaleFrom) * Rot(theta_to - theta_from)
+            //   b = Rot(-theta_from) * ((C_to - C_from) / scaleFrom)
+            var ratio = scaleTo / scaleFrom;
+            var deltaTheta = to.rotation - from.rotation;
+            var mCos = Math.Cos(deltaTheta) * ratio;
+            var mSin = Math.Sin(deltaTheta) * ratio;
+
+            var gx = (double)((to.x.AsDecimal - from.x.AsDecimal) / from.scale.AsDecimal);
+            var gy = (double)((to.y.AsDecimal - from.y.AsDecimal) / from.scale.AsDecimal);
+            var fCos = Math.Cos(-from.rotation);
+            var fSin = Math.Sin(-from.rotation);
+            var bx = gx * fCos - gy * fSin;
+            var by = gx * fSin + gy * fCos;
+
+            var w = frameWidth;
+            var h = frameHeight;
+            var aspect = w / (double)h;
+            var invAspect = 1d / aspect;
+
+            if (reprojectScratch.Length != count)
+            {
+                reprojectScratch = new Color32[count];
+            }
+
+            var src = frame;
+            var dst = reprojectScratch;
+            var options = new ParallelOptions { MaxDegreeOfParallelism = workerCount };
+
+            Parallel.For(0, h, options, py =>
+            {
+                var normalizedYTo = ((py + 0.5d) / h) - 0.5d;
+                var rowBase = py * w;
+                for (var px = 0; px < w; px++)
+                {
+                    var normalizedXTo = (((px + 0.5d) / w) - 0.5d) * aspect;
+
+                    var dFromX = bx + (normalizedXTo * mCos - normalizedYTo * mSin);
+                    var dFromY = by + (normalizedXTo * mSin + normalizedYTo * mCos);
+
+                    var srcXf = (dFromX * invAspect + 0.5d) * w - 0.5d;
+                    var srcYf = (dFromY + 0.5d) * h - 0.5d;
+
+                    var sx = (int)Math.Round(srcXf);
+                    var sy = (int)Math.Round(srcYf);
+                    if (sx < 0) sx = 0; else if (sx >= w) sx = w - 1;
+                    if (sy < 0) sy = 0; else if (sy >= h) sy = h - 1;
+
+                    dst[rowBase + px] = src[sy * w + sx];
+                }
+            });
+
+            reprojectScratch = src;
+            frame = dst;
+        }
+
         private static long CountNewSamples(int width, int height, int step, bool first)
         {
             var columns = (width + step - 1L) / step;
@@ -456,15 +558,20 @@ namespace FractalVisio.Fractal
             var normalizedX = (((pixelX + 0.5d) / job.Width) - 0.5d) * job.Aspect;
             var normalizedY = ((pixelY + 0.5d) / job.Height) - 0.5d;
 
+            // Same screen-space rotation the GPU shader applies, so the two backends
+            // agree across the fp32 -> fp64 handoff.
+            var rotatedX = normalizedX * job.RotationCos - normalizedY * job.RotationSin;
+            var rotatedY = normalizedX * job.RotationSin + normalizedY * job.RotationCos;
+
             if (job.ExtendedPrecision)
             {
-                var cx = DoubleDouble.Add(job.CenterX, DoubleDouble.Multiply(job.Scale, normalizedX));
-                var cy = DoubleDouble.Add(job.CenterY, DoubleDouble.Multiply(job.Scale, normalizedY));
+                var cx = DoubleDouble.Add(job.CenterX, DoubleDouble.Multiply(job.Scale, rotatedX));
+                var cy = DoubleDouble.Add(job.CenterY, DoubleDouble.Multiply(job.Scale, rotatedY));
                 return EvaluateExtended(cx, cy, job.MaxIterations, token);
             }
 
-            var doubleCx = job.CenterXDouble + job.ScaleDouble * normalizedX;
-            var doubleCy = job.CenterYDouble + job.ScaleDouble * normalizedY;
+            var doubleCx = job.CenterXDouble + job.ScaleDouble * rotatedX;
+            var doubleCy = job.CenterYDouble + job.ScaleDouble * rotatedY;
             return EvaluateDouble(doubleCx, doubleCy, job.MaxIterations, token);
         }
 
@@ -628,6 +735,8 @@ namespace FractalVisio.Fractal
                 CenterXDouble = CenterX.ToDouble();
                 CenterYDouble = CenterY.ToDouble();
                 ScaleDouble = Scale.ToDouble();
+                RotationCos = Math.Cos(request.View.rotation);
+                RotationSin = Math.Sin(request.View.rotation);
                 MaxIterations = request.Iterations;
                 ExtendedPrecision = request.ExtendedPrecision;
                 // Distrust "interior" only where a gesture forces a capped budget
@@ -650,6 +759,8 @@ namespace FractalVisio.Fractal
             public double CenterXDouble { get; }
             public double CenterYDouble { get; }
             public double ScaleDouble { get; }
+            public double RotationCos { get; }
+            public double RotationSin { get; }
             public int MaxIterations { get; }
             public bool ExtendedPrecision { get; }
             public bool TrustInterior { get; }
