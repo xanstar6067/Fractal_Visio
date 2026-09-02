@@ -117,6 +117,14 @@ any feature that is not a bug fix, and update it when a design decision changes.
 - Until the fractal menu exists, the active fractal is chosen by `AppBootstrap.startupFractalId`
   (an `IFractalDefinition.Id`, e.g. `mandelbrot` or `burning-ship`) or at runtime through
   `FractalSession.SetDefinition`. Do not add a second way.
+- The UI is uGUI, built in code, with no imported art: rounded shapes come from `UiSprites`
+  (procedural nine-slice) and every size from `UiTheme.Px`, which scales by screen height.
+  Frosted glass is a real backdrop blur - `BackdropBlur` keeps one small blurred copy of the
+  screen and each `GlassPanel` samples its own screen rectangle out of it. Do not thin the
+  panel tint below ~0.75 alpha: white text stops being readable over bright fractal bands.
+- `UiRouter.PointerOverUi` is what stops a drag on a panel from panning the fractal
+  underneath. It is computed on demand, not cached - a stale answer is exactly the frame a
+  tap lands on.
 - Only `Bootstrap` references `Fractals`. `App` reaches fractals through
   `IFractalDefinition` in `Core`, and `Rendering` likewise - do not add the reference.
 - Render math takes an explicit `Viewport`; do not read `Screen.width/height` inside

@@ -11,7 +11,7 @@ namespace FractalVisio.App
     /// keeps the RawImage pointed at the right texture and sub-rectangle. It reads the session and
     /// never writes to it; input, HUD and menus live elsewhere.
     /// </summary>
-    public sealed class FractalPresenter : IRenderStatusSource, IDisposable
+    public sealed class FractalPresenter : IRenderStatusSource, IBackdropSource, IDisposable
     {
         private readonly RawImage targetImage;
         private readonly FractalSession session;
@@ -75,6 +75,11 @@ namespace FractalVisio.App
         public string ActiveTextureName => targetImage != null && targetImage.texture != null
             ? targetImage.texture.name
             : string.Empty;
+
+        /// <summary>What is on screen, for the UI backdrop. See <see cref="IBackdropSource"/>.</summary>
+        Texture IBackdropSource.Texture => targetImage != null ? targetImage.texture : null;
+
+        Rect IBackdropSource.UvRect => targetImage != null ? targetImage.uvRect : new Rect(0f, 0f, 1f, 1f);
 
         /// <summary>Drive one frame. <paramref name="interacting"/> comes from the input layer.</summary>
         public void Tick(bool interacting)

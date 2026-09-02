@@ -7,6 +7,7 @@ using FractalVisio.Core;
 using FractalVisio.Fractals;
 using FractalVisio.Gestures;
 using FractalVisio.Modules;
+using FractalVisio.UI;
 
 namespace FractalVisio.Bootstrap
 {
@@ -53,6 +54,7 @@ namespace FractalVisio.Bootstrap
         private FractalPresenter presenter;
         private AppServices context;
         private FractalGestureInput gestureInput;
+        private UiRouter uiRouter;
         private float lastInteractionTime;
 
         /// <summary>The one place anything outside may read or change what is on screen.</summary>
@@ -84,7 +86,15 @@ namespace FractalVisio.Bootstrap
             }
 
             var gesture = gestureInput != null ? gestureInput.Current : default;
-            if (gesture.ResetRequested)
+
+            // A drag that starts on a panel belongs to the panel. Without this the fractal pans
+            // under the interface at the same time.
+            var pointerOverUi = uiRouter != null && uiRouter.PointerOverUi;
+            if (pointerOverUi)
+            {
+                gesture = default;
+            }
+            else if (gesture.ResetRequested)
             {
                 ResetView();
             }
@@ -165,12 +175,20 @@ namespace FractalVisio.Bootstrap
                 FractalCatalog.Find(startupFractalId) ?? FractalCatalog.Default,
                 BuildQuality());
             presenter ??= new FractalPresenter(targetImage, session);
-            context ??= new AppServices(session, presenter, transform);
+            context ??= new AppServices(
+                session,
+                presenter,
+                presenter,
+                FractalCatalog.All,
+                transform);
 
             if (modules.Count == 0)
             {
                 // Adding a module is one line here plus its file. Order is the tick order.
                 modules.Add(new HudModule(scaleValueText, computeBackendText, hudFontSize));
+
+                uiRouter = new UiRouter();
+                modules.Add(uiRouter);
 
                 for (var i = 0; i < modules.Count; i++)
                 {

@@ -426,9 +426,26 @@ public sealed class AppServices
 Экраны читают `FractalSession` и вызывают его сеттеры. Прямых ссылок на рендереры нет.
 `SettingsScreen` генерирует контролы по `Definition.Parameters` — см. 4.3.
 
-Рекомендация: UI Toolkit (UI Documents + USS) вместо uGUI для меню — верстка настроек
-данными, без ручной сборки RectTransform кодом. HUD и `RawImage` вывода могут остаться
-на uGUI, смешивать допустимо. Решение можно отложить до Этапа 4.
+**Решено: uGUI.** UI Toolkit пришлось бы подмешивать к уже существующему uGUI-канвасу с
+`RawImage` вывода и HUD, а главное — эффект матового стекла требует показать размытую копию
+экрана внутри панели, что в uGUI делается обычным `RawImage` с `uvRect`, а в UI Toolkit
+упирается в отсутствие простого способа отдать элементу произвольную текстуру с кропом.
+
+### Матовое стекло
+
+Фон приложения — одна текстура, которой мы владеем, поэтому блюр честный, а не нарисованный:
+
+1. `BackdropBlur` кропает её по `uvRect` (поля оверскана внутрь стекла попадать не должны),
+   ужимает до 384 пикселей по длинной стороне и прогоняет разделимый гауссиан двумя
+   проходами возрастающего радиуса — это доли миллисекунды.
+2. Каждая панель показывает свой кусок этой общей размытой текстуры: `RawImage.uvRect`
+   считается из экранного прямоугольника панели. Поэтому стекло следует за картинкой, а не
+   выглядит наклейкой.
+3. Сверху — затемняющий тинт, волосяная рамка и блик по верхней кромке; всё вместе скруглено
+   маской из процедурного nine-slice спрайта (`UiSprites`), никаких импортированных ассетов.
+
+Тинт непрозрачнее, чем хочется «по красоте»: на жёлтой полосе фрактала панель с alpha 0.6
+уходила в бледно-зелёный и белый текст пропадал. Проверено на скриншотах в Play-режиме.
 
 ---
 
@@ -477,7 +494,7 @@ public sealed class AppServices
 | 3 | ✅ **Сделано.** `FractalSession` (владелец вида и `RenderQuality`, события `SessionChange`), `AppServices`, `IAppModule`, `RenderStatus`/`IRenderStatusSource`; `FractalSceneController` разделён на `FractalPresenter` (обычный класс, только рендер) и `AppBootstrap` (MonoBehaviour сцены, композиционный корень); HUD вынесен в `HudModule` | средний |
 | 4 | ✅ **Сделано.** `IFractalDefinition`, `ICpuPassHost`, `IEscapeSamplerD/DD`, `FractalParameterSet`/дескрипторы, `PrecisionTier`; `MandelbrotDefinition` + два семплера-структуры + `FractalCatalog`; CPU-проход обобщён по типу семплера, GPU-рендерер берёт шейдер и уникформы у определения; `Shaders/Common/FractalCommon.hlsl` | средний |
 | 5 | Буфер итераций + `IColorMapper` + `PaletteAsset`; палитры как ассеты | средний |
-| 6 | `IUiRouter`, `HudScreen`, `MainMenuScreen`, `SettingsScreen` c авто-генерацией по дескрипторам | низкий |
+| 6 | 🔶 **Частично.** `UiRouter` (модуль), `UiScreen`, `SettingsScreen` с выбором фрактала, матовое стекло (`BackdropBlur`, `GlassPanel`, `UiSprites`, `UiTheme`), блокировка жестов через `PointerOverUi`. Осталось: авто-генерация контролов по `FractalParameterDescriptor`, экраны палитр и закладок | низкий |
 | 7 | Модули: `ScreenshotModule`, `StateStoreModule`, `BookmarksModule` | низкий |
 | 8 | ✅ **Сделано.** Burning Ship: два семплера-структуры, определение с параметром `bailout`, `BurningShip.shader` на общем include, строка в каталоге. Проверено: обе точности CPU, GPU, смена фрактала через `FractalSession.SetDefinition`, параметр доходит до ядра и до материала | низкий |
 | 9 | Burst + Jobs в `ProgressivePass` (см. заметку в CLAUDE.md) | отдельная задача |
@@ -490,7 +507,7 @@ public sealed class AppServices
 
 ## 8. Открытые вопросы
 
-- **UI Toolkit vs uGUI** для меню — решить на Этапе 5.
+
 - **Тесты.** `com.unity.test-framework` в `manifest.json` нет. Edit-mode тесты на
   `StateCodec` (round-trip сохранения) и на семплеры (эталонные значения итераций)
   дёшевы и окупятся при добавлении фракталов. Требует добавления пакета.
