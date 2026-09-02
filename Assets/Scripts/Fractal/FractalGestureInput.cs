@@ -99,9 +99,11 @@ namespace FractalVisio.Fractal
                     ? currentDistance / previousDistance
                     : 1f;
 
+                // Screen space is y-up while the view rotation is applied clockwise-positive,
+                // so the twist has to be negated for the fractal to follow the fingers.
                 var rawTwist = ShortestAngle(
-                    Mathf.Atan2(previousSecond.y - previousFirst.y, previousSecond.x - previousFirst.x),
-                    Mathf.Atan2(second.position.y - first.position.y, second.position.x - first.position.x));
+                    Mathf.Atan2(second.position.y - first.position.y, second.position.x - first.position.x),
+                    Mathf.Atan2(previousSecond.y - previousFirst.y, previousSecond.x - previousFirst.x));
 
                 if (!rotationEngaged)
                 {
