@@ -114,6 +114,9 @@ any feature that is not a bug fix, and update it when a design decision changes.
   while `Rendering` still cannot see `Fractals`. Keep samplers `struct`; a `class` sampler
   compiles and silently runs several times slower. This is also the Burst seam: only
   `ICpuPassHost`'s two methods have to learn to schedule jobs.
+- Until the fractal menu exists, the active fractal is chosen by `AppBootstrap.startupFractalId`
+  (an `IFractalDefinition.Id`, e.g. `mandelbrot` or `burning-ship`) or at runtime through
+  `FractalSession.SetDefinition`. Do not add a second way.
 - Only `Bootstrap` references `Fractals`. `App` reaches fractals through
   `IFractalDefinition` in `Core`, and `Rendering` likewise - do not add the reference.
 - Render math takes an explicit `Viewport`; do not read `Screen.width/height` inside

@@ -16,7 +16,8 @@ namespace FractalVisio.Fractals
     {
         private static readonly IFractalDefinition[] Definitions =
         {
-            new MandelbrotDefinition()
+            new MandelbrotDefinition(),
+            new BurningShipDefinition()
         };
 
         public static IReadOnlyList<IFractalDefinition> All => Definitions;

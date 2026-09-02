@@ -77,6 +77,12 @@ namespace FractalVisio.Core
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static DoubleDouble Negate(DoubleDouble value) => new(-value.Hi, -value.Lo);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static DoubleDouble Abs(DoubleDouble value) => value.Hi < 0d ? Negate(value) : value;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public double ToDouble() => Hi + Lo;
 
         private static DoubleDouble Normalize(double hi, double lo)

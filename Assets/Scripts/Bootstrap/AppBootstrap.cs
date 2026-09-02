@@ -31,6 +31,10 @@ namespace FractalVisio.Bootstrap
         [Header("Debug HUD")]
         [SerializeField, Min(8)] private int hudFontSize = 110;
 
+        [Header("Fractal")]
+        [SerializeField, Tooltip("IFractalDefinition.Id, e.g. mandelbrot or burning-ship. Falls back to the first in the catalog.")]
+        private string startupFractalId = "mandelbrot";
+
         [Header("Quality")]
         [SerializeField, Min(32)] private int settledIterations = 320;
         [SerializeField, Min(64)] private int maximumIterations = 2048;
@@ -157,7 +161,9 @@ namespace FractalVisio.Bootstrap
                 gestureInput = gameObject.AddComponent<FractalGestureInput>();
             }
 
-            session ??= new FractalSession(FractalCatalog.Default, BuildQuality());
+            session ??= new FractalSession(
+                FractalCatalog.Find(startupFractalId) ?? FractalCatalog.Default,
+                BuildQuality());
             presenter ??= new FractalPresenter(targetImage, session);
             context ??= new AppServices(session, presenter, transform);
 
