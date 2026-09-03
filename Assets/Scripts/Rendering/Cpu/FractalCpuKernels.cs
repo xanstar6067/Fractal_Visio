@@ -14,6 +14,11 @@ namespace FractalVisio.Rendering
     /// middle of the screen sharpens first and one tile of pure interior cannot
     /// hold up the rest of the pass.
     ///
+    /// What it accumulates is <b>escape values, not colours</b>. Colour is applied once per
+    /// published pass through an <see cref="IColorMapper"/>, which is what makes a palette or
+    /// colouring change a remap of the existing buffer - milliseconds - instead of a re-render,
+    /// which at depth is seconds.
+    ///
     /// The renderer never warps its own pixels to follow the view. A published frame
     /// is a picture of one <see cref="ViewState"/>, kept in <see cref="PublishedView"/>,
     /// and following the gesture is the compositor's job (see <c>FrameCompositor</c> and
@@ -29,7 +34,6 @@ namespace FractalVisio.Rendering
     /// </summary>
     public sealed class FractalCpuRenderer : IDisposable
     {
-        private const int PaletteResolution = 256;
         private const int InteractivePassCount = 2;      // steps 16, 8 while the view keeps moving
         private const double UploadIntervalSeconds = 0.04d;
 
@@ -55,26 +59,37 @@ namespace FractalVisio.Rendering
         // render on pixels nobody is looking at.
         private const int MarginStepThreshold = 4;
 
-        /// <summary>Interior, and "nothing rendered here yet". Shared with the compositor.</summary>
-        public static readonly Color32 InteriorColor = new(3, 5, 12, 255);
-
-        private readonly Color32[] palette;
+        private readonly IColorMapper mapper;
         private readonly int workerCount;
 
-        private Color32[] frame = Array.Empty<Color32>();
+        /// <summary>Escape values, one per pixel. Negative means the point never escaped.</summary>
+        private float[] escape = Array.Empty<float>();
 
-        // What the main thread actually uploads. The render worker copies `frame`
-        // into it only between passes - i.e. when `frame` is a whole-image render
-        // at one step size, never a half-updated mix of a pass and the coarser
-        // image beneath it. Guarded by `publishLock` so SetPixels32 never reads it
-        // mid-copy. The view that snapshot stands for travels with it.
+        /// <summary>Colours for the escape buffer, produced at publish time.</summary>
+        private Color32[] mapScratch = Array.Empty<Color32>();
+
+        // What the main thread actually uploads. The render worker fills it only between passes -
+        // i.e. when the escape buffer is a whole-image render at one step size, never a
+        // half-updated mix of a pass and the coarser image beneath it. Guarded by `publishLock`
+        // so SetPixels32 never reads it mid-copy. The view that snapshot stands for travels with it.
         private Color32[] publishFrame = Array.Empty<Color32>();
         private ViewState publishView;
         private bool publishValid;
         private readonly object publishLock = new object();
 
+        /// <summary>
+        /// Palette and colouring in force. Volatile because the render worker reads it when it maps
+        /// a pass and the main thread replaces it when the user picks a palette - a pass published
+        /// after the change should already wear the new colours.
+        /// </summary>
+        private volatile ColorState colorState = new(PaletteLibrary.Default, ColoringSettings.Default);
+
         private int frameWidth;
         private int frameHeight;
+
+        // Set by the render worker at the first publish, read by the main thread when the palette
+        // changes: volatile so a remap right after the first pass is not decided on a stale copy.
+        private volatile bool hasEscapeData;
 
         private Texture2D target;
         private Task renderTask;
@@ -98,13 +113,9 @@ namespace FractalVisio.Rendering
         /// background layer passes a small number so it cannot starve the renderer whose output
         /// the viewer is actually looking at.
         /// </param>
-        public FractalCpuRenderer(Gradient gradient, int maximumWorkers = 0)
+        public FractalCpuRenderer(IColorMapper colorMapper, int maximumWorkers = 0)
         {
-            palette = new Color32[PaletteResolution];
-            for (var i = 0; i < PaletteResolution; i++)
-            {
-                palette[i] = (Color32)gradient.Evaluate(i / (PaletteResolution - 1f));
-            }
+            mapper = colorMapper ?? throw new ArgumentNullException(nameof(colorMapper));
 
             // Keep one logical core free for Unity, rendering and Android OS work.
             var available = Math.Max(1, SystemInfo.processorCount - 1);
@@ -125,6 +136,23 @@ namespace FractalVisio.Rendering
 
         /// <summary>Aspect of the published buffer, margins included. Feeds <see cref="FramePlacement"/>.</summary>
         public double PublishedAspect { get; private set; } = 1d;
+
+        /// <summary>
+        /// Change palette or colouring. Recolours the existing escape buffer when the renderer is
+        /// idle; while a render is running the next published pass picks the change up on its own.
+        /// Either way the fractal is not recomputed.
+        /// </summary>
+        public void SetColoring(PaletteData palette, in ColoringSettings settings)
+        {
+            colorState = new ColorState(palette ?? PaletteLibrary.Default, settings);
+
+            if (renderActive || !hasEscapeData || target == null)
+            {
+                return;
+            }
+
+            MapAndStage(escape, publishView);
+        }
 
         public void Request(
             Texture2D texture,
@@ -165,7 +193,6 @@ namespace FractalVisio.Rendering
 
                 if (!hasQueued)
                 {
-                    uploaded = UploadFrame();
                     Progress = 1f;
                 }
             }
@@ -175,13 +202,15 @@ namespace FractalVisio.Rendering
                 StartQueued();
             }
 
-            if (renderActive && frameDirty)
+            if (frameDirty)
             {
                 var now = Time.realtimeSinceStartupAsDouble;
-                if (now - lastUploadTime >= UploadIntervalSeconds)
+                // Mid-render the upload rate is capped so SetPixels32 does not eat the frame; an
+                // idle renderer has nothing to protect, so a remap shows up immediately.
+                if (!renderActive || now - lastUploadTime >= UploadIntervalSeconds)
                 {
                     lastUploadTime = now;
-                    uploaded |= UploadFrame();
+                    uploaded = UploadFrame();
                 }
             }
 
@@ -203,12 +232,14 @@ namespace FractalVisio.Rendering
 
         /// <summary>
         /// Forget what the texture shows. The pixels stay, but they stop being usable as a
-        /// placeholder - call it when the fractal, its parameters or the palette changed, because
-        /// the frame is then a picture of something else entirely rather than of another view.
+        /// placeholder - call it when the fractal or its parameters changed, because the frame is
+        /// then a picture of something else entirely rather than of another view. A palette change
+        /// is not one of these: that is <see cref="SetColoring"/>.
         /// </summary>
         public void DiscardPublished()
         {
             HasPublished = false;
+            hasEscapeData = false;
             lock (publishLock)
             {
                 publishValid = false;
@@ -254,7 +285,8 @@ namespace FractalVisio.Rendering
             cancellation = null;
             renderTask = null;
             renderActive = false;
-            frame = Array.Empty<Color32>();
+            escape = Array.Empty<float>();
+            mapScratch = Array.Empty<Color32>();
             lock (publishLock)
             {
                 publishFrame = Array.Empty<Color32>();
@@ -262,6 +294,7 @@ namespace FractalVisio.Rendering
             }
 
             HasPublished = false;
+            hasEscapeData = false;
             frameWidth = 0;
             frameHeight = 0;
         }
@@ -270,20 +303,61 @@ namespace FractalVisio.Rendering
         internal void AddSamples(long count) => Interlocked.Add(ref samplesDone, count);
 
         /// <summary>
-        /// Snapshot <paramref name="source"/> as the next image to upload, together with the view
-        /// it depicts. The render worker calls this only from its sequential section between
-        /// passes, so the buffer holds one coherent step size rather than a torn pass boundary.
+        /// Colour <paramref name="source"/> and stage it as the next image to upload, together with
+        /// the view it depicts. The render worker calls this only from its sequential section
+        /// between passes, so the buffer holds one coherent step size rather than a torn pass
+        /// boundary.
         /// </summary>
-        internal void PublishPass(Color32[] source, in ViewState view)
+        internal void PublishPass(float[] source, in ViewState view)
         {
+            hasEscapeData = true;
+            MapAndStage(source, view);
+        }
+
+        private void MapAndStage(float[] source, in ViewState view)
+        {
+            var length = source.Length;
+            if (length <= 0)
+            {
+                return;
+            }
+
+            if (mapScratch.Length != length)
+            {
+                mapScratch = new Color32[length];
+            }
+
+            var state = colorState;
+            var chunk = Math.Max(4096, length / Math.Max(1, workerCount * 4));
+            var chunks = (length + chunk - 1) / chunk;
+            var localMapper = mapper;
+            var localSource = source;
+            var localTarget = mapScratch;
+            var settings = state.Settings;
+            var palette = state.Palette;
+
+            if (chunks <= 1)
+            {
+                localMapper.MapRange(localSource, localTarget, 0, length, palette, settings);
+            }
+            else
+            {
+                Parallel.For(
+                    0,
+                    chunks,
+                    new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+                    index => localMapper.MapRange(
+                        localSource, localTarget, index * chunk, chunk, palette, settings));
+            }
+
             lock (publishLock)
             {
-                if (publishFrame.Length != source.Length)
+                if (publishFrame.Length != length)
                 {
-                    publishFrame = new Color32[source.Length];
+                    publishFrame = new Color32[length];
                 }
 
-                Array.Copy(source, publishFrame, source.Length);
+                Array.Copy(localTarget, publishFrame, length);
                 publishView = view;
                 publishValid = true;
             }
@@ -343,7 +417,7 @@ namespace FractalVisio.Rendering
             cancellation = new CancellationTokenSource();
             var token = cancellation.Token;
             var job = new RenderJob(
-                this, frame, frameWidth, frameHeight, visibleRect, activeRequest, workerCount, floor, ceiling);
+                this, escape, frameWidth, frameHeight, visibleRect, activeRequest, workerCount, floor, ceiling);
             renderActive = true;
             renderTask = Task.Run(() => RenderProgressive(job, token), token);
         }
@@ -411,17 +485,18 @@ namespace FractalVisio.Rendering
         private void EnsureFrameBuffer(int width, int height)
         {
             var required = width * height;
-            if (frameWidth == width && frameHeight == height && frame.Length == required)
+            if (frameWidth == width && frameHeight == height && escape.Length == required)
             {
                 return; // keep the previous image; passes overwrite it in place
             }
 
-            frame = new Color32[required];
-            for (var i = 0; i < frame.Length; i++)
+            escape = new float[required];
+            for (var i = 0; i < escape.Length; i++)
             {
-                frame[i] = InteriorColor;
+                escape[i] = EscapeMath.Interior;
             }
 
+            mapScratch = new Color32[required];
             lock (publishLock)
             {
                 publishFrame = new Color32[required];
@@ -429,6 +504,7 @@ namespace FractalVisio.Rendering
             }
 
             HasPublished = false;
+            hasEscapeData = false;
             frameWidth = width;
             frameHeight = height;
         }
@@ -549,10 +625,10 @@ namespace FractalVisio.Rendering
             }
         }
 
-        /// <summary>Pixel to plane point to iteration count. Structs only - see IEscapeSamplerD.</summary>
+        /// <summary>Pixel to plane point to escape value. Structs only - see IEscapeSamplerD.</summary>
         private interface IPlaneSampler
         {
-            int SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token);
+            float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token);
         }
 
         private readonly struct PlaneSamplerD<TSampler> : IPlaneSampler
@@ -565,7 +641,7 @@ namespace FractalVisio.Rendering
                 this.sampler = sampler;
             }
 
-            public int SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token)
+            public float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token)
             {
                 Normalize(job, pixelX, pixelY, out var rotatedX, out var rotatedY);
                 var cx = job.CenterXDouble + job.ScaleDouble * rotatedX;
@@ -584,7 +660,7 @@ namespace FractalVisio.Rendering
                 this.sampler = sampler;
             }
 
-            public int SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token)
+            public float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token)
             {
                 Normalize(job, pixelX, pixelY, out var rotatedX, out var rotatedY);
                 var cx = DoubleDouble.Add(job.CenterX, DoubleDouble.Multiply(job.Scale, rotatedX));
@@ -624,13 +700,13 @@ namespace FractalVisio.Rendering
 
                 RenderPass(job, tiles, step, p == job.PassFloor, sampler, token);
 
-                // Whole frame now covered at this step: publish it as one piece.
+                // Whole frame now covered at this step: colour it and publish it as one piece.
                 // Marking dirty per tile instead would upload a frame that is part this
                 // pass and part the coarser image beneath it, and that boundary is the
                 // seam seen while panning - worst on the CPU-only deep-zoom path where a
                 // gesture keeps restarting the render before it can finish a pass.
                 token.ThrowIfCancellationRequested();
-                job.Owner.PublishPass(job.Frame, job.View);
+                job.Owner.PublishPass(job.Escape, job.View);
             }
         }
 
@@ -688,19 +764,18 @@ namespace FractalVisio.Rendering
                                 sy = job.Height - 1;
                             }
 
-                            var iteration = sampler.SampleAt(job, sx, sy, token);
+                            var value = sampler.SampleAt(job, sx, sy, token);
                             produced++;
 
-                            if (!job.TrustInterior && iteration >= job.MaxIterations)
+                            if (!job.TrustInterior && value < 0f)
                             {
                                 // A budget-capped "did not escape" is unknown, not proven
                                 // interior. Keep whatever is already in the buffer (the
-                                // coarser pass) instead of stamping it black.
+                                // coarser pass) instead of stamping it interior-coloured.
                                 continue;
                             }
 
-                            var color = ResolveColor(iteration, job.MaxIterations, job.Palette);
-                            FillBlock(job.Frame, job.Width, job.Height, bx, by, step, color);
+                            FillBlock(job.Escape, job.Width, job.Height, bx, by, step, value);
                         }
                     }
 
@@ -721,7 +796,7 @@ namespace FractalVisio.Rendering
             public int Next;
         }
 
-        private static void FillBlock(Color32[] buffer, int width, int height, int originX, int originY, int step, Color32 color)
+        private static void FillBlock(float[] buffer, int width, int height, int originX, int originY, int step, float value)
         {
             var x1 = originX + step;
             if (x1 > width)
@@ -740,41 +815,22 @@ namespace FractalVisio.Rendering
                 var row = y * width;
                 for (var x = originX; x < x1; x++)
                 {
-                    buffer[row + x] = color;
+                    buffer[row + x] = value;
                 }
             }
         }
 
-        private static Color32 ResolveColor(int iteration, int maxIterations, Color32[] colors)
+        /// <summary>Palette plus colouring, swapped as one so a worker never sees half a change.</summary>
+        private sealed class ColorState
         {
-            if (iteration >= maxIterations)
+            public ColorState(PaletteData palette, in ColoringSettings settings)
             {
-                return InteriorColor;
+                Palette = palette;
+                Settings = settings;
             }
 
-            var palettePosition = iteration * 0.021d;
-            palettePosition -= Math.Floor(palettePosition);
-            var scaled = palettePosition * (colors.Length - 1);
-            var firstIndex = (int)scaled;
-            var secondIndex = firstIndex + 1;
-            if (secondIndex >= colors.Length)
-            {
-                secondIndex = 0;
-            }
-
-            var t = scaled - firstIndex;
-            var a = colors[firstIndex];
-            var b = colors[secondIndex];
-            return new Color32(
-                LerpByte(a.r, b.r, t),
-                LerpByte(a.g, b.g, t),
-                LerpByte(a.b, b.b, t),
-                255);
-        }
-
-        private static byte LerpByte(byte a, byte b, double t)
-        {
-            return (byte)(a + (b - a) * t + 0.5d);
+            public PaletteData Palette { get; }
+            public ColoringSettings Settings { get; }
         }
 
         private readonly struct FrameRequest
@@ -813,7 +869,7 @@ namespace FractalVisio.Rendering
         {
             public RenderJob(
                 FractalCpuRenderer owner,
-                Color32[] frame,
+                float[] escape,
                 int width,
                 int height,
                 RectInt visibleRect,
@@ -823,7 +879,7 @@ namespace FractalVisio.Rendering
                 int passCeiling)
             {
                 Owner = owner;
-                Frame = frame;
+                Escape = escape;
                 Width = width;
                 Height = height;
                 Definition = request.Definition;
@@ -832,7 +888,6 @@ namespace FractalVisio.Rendering
                 VisibleRect = visibleRect;
                 HasMargin = visibleRect.width < width || visibleRect.height < height;
                 Aspect = width / (double)height;
-                Palette = owner.palette;
                 CenterX = DoubleDouble.FromDecimal(request.View.x.AsDecimal);
                 CenterY = DoubleDouble.FromDecimal(request.View.y.AsDecimal);
                 Scale = DoubleDouble.FromDecimal(request.View.scale.AsDecimal);
@@ -858,11 +913,12 @@ namespace FractalVisio.Rendering
 
             public FractalParameterSet Parameters { get; }
 
-            public Color32[] Frame { get; }
+            /// <summary>Escape values, one per pixel. Colour is applied later, at publish time.</summary>
+            public float[] Escape { get; }
+
             public int Width { get; }
             public int Height { get; }
             public double Aspect { get; }
-            public Color32[] Palette { get; }
 
             /// <summary>The view this render depicts; travels with the frame when it is published.</summary>
             public ViewState View { get; }

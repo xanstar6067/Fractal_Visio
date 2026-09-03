@@ -6,7 +6,8 @@ namespace FractalVisio.App
 {
     /// <summary>
     /// What changed in the session. Consumers read the flags to decide how much work the change
-    /// costs them: a palette change only remaps colours, a view change re-renders the fractal.
+    /// costs them: a palette change only remaps the escape buffer, a view change re-renders the
+    /// fractal.
     /// </summary>
     [Flags]
     public enum SessionChange
@@ -17,7 +18,10 @@ namespace FractalVisio.App
         Parameters = 1 << 2,
         Palette = 1 << 3,
         Coloring = 1 << 4,
-        Quality = 1 << 5
+        Quality = 1 << 5,
+
+        /// <summary>Interface scale and anything else about the UI rather than the picture.</summary>
+        Interface = 1 << 6
     }
 
     /// <summary>Iteration budget and the scale thresholds that pick a backend and a precision.</summary>
@@ -30,6 +34,14 @@ namespace FractalVisio.App
         public double MinimumScale;
         public double MaximumScale;
 
+        /// <summary>
+        /// Render resolution as a fraction of the screen, or 0 for "let the device profile decide".
+        /// Explicit values bypass the profile's long-edge cap: choosing 100% is a request for the
+        /// screen's own resolution, and silently rendering less than that would make the setting a
+        /// lie.
+        /// </summary>
+        public float RenderScale;
+
         public static RenderQuality Default => new RenderQuality
         {
             SettledIterations = 320,
@@ -37,7 +49,8 @@ namespace FractalVisio.App
             GpuMinimumScale = 2.5e-4d,
             ExtendedPrecisionScale = 1e-12d,
             MinimumScale = 1e-24d,
-            MaximumScale = 4d
+            MaximumScale = 4d,
+            RenderScale = 0f
         }.Sanitized();
 
         public RenderQuality Sanitized()
@@ -49,6 +62,7 @@ namespace FractalVisio.App
             result.ExtendedPrecisionScale = Math.Min(result.GpuMinimumScale, Math.Max(1e-20d, result.ExtendedPrecisionScale));
             result.MinimumScale = Math.Max(1e-28d, result.MinimumScale);
             result.MaximumScale = Math.Max(result.GpuMinimumScale, result.MaximumScale);
+            result.RenderScale = result.RenderScale <= 0f ? 0f : Mathf.Clamp(result.RenderScale, 0.25f, 1f);
             return result;
         }
     }
@@ -59,8 +73,8 @@ namespace FractalVisio.App
     /// funnels through <see cref="SetView"/>, so clamping and the iteration budget are decided in
     /// exactly one place.
     ///
-    /// It owns the active fractal definition and its parameters; palette and colouring land here
-    /// too in the next stage, and the <see cref="SessionChange"/> flags already carry them.
+    /// It owns the active fractal definition and its parameters, the palette and colouring, and -
+    /// until stage 7 gives them a home of their own - the interface settings.
     /// </summary>
     public sealed class FractalSession
     {
@@ -68,12 +82,18 @@ namespace FractalVisio.App
         private RenderQuality quality;
         private IFractalDefinition definition;
         private FractalParameterSet parameters;
+        private PaletteData palette;
+        private ColoringSettings coloring;
+        private InterfaceSettings interfaceSettings;
 
         public FractalSession(IFractalDefinition definition, in RenderQuality quality)
         {
             this.definition = definition ?? throw new ArgumentNullException(nameof(definition));
             this.quality = quality.Sanitized();
             parameters = FractalParameterSet.Defaults(definition.Parameters);
+            palette = PaletteLibrary.Default;
+            coloring = ColoringSettings.Default;
+            interfaceSettings = InterfaceSettings.Default;
             view = definition.DefaultView;
             ApplyBudget(ref view);
         }
@@ -87,6 +107,12 @@ namespace FractalVisio.App
         public IFractalDefinition Definition => definition;
 
         public FractalParameterSet Parameters => parameters;
+
+        public PaletteData Palette => palette;
+
+        public ColoringSettings Coloring => coloring;
+
+        public InterfaceSettings Interface => interfaceSettings;
 
         /// <summary>Switch fractal: view and parameters return to that fractal's own defaults.</summary>
         public void SetDefinition(IFractalDefinition value)
@@ -121,6 +147,45 @@ namespace FractalVisio.App
             Raise(SessionChange.Parameters);
         }
 
+        /// <summary>
+        /// Change the colour ramp. Deliberately its own flag: this is a remap of the escape buffer
+        /// the renderer already holds, not a reason to compute the fractal again.
+        /// </summary>
+        public void SetPalette(PaletteData value)
+        {
+            if (value == null || ReferenceEquals(value, palette))
+            {
+                return;
+            }
+
+            palette = value;
+            Raise(SessionChange.Palette);
+        }
+
+        public void SetColoring(in ColoringSettings value)
+        {
+            var next = value.Sanitized();
+            if (next.Equals(coloring))
+            {
+                return;
+            }
+
+            coloring = next;
+            Raise(SessionChange.Coloring);
+        }
+
+        public void SetInterface(in InterfaceSettings value)
+        {
+            var next = value.Sanitized();
+            if (next.Equals(interfaceSettings))
+            {
+                return;
+            }
+
+            interfaceSettings = next;
+            Raise(SessionChange.Interface);
+        }
+
         public void SetQuality(in RenderQuality value)
         {
             quality = value.Sanitized();
@@ -128,6 +193,21 @@ namespace FractalVisio.App
             ApplyBudget(ref next);
             view = next;
             Raise(SessionChange.Quality | SessionChange.View);
+        }
+
+        /// <summary>Render resolution as a fraction of the screen; 0 hands the choice back to the device profile.</summary>
+        public void SetRenderScale(float value)
+        {
+            var next = quality;
+            next.RenderScale = value;
+            next = next.Sanitized();
+            if (Mathf.Approximately(next.RenderScale, quality.RenderScale))
+            {
+                return;
+            }
+
+            quality = next;
+            Raise(SessionChange.Quality);
         }
 
         /// <summary>

@@ -52,9 +52,15 @@ namespace FractalVisio.Rendering
         private double lastRequestTime = double.NegativeInfinity;
         private double requestedFieldFactor = 1d;
 
-        public WideFieldLayer(Gradient gradient, int maximumWorkers)
+        public WideFieldLayer(IColorMapper colorMapper, int maximumWorkers)
         {
-            renderer = new FractalCpuRenderer(gradient, Mathf.Max(1, maximumWorkers));
+            renderer = new FractalCpuRenderer(colorMapper, Mathf.Max(1, maximumWorkers));
+        }
+
+        /// <summary>Keep the backdrop on the same palette as the sharp frame in front of it.</summary>
+        public void SetColoring(PaletteData palette, in ColoringSettings settings)
+        {
+            renderer.SetColoring(palette, settings);
         }
 
         /// <summary>The backdrop image, or null before the first pass lands.</summary>
@@ -90,7 +96,7 @@ namespace FractalVisio.Rendering
             var pixels = new Color32[viewport.Width * viewport.Height];
             for (var i = 0; i < pixels.Length; i++)
             {
-                pixels[i] = FractalCpuRenderer.InteriorColor;
+                pixels[i] = ColoringSettings.DefaultInteriorColor;
             }
 
             texture.SetPixels32(pixels);

@@ -24,6 +24,7 @@ namespace FractalVisio.UI
         private SettingsScreen settings;
         private int cachedWidth;
         private int cachedHeight;
+        private float builtInterfaceScale = 1f;
 
         public string Id => "ui";
 
@@ -48,10 +49,13 @@ namespace FractalVisio.UI
                 return;
             }
 
-            if (Screen.width != cachedWidth || Screen.height != cachedHeight)
+            if (Screen.width != cachedWidth ||
+                Screen.height != cachedHeight ||
+                !Mathf.Approximately(services.Session.Interface.Scale, builtInterfaceScale))
             {
-                // Every size in the UI is derived from screen height, so a rotation or a resize
-                // rebuilds rather than rescales - the generated corner sprites change with it.
+                // Sizes come from the screen density and the interface setting, and the rounded
+                // corner sprites are generated at a fixed pixel radius - so a rotation, a resize or
+                // a new interface size rebuilds rather than rescales.
                 Teardown();
                 Build();
             }
@@ -98,6 +102,10 @@ namespace FractalVisio.UI
         {
             cachedWidth = Screen.width;
             cachedHeight = Screen.height;
+
+            // The interface scale is a session setting; UiTheme is where every size reads it from.
+            builtInterfaceScale = services.Session.Interface.Scale;
+            UiTheme.UserScale = builtInterfaceScale;
 
             EnsureEventSystem();
 

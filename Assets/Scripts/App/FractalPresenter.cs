@@ -16,6 +16,9 @@ namespace FractalVisio.App
     /// viewer is now (the session), and how the two are reconciled (an affine map per frame, see
     /// <see cref="FramePlacement"/>). Nothing rewrites computed pixels to chase a gesture, which is
     /// what keeps a long pan from turning into a pile of resamplings of resamplings.
+    ///
+    /// Colour is likewise kept out of the render: the CPU renderer accumulates escape values and
+    /// applies a palette at publish time, so a palette change costs a remap rather than a render.
     /// </summary>
     public sealed class FractalPresenter : IRenderStatusSource, IBackdropSource, IDisposable
     {
@@ -43,6 +46,7 @@ namespace FractalVisio.App
         private readonly RawImage targetImage;
         private readonly FractalSession session;
         private readonly MobileRenderProfile profile;
+        private readonly IColorMapper colorMapper = new EscapeColorMapper();
 
         private FractalGpuRenderer gpuRenderer;
         private FractalCpuRenderer cpuRenderer;
@@ -64,11 +68,13 @@ namespace FractalVisio.App
         private RenderBackend currentBackend;
         private bool hasBackend;
         private bool renderDirty;
+        private bool coloringDirty = true;
         private bool placeholdersStale;
         private bool hasRequestedView;
         private bool lastRequestWasInteractive;
         private bool lastUsedExtendedPrecision;
         private double lastFieldFactor = 1d;
+        private float builtRenderScale = -1f;
         private int cachedScreenWidth;
         private int cachedScreenHeight;
 
@@ -79,11 +85,10 @@ namespace FractalVisio.App
 
             profile = MobileRenderProfile.Detect();
 
-            var gradient = BuildDefaultGradient();
-            gpuRenderer = new FractalGpuRenderer(gradient);
-            cpuRenderer = new FractalCpuRenderer(gradient);
-            wideLayer = new WideFieldLayer(gradient, profile.WideWorkers);
-            compositor = new FrameCompositor(FractalCpuRenderer.InteriorColor);
+            gpuRenderer = new FractalGpuRenderer();
+            cpuRenderer = new FractalCpuRenderer(colorMapper);
+            wideLayer = new WideFieldLayer(colorMapper, profile.WideWorkers);
+            compositor = new FrameCompositor(session.Coloring.InteriorColor);
 
             session.Changed += OnSessionChanged;
             RecreateTargets();
@@ -114,6 +119,11 @@ namespace FractalVisio.App
             ? targetImage.texture.name
             : string.Empty;
 
+        /// <summary>Pixel size of the buffer the fractal is actually computed into, for the HUD.</summary>
+        public Vector2Int RenderSize => currentBackend == RenderBackend.GpuFloat
+            ? new Vector2Int(settledViewport.Width, settledViewport.Height)
+            : cpuBuffer;
+
         /// <summary>What is on screen, for the UI backdrop. See <see cref="IBackdropSource"/>.</summary>
         Texture IBackdropSource.Texture => targetImage != null ? targetImage.texture : null;
 
@@ -127,11 +137,15 @@ namespace FractalVisio.App
                 return;
             }
 
-            if (Screen.width != cachedScreenWidth || Screen.height != cachedScreenHeight)
+            if (Screen.width != cachedScreenWidth ||
+                Screen.height != cachedScreenHeight ||
+                !Mathf.Approximately(session.Quality.RenderScale, builtRenderScale))
             {
                 RecreateTargets();
                 renderDirty = true;
             }
+
+            ApplyColoring();
 
             var view = session.View;
             motion.Sample(view.scale.AsDouble, Time.unscaledDeltaTime);
@@ -179,17 +193,49 @@ namespace FractalVisio.App
         private void OnSessionChanged(SessionChange change)
         {
             if ((change & (SessionChange.View | SessionChange.Quality | SessionChange.Definition |
-                           SessionChange.Parameters | SessionChange.Palette | SessionChange.Coloring)) != 0)
+                           SessionChange.Parameters)) != 0)
             {
                 renderDirty = true;
             }
 
-            // A different fractal, parameter or palette makes every kept frame a picture of
-            // something else. A different view does not - that is the whole point of keeping them.
-            if ((change & (SessionChange.Definition | SessionChange.Parameters |
-                           SessionChange.Palette | SessionChange.Coloring)) != 0)
+            // A different fractal or parameter makes every kept frame a picture of something else.
+            // A different view does not - that is the whole point of keeping them - and neither
+            // does a different palette, which is a recolour of the same escape values.
+            if ((change & (SessionChange.Definition | SessionChange.Parameters)) != 0)
             {
                 placeholdersStale = true;
+            }
+
+            if ((change & (SessionChange.Palette | SessionChange.Coloring)) != 0)
+            {
+                coloringDirty = true;
+            }
+        }
+
+        /// <summary>
+        /// Push palette and colouring down. The CPU path recolours the escape buffer it already
+        /// has; the GPU path has no buffer to recolour, so there it costs one re-render - cheap,
+        /// because the GPU path only runs where a whole frame is a millisecond.
+        /// </summary>
+        private void ApplyColoring()
+        {
+            if (!coloringDirty)
+            {
+                return;
+            }
+
+            coloringDirty = false;
+            var palette = session.Palette;
+            var coloring = session.Coloring;
+
+            cpuRenderer?.SetColoring(palette, coloring);
+            wideLayer?.SetColoring(palette, coloring);
+            gpuRenderer?.SetColoring(palette, coloring);
+            compositor?.SetFallbackColor(coloring.InteriorColor);
+
+            if (currentBackend == RenderBackend.GpuFloat)
+            {
+                renderDirty = true;
             }
         }
 
@@ -378,21 +424,23 @@ namespace FractalVisio.App
             DestroyTargets();
             cachedScreenWidth = Mathf.Max(64, Screen.width);
             cachedScreenHeight = Mathf.Max(64, Screen.height);
+            builtRenderScale = session.Quality.RenderScale;
 
-            interactiveViewport = profile.ResolveViewport(cachedScreenWidth, cachedScreenHeight, true);
-            settledViewport = profile.ResolveViewport(cachedScreenWidth, cachedScreenHeight, false);
-            cpuBuffer = profile.ResolveCpuBuffer(cachedScreenWidth, cachedScreenHeight);
+            interactiveViewport = profile.ResolveViewport(cachedScreenWidth, cachedScreenHeight, true, builtRenderScale);
+            settledViewport = profile.ResolveViewport(cachedScreenWidth, cachedScreenHeight, false, builtRenderScale);
+            cpuBuffer = profile.ResolveCpuBuffer(cachedScreenWidth, cachedScreenHeight, builtRenderScale);
             compositeViewport = new Viewport(cpuBuffer.x, cpuBuffer.y);
             lastCpuViewport = profile.ResolveCpuViewport(cpuBuffer, 1d);
             lastFieldFactor = 1d;
 
             interactiveGpuTexture = CreateRenderTexture(interactiveViewport, "Fractal GPU Interactive");
             settledGpuTexture = CreateRenderTexture(settledViewport, "Fractal GPU Settled");
-            cpuTexture = CreateCpuTexture(cpuBuffer, "Fractal CPU");
+            cpuTexture = CreateCpuTexture(cpuBuffer, "Fractal CPU", session.Coloring.InteriorColor);
             wideLayer?.Resize(profile.ResolveWideViewport(cachedScreenWidth, cachedScreenHeight));
 
             motion.Reset();
             hasRequestedView = false;
+            coloringDirty = true;
         }
 
         private void DestroyTargets()
@@ -416,7 +464,7 @@ namespace FractalVisio.App
             return texture;
         }
 
-        private static Texture2D CreateCpuTexture(Vector2Int size, string textureName)
+        private static Texture2D CreateCpuTexture(Vector2Int size, string textureName, Color32 clearColor)
         {
             var texture = new Texture2D(size.x, size.y, TextureFormat.RGBA32, false, false)
             {
@@ -430,7 +478,7 @@ namespace FractalVisio.App
             var pixels = new Color32[size.x * size.y];
             for (var i = 0; i < pixels.Length; i++)
             {
-                pixels[i] = FractalCpuRenderer.InteriorColor;
+                pixels[i] = clearColor;
             }
 
             texture.SetPixels32(pixels);
@@ -459,27 +507,6 @@ namespace FractalVisio.App
 
             UnityEngine.Object.Destroy(texture);
             texture = null;
-        }
-
-        // Stage 5 replaces this with a PaletteAsset chosen through the session.
-        private static Gradient BuildDefaultGradient()
-        {
-            var gradient = new Gradient();
-            gradient.SetKeys(
-                new[]
-                {
-                    new GradientColorKey(new Color(0.015f, 0.025f, 0.12f), 0f),
-                    new GradientColorKey(new Color(0.04f, 0.42f, 0.95f), 0.25f),
-                    new GradientColorKey(new Color(0.15f, 0.95f, 0.85f), 0.5f),
-                    new GradientColorKey(new Color(1f, 0.78f, 0.12f), 0.75f),
-                    new GradientColorKey(new Color(0.9f, 0.08f, 0.24f), 1f)
-                },
-                new[]
-                {
-                    new GradientAlphaKey(1f, 0f),
-                    new GradientAlphaKey(1f, 1f)
-                });
-            return gradient;
         }
     }
 }

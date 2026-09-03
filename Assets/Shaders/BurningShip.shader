@@ -7,8 +7,13 @@ Shader "FractalVisio/BurningShip"
         _Aspect ("Aspect", Float) = 1
         _Rotation ("Rotation", Float) = 0
         _Iterations ("Iterations", Int) = 128
-        _Bailout ("Bailout", Float) = 4
+        _Bailout ("Bailout", Float) = 256
         _PaletteTex ("Palette", 2D) = "white" {}
+        _ColorCycle ("Iterations per palette sweep", Float) = 48
+        _ColorOffset ("Palette offset", Float) = 0
+        _ColorSmooth ("Smooth colouring", Float) = 1
+        _ColorLogarithmic ("Logarithmic spread", Float) = 1
+        _InteriorColor ("Interior", Color) = (0.012, 0.02, 0.047, 1)
     }
 
     SubShader
@@ -37,6 +42,7 @@ Shader "FractalVisio/BurningShip"
                 int maxIterations = FractalMaxIterations();
                 float bailout = max(_Bailout, 4.0);
                 int iteration = 0;
+                float squared = 0.0;
                 bool escaped = false;
 
                 [loop]
@@ -50,7 +56,8 @@ Shader "FractalVisio/BurningShip"
                     // z -> (|Re z| + i|Im z|)^2 + c
                     z = float2(z.x * z.x - z.y * z.y, 2.0 * abs(z.x * z.y)) + c;
                     iteration = i + 1;
-                    if (dot(z, z) > bailout)
+                    squared = dot(z, z);
+                    if (squared > bailout)
                     {
                         escaped = true;
                         break;
@@ -62,7 +69,7 @@ Shader "FractalVisio/BurningShip"
                     return FRACTAL_INTERIOR_COLOR;
                 }
 
-                return FractalEscapeColor(iteration);
+                return FractalEscapeColor(FractalSmoothCount(iteration, squared, bailout));
             }
             ENDHLSL
         }

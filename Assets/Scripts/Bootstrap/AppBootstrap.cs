@@ -208,7 +208,11 @@ namespace FractalVisio.Bootstrap
                 GpuMinimumScale = gpuMinimumScale,
                 ExtendedPrecisionScale = extendedPrecisionScale,
                 MinimumScale = minimumScale,
-                MaximumScale = maximumScale
+                MaximumScale = maximumScale,
+
+                // Render resolution is a runtime setting, not an inspector one: carry whatever the
+                // user picked, so re-validating an inspector field does not silently reset it.
+                RenderScale = session != null ? session.Quality.RenderScale : 0f
             };
         }
 

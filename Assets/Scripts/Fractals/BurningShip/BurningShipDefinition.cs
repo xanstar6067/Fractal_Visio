@@ -16,9 +16,12 @@ namespace FractalVisio.Fractals
     {
         public const string BailoutKey = "bailout";
 
+        // Bailout is on the squared modulus. The default is far above the 4 that decides
+        // membership: the smooth escape count needs the orbit to be well clear of the set before
+        // it approximates anything, and below ~64 the image bands again. See EscapeMath.Smooth.
         private static readonly FractalParameterDescriptor[] ParameterList =
         {
-            new(BailoutKey, "Bailout", 4d, 4d, 4096d, FractalParameterKind.Double, logarithmic: true)
+            new(BailoutKey, "Bailout", 256d, 4d, 65536d, FractalParameterKind.Double, logarithmic: true)
         };
 
         public string Id => "burning-ship";
@@ -44,12 +47,12 @@ namespace FractalVisio.Fractals
 
         public void BindMaterial(Material material, in FractalParameterSet parameters)
         {
-            material.SetFloat(BailoutId, (float)parameters.Get(BailoutKey, 4d));
+            material.SetFloat(BailoutId, (float)parameters.Get(BailoutKey, 256d));
         }
 
         public void RunCpuPass(ICpuPassHost host, in FractalParameterSet parameters, bool extendedPrecision)
         {
-            var bailout = parameters.Get(BailoutKey, 4d);
+            var bailout = parameters.Get(BailoutKey, 256d);
 
             if (extendedPrecision)
             {

@@ -227,25 +227,54 @@ public readonly struct MandelbrotSamplerD : IEscapeSamplerD
 Это же место — будущий вход для Burst: `CpuPassRunner` меняется на планировщик
 `IJobParallelFor` без изменений в определениях фракталов (см. заметку в CLAUDE.md).
 
-### 4.5 Буфер итераций и раскраска
+### 4.5 Буфер escape-значений и раскраска
 
-Ключевое изменение относительно текущего кода: CPU-рендерер копит **буфер итераций**
-(`float[]`, дробные значения для smooth-раскраски), а не сразу `Color32[]`.
+CPU-рендерер копит **escape-значения** (`float[]`), а не сразу `Color32[]`. Цвет применяется
+один раз на опубликованный проход.
 
 ```csharp
 public interface IColorMapper
 {
-    void Map(ReadOnlySpan<float> iterations, Span<Color32> target,
-             int maxIterations, in PaletteData palette, in ColoringSettings settings);
+    void MapRange(float[] escapeValues, Color32[] target, int start, int count,
+                  PaletteData palette, in ColoringSettings settings);
 }
 ```
 
-Смена палитры или режима раскраски = повторный маппинг буфера (миллисекунды), без
-пересчёта фрактала (секунды на глубоком зуме). Без этого модуль палитр будет
-неприятно тормозить именно там, где он интереснее всего.
+Диапазон, а не весь буфер, и массивы, а не `Span`: вызывающий делит картинку по потокам, а
+`Span` нельзя захватить лямбдой, которая это сделает. Один виртуальный вызов на кусок бесплатен,
+на пиксель — нет.
 
-`ColoringSettings`: `Mode` (Escape / Smooth / OrbitTrap / Distance), `CycleLength`,
-`Offset`, `InteriorColor`, `Invert`.
+Смена палитры или режима раскраски = повторный маппинг буфера (миллисекунды), без пересчёта
+фрактала (секунды на глубоком зуме). Именно поэтому `SessionChange.Palette` и `Coloring` не
+поднимают `renderDirty` у презентера: он зовёт `SetColoring` у обоих CPU-слоёв, и те
+перекрашивают то, что уже посчитано.
+
+**Контракт семплера.** `IEscapeSamplerD/DD` возвращают `float` — непрерывный escape-счёт, либо
+**отрицательное** значение, если точка не вышла за bailout. Отрицательное — маркер интерьера,
+на который завязан весь путь раскраски; возвращать `maxIterations` нельзя. Непрерывность даёт
+`EscapeMath.Smooth`:
+
+```
+nu = i + 1 - log2( log(|z|^2) / log(bailout) )
+```
+
+Bailout при этом поднят далеко выше четвёрки, решающей принадлежность (Мандельброт: 65536): при
+маленьком bailout приближение плохое и полосы возвращаются. Цена — пара лишних итераций на
+выходящий пиксель.
+
+`ColoringSettings`: `Smooth` (брать дробную часть), `Mode` (`Linear` / `Logarithmic`),
+`CycleLength`, `Offset`, `InteriorColor`. Логарифмический режим по умолчанию: экран на старте —
+почти сплошь малые счётчики, и линейная развёртка отдаёт им один цвет на всё поле. Оба режима
+совпадают в нуле и на одном полном обороте палитры.
+
+**Инвариант:** формула позиции в палитре живёт в двух местах — `EscapeColorMapper.MapRange` и
+`FractalCommon.hlsl:FractalEscapeColor` — и они обязаны совпадать. Бэкенд переключается под
+зрителем на середине зума, и палитра, съезжающая в этот момент, читается как сбой.
+
+Палитры: `PaletteData` (256 стопов, циклическая выборка) + `PaletteLibrary` — список в коде, по
+той же причине, что и `FractalCatalog`. Каждая палитра заканчивается тем же цветом, с которого
+начинается, иначе на каждом обороте виден жёсткий шов. `PaletteAsset` появится на Этапе 7
+вместе с редактором.
 
 ### 4.6 Сохраняемое состояние
 
@@ -506,13 +535,14 @@ public sealed class AppServices
 | 2 | ✅ **Сделано, затем заменено Этапом 10.** Оверскан: поля в `Viewport`, `ResolveCpuViewport`, `ViewNavigator.ForViewport`, `uvRect` в контроллере, маска непокрытых блоков, поля только в грубых проходах. Поля и `MarginStepThreshold` остались; репроекция и маска непокрытых блоков удалены | средний |
 | 3 | ✅ **Сделано.** `FractalSession` (владелец вида и `RenderQuality`, события `SessionChange`), `AppServices`, `IAppModule`, `RenderStatus`/`IRenderStatusSource`; `FractalSceneController` разделён на `FractalPresenter` (обычный класс, только рендер) и `AppBootstrap` (MonoBehaviour сцены, композиционный корень); HUD вынесен в `HudModule` | средний |
 | 4 | ✅ **Сделано.** `IFractalDefinition`, `ICpuPassHost`, `IEscapeSamplerD/DD`, `FractalParameterSet`/дескрипторы, `PrecisionTier`; `MandelbrotDefinition` + два семплера-структуры + `FractalCatalog`; CPU-проход обобщён по типу семплера, GPU-рендерер берёт шейдер и уникформы у определения; `Shaders/Common/FractalCommon.hlsl` | средний |
-| 5 | Буфер итераций + `IColorMapper` + `PaletteAsset`; палитры как ассеты. Сюда же уходит smooth-раскраска: `IEscapeSamplerD/DD` начинают возвращать дробный номер итерации вместо `int` — контракт трогает каждый фрактал, поэтому делать до появления третьего | средний |
-| 6 | 🔶 **Частично.** `UiRouter` (модуль), `UiScreen`, `SettingsScreen` с выбором фрактала, матовое стекло (`BackdropBlur`, `GlassPanel`, `UiSprites`, `UiTheme`), блокировка жестов через `PointerOverUi`. Осталось: авто-генерация контролов по `FractalParameterDescriptor`, экраны палитр и закладок | низкий |
+| 5 | ✅ **Сделано.** Буфер escape-значений + `IColorMapper`/`EscapeColorMapper` + `PaletteData`/`PaletteLibrary` (5 палитр) + `ColoringSettings` (smooth, Linear/Logarithmic, cycle, offset, interior); `IEscapeSamplerD/DD` возвращают `float` с отрицательным маркером интерьера; bailout поднят до 65536 (Мандельброт) и 256 (Burning Ship); GPU и CPU считают позицию в палитре по одной формуле. Не делалось: `PaletteAsset` как ScriptableObject и редактор палитр — уходит в Этап 7 | средний |
+| 6 | 🔶 **Частично.** `UiRouter` (модуль), `UiScreen`, матовое стекло (`BackdropBlur`, `GlassPanel`, `UiSprites`, `UiTheme`), блокировка жестов через `PointerOverUi`. Панель настроек переведена на прокручиваемую колонку `SettingsSection` с секциями FRACTAL / PALETTE / COLOURING / RESOLUTION / INTERFACE SIZE; масштаб UI считается от `Screen.dpi`, а не от высоты экрана. Осталось: авто-генерация контролов по `FractalParameterDescriptor`, экран закладок, редактор палитр | низкий |
 | 7 | Модули: `ScreenshotModule`, `StateStoreModule`, `BookmarksModule` | низкий |
 | 8 | ✅ **Сделано.** Burning Ship: два семплера-структуры, определение с параметром `bailout`, `BurningShip.shader` на общем include, строка в каталоге. Проверено: обе точности CPU, GPU, смена фрактала через `FractalSession.SetDefinition`, параметр доходит до ядра и до материала | низкий |
 | 9 | Burst + Jobs в `ProgressivePass` (см. заметку в CLAUDE.md) | отдельная задача |
 | 10 | ✅ **Сделано.** Композиция кадров (см. 4.7): `FramePlacement`, `ViewMotion`, `FrameCompositor` + `FrameComposite.shader`, `WideFieldLayer`; репроекция и маска непокрытых блоков удалены; оверскан стал функцией скорости при постоянном размере буфера; полосы в CPU-проходе заменены тайлами 64×64 из общего курсора | средний |
 | 11 | Предиктивный рендер: оценка времени рендера по предыдущему результату, выбор целевого прохода и рендер точки, где вид будет к моменту прилёта кадра (аналог `MovementPredictor`, см. `RESEARCH-mandelbrot-browser.md` §4) | средний |
+| 13 | Мультиязычный фундамент: вынести все строки UI за `IStringCatalog` (ключ -> строка), локали как ассеты, язык — настройка сессии рядом с `InterfaceSettings`. Заложить **до** того, как меню разрастётся: сейчас строк порядка двадцати и они в двух файлах (`SettingsScreen`, `HudModule`), потом их будут сотни. Делать не срочно — пока идёт отладка и меню маленькое | низкий |
 | 12 | Пертурбация + BLA как отдельный `PrecisionTier`: опорная орбита в managed-коде, дельта в fp64, детекция глитчей. Снимает потолок `decimal` и делает глубину дешёвой — см. `RESEARCH-mandelbrot-browser.md` §7 | отдельная задача |
 
 Этапы 0–1 — фундамент, делаются подряд. Этап 10 вынесен вперёд намеренно: артефакты по краям при

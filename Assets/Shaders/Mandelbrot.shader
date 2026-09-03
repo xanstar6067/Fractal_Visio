@@ -8,6 +8,11 @@ Shader "FractalVisio/Mandelbrot"
         _Rotation ("Rotation", Float) = 0
         _Iterations ("Iterations", Int) = 128
         _PaletteTex ("Palette", 2D) = "white" {}
+        _ColorCycle ("Iterations per palette sweep", Float) = 48
+        _ColorOffset ("Palette offset", Float) = 0
+        _ColorSmooth ("Smooth colouring", Float) = 1
+        _ColorLogarithmic ("Logarithmic spread", Float) = 1
+        _InteriorColor ("Interior", Color) = (0.012, 0.02, 0.047, 1)
     }
 
     SubShader
@@ -38,9 +43,15 @@ Shader "FractalVisio/Mandelbrot"
                     return FRACTAL_INTERIOR_COLOR;
                 }
 
+                // Bailout well above the 4 that decides membership: the smooth escape count only
+                // approximates anything once the orbit is clear of the set. Matches
+                // MandelbrotSamplerD.Bailout - the two backends must agree.
+                const float bailout = 65536.0;
+
                 float2 z = 0.0;
                 int maxIterations = FractalMaxIterations();
                 int iteration = 0;
+                float squared = 0.0;
                 bool escaped = false;
 
                 [loop]
@@ -53,7 +64,8 @@ Shader "FractalVisio/Mandelbrot"
 
                     z = float2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
                     iteration = i + 1;
-                    if (dot(z, z) > 4.0)
+                    squared = dot(z, z);
+                    if (squared > bailout)
                     {
                         escaped = true;
                         break;
@@ -65,7 +77,7 @@ Shader "FractalVisio/Mandelbrot"
                     return FRACTAL_INTERIOR_COLOR;
                 }
 
-                return FractalEscapeColor(iteration);
+                return FractalEscapeColor(FractalSmoothCount(iteration, squared, bailout));
             }
             ENDHLSL
         }

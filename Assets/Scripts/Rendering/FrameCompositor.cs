@@ -39,8 +39,19 @@ namespace FractalVisio.Rendering
             }
         }
 
-        /// <summary>Colour for display pixels no layer could cover. Matches the interior colour.</summary>
-        public Color FallbackColor { get; }
+        /// <summary>Colour for display pixels no layer could cover. Follows the interior colour.</summary>
+        public Color FallbackColor { get; private set; }
+
+        public void SetFallbackColor(Color value)
+        {
+            if (material == null || FallbackColor == value)
+            {
+                return;
+            }
+
+            FallbackColor = value;
+            material.SetColor(FallbackColorId, value);
+        }
 
         /// <summary>The composed image, or null before the first successful compose.</summary>
         public Texture Texture => target;

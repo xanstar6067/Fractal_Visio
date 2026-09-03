@@ -16,13 +16,13 @@ namespace FractalVisio.Fractals
             this.bailout = bailout;
         }
 
-        public int Sample(double cx, double cy, int maxIterations, CancellationToken token)
+        public float Sample(double cx, double cy, int maxIterations, CancellationToken token)
         {
             var zx = 0d;
             var zy = 0d;
             var iteration = 0;
 
-            while (iteration < maxIterations && zx * zx + zy * zy <= bailout)
+            while (iteration < maxIterations)
             {
                 if ((iteration & 127) == 0 && token.IsCancellationRequested)
                 {
@@ -33,9 +33,15 @@ namespace FractalVisio.Fractals
                 zy = 2d * System.Math.Abs(zx * zy) + cy;
                 zx = nextX;
                 iteration++;
+
+                var squared = zx * zx + zy * zy;
+                if (squared > bailout)
+                {
+                    return EscapeMath.Smooth(iteration, squared, bailout);
+                }
             }
 
-            return iteration;
+            return EscapeMath.Interior;
         }
     }
 
@@ -48,7 +54,7 @@ namespace FractalVisio.Fractals
             this.bailout = bailout;
         }
 
-        public int Sample(in DoubleDouble cx, in DoubleDouble cy, int maxIterations, CancellationToken token)
+        public float Sample(in DoubleDouble cx, in DoubleDouble cy, int maxIterations, CancellationToken token)
         {
             var zx = new DoubleDouble(0d);
             var zy = new DoubleDouble(0d);
@@ -63,9 +69,10 @@ namespace FractalVisio.Fractals
 
                 var xSquared = DoubleDouble.Square(zx);
                 var ySquared = DoubleDouble.Square(zy);
-                if (DoubleDouble.Add(xSquared, ySquared).ToDouble() > bailout)
+                var squared = DoubleDouble.Add(xSquared, ySquared).ToDouble();
+                if (squared > bailout)
                 {
-                    break;
+                    return EscapeMath.Smooth(iteration, squared, bailout);
                 }
 
                 var product = DoubleDouble.Multiply(zx, zy);
@@ -74,7 +81,7 @@ namespace FractalVisio.Fractals
                 iteration++;
             }
 
-            return iteration;
+            return EscapeMath.Interior;
         }
     }
 }

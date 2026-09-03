@@ -21,10 +21,12 @@ Identify by `$env:COMPUTERNAME`, or by which project root exists.
 ### Work PC - user `pro`
 
 - Project root: `E:\VisualStudio_explore\Unity\Fractal_Visio`
-- Unity Editor: `E:\UnityEditors\6000.5.10f1\Editor\Unity.exe` (standalone install, not under Hub)
+- Unity Editor: `E:\UnityEditors\6000.6.0f1\Editor\Unity.exe` (standalone install, not under Hub)
 - Unity Hub: `C:\Program Files\Unity Hub\Unity Hub.exe`
 - Unity CLI: `C:\Users\pro\AppData\Local\Unity\bin\unity.exe`
-- Editor version: `6000.5.10f1`
+- Editor version: `6000.6.0f1` (updated 2026-09-03; the project was moved forward and cannot be
+  rolled back. Other editors are installed on this machine - `unity editors --format json` lists
+  them - but only this one has the Android module and matches `ProjectVersion.txt`.)
 
 ### Rules for both
 
@@ -160,8 +162,24 @@ any feature that is not a bug fix, and update it when a design decision changes.
   coverage) — making it sharper defeats its purpose.
 - The uv map goes to the shader as two `float4` rows, never a `float4x4`: a matrix uniform's
   row/column order depends on the compiler's convention, a dot product does not.
-- The CPU renderer will publish an iteration buffer (stage 5); palette and colouring changes
-  then remap that buffer instead of recomputing the fractal.
+- The CPU renderer accumulates **escape values, not colours** (`float[]`, negative = interior).
+  Colour is applied at publish time through `IColorMapper`, so a palette or colouring change is a
+  remap of the existing buffer, not a re-render. `SessionChange.Palette`/`Coloring` must therefore
+  never set `renderDirty` on the CPU path - the presenter calls `SetColoring` instead.
+- Samplers return a continuous escape count (`EscapeMath.Smooth`) or a negative interior marker,
+  and the bailout is far above the 4 that decides membership (65536 for Mandelbrot). A small
+  bailout makes the smooth term a bad approximation and the banding comes back.
+- The palette-position formula lives in exactly two places - `EscapeColorMapper.MapRange` and
+  `FractalCommon.hlsl:FractalEscapeColor` - and they must agree. The backend switches under the
+  viewer mid-zoom; a palette that shifts at the handoff reads as a glitch.
+- UI sizes are **dp, scaled by `Screen.dpi`**, never by screen height: a touch target has to be a
+  certain number of millimetres wide, and pixel counts say nothing about millimetres. Scaling by
+  height made every control a third of its size in landscape. `UiTheme.UserScale` (the INTERFACE
+  SIZE setting) is the escape hatch for a device that misreports its density. Nothing tappable
+  goes below `UiTheme.SegmentHeight` (48 dp).
+- Adding a setting is one `SettingsSection.Create` call plus the two lines that read and write it
+  on the session. If a setting needs a new control type, add the widget in `UI/Widgets` - do not
+  hand-lay-out rows in `SettingsScreen`.
 - Saved state (`FractalStateDto`) stores centre/scale as `decimal` strings and parameters by
   string key, with a `version` field. Never serialise the centre as `double`.
 

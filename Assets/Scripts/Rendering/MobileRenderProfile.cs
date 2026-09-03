@@ -93,19 +93,42 @@ namespace FractalVisio.Rendering
         }
 
         /// <summary>GPU target geometry. No margin: the GPU re-renders the whole view every frame.</summary>
-        public Viewport ResolveViewport(int screenWidth, int screenHeight, bool interacting)
+        public Viewport ResolveViewport(int screenWidth, int screenHeight, bool interacting, float renderScale)
         {
-            var size = ResolveSize(screenWidth, screenHeight, interacting ? InteractionScale : SettledScale);
+            var scale = interacting ? ResolveInteractionScale(renderScale) : ResolveSettledScale(renderScale);
+            var size = ResolveSize(screenWidth, screenHeight, scale, renderScale <= 0f);
             return new Viewport(size.x, size.y);
         }
 
         /// <summary>
-        /// Size of the CPU buffer. Fixed for a given screen: the field factor changes what the
-        /// buffer covers, never how many pixels it has, so the texture is allocated once.
+        /// Size of the CPU buffer. Fixed for a given screen and render scale: the field factor
+        /// changes what the buffer covers, never how many pixels it has, so the texture is
+        /// allocated once per resolution change rather than per gesture.
         /// </summary>
-        public Vector2Int ResolveCpuBuffer(int screenWidth, int screenHeight)
+        public Vector2Int ResolveCpuBuffer(int screenWidth, int screenHeight, float renderScale)
         {
-            return ResolveSize(screenWidth, screenHeight, SettledScale);
+            return ResolveSize(screenWidth, screenHeight, ResolveSettledScale(renderScale), renderScale <= 0f);
+        }
+
+        /// <summary>Settled resolution: the user's choice when they made one, else the profile's.</summary>
+        private float ResolveSettledScale(float renderScale)
+        {
+            return renderScale > 0f ? renderScale : SettledScale;
+        }
+
+        /// <summary>
+        /// Mid-gesture resolution. An explicit choice is scaled down by the same ratio the profile
+        /// uses, so picking a higher resolution does not also make dragging heavier in proportion.
+        /// </summary>
+        private float ResolveInteractionScale(float renderScale)
+        {
+            if (renderScale <= 0f)
+            {
+                return InteractionScale;
+            }
+
+            var ratio = InteractionScale / Mathf.Max(0.01f, SettledScale);
+            return Mathf.Clamp(renderScale * ratio, 0.2f, renderScale);
         }
 
         /// <summary>
@@ -132,12 +155,19 @@ namespace FractalVisio.Rendering
             return new Viewport(width, height);
         }
 
-        private Vector2Int ResolveSize(int screenWidth, int screenHeight, float qualityScale)
+        /// <param name="applyLongEdgeCap">
+        /// Whether the device profile's long-edge cap applies. It does in Auto, where the cap is
+        /// the profile's whole opinion about what this device can afford; it does not when the user
+        /// asked for a resolution, because silently rendering less than they picked would make the
+        /// setting a lie. A hard 4096 still stands, to keep a buffer allocation sane.
+        /// </param>
+        private Vector2Int ResolveSize(int screenWidth, int screenHeight, float qualityScale, bool applyLongEdgeCap)
         {
             var safeWidth = Mathf.Max(64, screenWidth);
             var safeHeight = Mathf.Max(64, screenHeight);
             var longEdge = Mathf.Max(safeWidth, safeHeight);
-            var targetLongEdge = Mathf.Max(64, Mathf.RoundToInt(Mathf.Min(longEdge, MaxLongEdge) * qualityScale));
+            var cap = applyLongEdgeCap ? MaxLongEdge : 4096;
+            var targetLongEdge = Mathf.Max(64, Mathf.RoundToInt(Mathf.Min(longEdge, cap) * qualityScale));
             var scale = targetLongEdge / (float)longEdge;
             var width = AlignToEight(Mathf.Max(64, Mathf.RoundToInt(safeWidth * scale)));
             var height = AlignToEight(Mathf.Max(64, Mathf.RoundToInt(safeHeight * scale)));

@@ -2,12 +2,15 @@
 #define FRACTALVISIO_FRACTAL_COMMON_INCLUDED
 
 // Everything every fractal shader shares: the fullscreen triangle, the screen-to-plane mapping,
-// the palette lookup and the common uniforms. A fractal shader includes this and writes only its
-// own iteration.
+// the colouring and the common uniforms. A fractal shader includes this and writes only its own
+// iteration.
 //
 // A fractal with extra uniforms declares them before the include:
 //   #define FRACTAL_EXTRA_UNIFORMS float2 _JuliaC; float _Power;
 // and sets them from IFractalDefinition.BindMaterial.
+//
+// The colouring here must stay in step with Rendering/Coloring/EscapeColorMapper.cs. The backend
+// switches under the viewer mid-zoom, so a palette that shifts at the handoff reads as a glitch.
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
@@ -24,6 +27,11 @@ float _Scale;
 float _Aspect;
 float _Rotation;
 int _Iterations;
+float _ColorCycle;
+float _ColorOffset;
+float _ColorSmooth;
+float _ColorLogarithmic;
+float4 _InteriorColor;
 FRACTAL_EXTRA_UNIFORMS
 CBUFFER_END
 
@@ -64,12 +72,37 @@ int FractalMaxIterations()
     return clamp(_Iterations, 1, 2048);
 }
 
-#define FRACTAL_INTERIOR_COLOR half4(0.012, 0.02, 0.047, 1.0)
+#define FRACTAL_INTERIOR_COLOR half4(_InteriorColor.rgb, 1.0)
 
-half4 FractalEscapeColor(int iteration)
+// Continuous escape count for a power-2 map. Mirrors Core/Rendering/IEscapeSampler.cs
+// (EscapeMath.Smooth): 1 at the moment of escape, 2 one iteration later, which is what makes the
+// value continuous across the iteration boundary instead of stepping.
+float FractalSmoothCount(int iteration, float squaredModulus, float bailout)
 {
-    float palettePosition = frac(iteration * 0.021);
-    return SAMPLE_TEXTURE2D(_PaletteTex, sampler_PaletteTex, float2(palettePosition, 0.5));
+    if (squaredModulus <= 1.0 || bailout <= 1.0)
+    {
+        return iteration + 1.0;
+    }
+
+    float ratio = log(squaredModulus) / log(bailout);
+    if (ratio <= 0.0)
+    {
+        return iteration + 1.0;
+    }
+
+    return iteration + 1.0 - log2(ratio);
+}
+
+// Escape count onto the palette. `_ColorSmooth` drops the fraction rather than the sampler doing
+// it, so the switch stays a recolour on both backends.
+half4 FractalEscapeColor(float escapeCount)
+{
+    float count = lerp(floor(escapeCount), escapeCount, saturate(_ColorSmooth));
+    float cycle = max(_ColorCycle, 1.0);
+    float linearPosition = count / cycle;
+    float logPosition = log(1.0 + max(count, 0.0)) / log(1.0 + cycle);
+    float normalized = lerp(linearPosition, logPosition, saturate(_ColorLogarithmic));
+    return SAMPLE_TEXTURE2D(_PaletteTex, sampler_PaletteTex, float2(frac(normalized + _ColorOffset), 0.5));
 }
 
 #endif // FRACTALVISIO_FRACTAL_COMMON_INCLUDED
