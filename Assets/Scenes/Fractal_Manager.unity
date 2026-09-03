@@ -430,7 +430,7 @@ MonoBehaviour:
   scaleValueText: {fileID: 555555555555555557}
   computeBackendText: {fileID: 666666666666666663}
   hudFontSize: 110
-  interactionIterations: 96
+  startupFractalId: mandelbrot
   settledIterations: 320
   maximumIterations: 2048
   settleDelay: 0.15

@@ -67,10 +67,13 @@ Identify by `$env:COMPUTERNAME`, or by which project root exists.
 
 ## Rendering notes
 
-- The CPU fractal kernel (`Assets\Scripts\Fractal\FractalCpuKernels.cs`) runs on plain
-  managed `Parallel.ForEach` over horizontal bands, coarse-to-fine (steps 16 -> 1). This
-  is a deliberate interim choice: it matches the WPF prototype, keeps `decimal`/`double`
-  math available, and adds no packages.
+- The CPU fractal kernel (`Assets\Scripts\Rendering\Cpu\FractalCpuKernels.cs`) runs on plain
+  managed `Parallel.For`, coarse-to-fine (steps 16 -> 1), with 64x64 tiles handed out from a
+  shared cursor. This is a deliberate interim choice: it matches the WPF prototype, keeps
+  `decimal`/`double` math available, and adds no packages. Tiles, not bands: a fractal pixel
+  costs anything from a few iterations to the whole budget, so equal-area bands finish at wildly
+  different times and a pass ends when the slowest one does. Tile origins must stay aligned to
+  16 - the "already computed in a coarser pass" skip tests absolute pixel coordinates.
 - **Future improvement:** move the per-pixel escape/delta iteration into Burst + Unity.Jobs
   (`com.unity.burst`, `com.unity.collections`, `com.unity.mathematics`) as an
   `IJobParallelFor` over a `NativeArray<Color32>`, scheduled per progressive pass.
@@ -129,20 +132,39 @@ any feature that is not a bug fix, and update it when a design decision changes.
   `IFractalDefinition` in `Core`, and `Rendering` likewise - do not add the reference.
 - Render math takes an explicit `Viewport`; do not read `Screen.width/height` inside
   `Core`, `Rendering` or `Fractals` — off-screen capture (save image) depends on this.
-- `Viewport` carries an `Overscan` margin: buffers cover more than the screen and the
-  presenter shows the centre through `RawImage.uvRect`. This is what removes the stretched
-  edge bars during pan and zoom-out. Overscan exists only in `Viewport` and the presenter —
-  navigator, kernels and shaders treat the widened viewport as an ordinary one. Never
-  reintroduce edge clamping as the fill for uncovered pixels in reprojection: pixels the
-  reprojection cannot source are flagged per 16x16 block and rendered in a priority wave
-  before the rest of the first pass. Only coarse passes (step >= MarginStepThreshold) render
-  the margin; finer passes stay inside the viewport's visible rect, which is what keeps the
-  margin nearly free. A pass restricted to that rect must keep the rect snapped outwards to
-  the coarse sample grid, or margin and visible area sample different points and seam.
-- The CPU renderer publishes an iteration buffer; palette and colouring changes remap that
-  buffer instead of recomputing the fractal.
+- **A rendered frame is a picture of one `ViewState`, not "the current picture".** The CPU
+  renderer keeps that view in `PublishedView` and never warps its own pixels to follow a
+  gesture; `FramePlacement` turns (frame view, current view) into one affine uv map and
+  `FrameCompositor` samples the original once per displayed frame. Do not reintroduce
+  in-place reprojection: it resampled an already-resampled buffer every gesture frame and
+  spent a full-frame `Parallel.For` on the same cores that were computing the fractal. See
+  `docs\ARCHITECTURE.md` §4.7 and `docs\RESEARCH-mandelbrot-browser.md`.
+- The CPU buffer publishes only at a pass boundary. Until the first pass of a request covers
+  the whole buffer, the texture keeps the previous frame and its view — a correct picture of a
+  different view beats a half-correct picture of this one. `DiscardPublished()` is for when the
+  frame stops depicting anything useful: fractal, parameters, palette or backend changed.
+- `Viewport` carries a field margin: the buffer covers more than the viewer sees. The buffer
+  size is fixed per screen resolution; the *field* widens (`ViewMotion.FieldFactor`, clamped by
+  `MobileRenderProfile.CpuFieldBase/CpuFieldMax`) and the visible part of the same buffer
+  shrinks. Widening must never grow the buffer — during a gesture the right currency is
+  resolution, not time. Margins exist only in `Viewport` and the presenter; navigator, kernels
+  and shaders treat the widened viewport as an ordinary one. Only coarse passes
+  (step >= MarginStepThreshold) render the margin; finer passes stay inside the viewport's
+  visible rect, which is what keeps the margin nearly free. A pass restricted to that rect must
+  keep the rect snapped outwards to the coarse sample grid, or margin and visible area sample
+  different points and seam.
+- `WideFieldLayer` is the answer to zoom-out and to nothing else. A pan or zoom-in asks for area
+  the last frame already holds; a zoom-out asks for area never computed, and no margin around a
+  single frame covers a gesture that doubles the field in a few hundred milliseconds. Keep it
+  deliberately cheap (a few hundred pixels, 1-2 workers, refreshed only near the edge of its
+  coverage) — making it sharper defeats its purpose.
+- The uv map goes to the shader as two `float4` rows, never a `float4x4`: a matrix uniform's
+  row/column order depends on the compiler's convention, a dot product does not.
+- The CPU renderer will publish an iteration buffer (stage 5); palette and colouring changes
+  then remap that buffer instead of recomputing the fractal.
 - Saved state (`FractalStateDto`) stores centre/scale as `decimal` strings and parameters by
   string key, with a `version` field. Never serialise the centre as `double`.
 
-Migration is staged (0 -> 9 in `docs\ARCHITECTURE.md`); each stage must leave the project
-compiling and visually unchanged.
+Migration is staged (0 -> 12 in `docs\ARCHITECTURE.md`); each stage must leave the project
+compiling. `docs\RESEARCH-mandelbrot-browser.md` is the teardown of the reference app that
+stages 10 to 12 come from — read it before changing the presentation layer or the depth math.
