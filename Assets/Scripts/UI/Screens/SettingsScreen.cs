@@ -36,12 +36,15 @@ namespace FractalVisio.UI
 
         private static readonly string[] ColoringNames = { "Bands", "Smooth", "Smooth log" };
 
-        // The device test found the interface still too small at the old top setting, so the range
-        // now reaches well past "comfortable". A scale nobody needs costs one row; a scale the
-        // device needs and does not have costs an unusable app.
-        private static readonly float[] InterfaceScales = { 0.85f, 1f, 1.25f, 1.6f, 2f, 2.5f };
+        // Centred on 1.0 - the density figure the screen reports - with room either side. Sizes
+        // rather than adjectives: "Large" means nothing without knowing the base, XS to XXL is a
+        // ladder, and none of it will need translating when stage 13 arrives.
+        private static readonly float[] InterfaceScales = { 0.8f, 1f, 1.2f, 1.45f, 1.75f, 2.1f };
 
-        private static readonly string[] InterfaceNames = { "Compact", "Normal", "Large", "Huge", "Giant", "Max" };
+        private static readonly string[] InterfaceNames = { "XS", "S", "M", "L", "XL", "XXL" };
+
+        /// <summary>Most columns to split into. Past three the rows get too narrow to read.</summary>
+        private const int MaximumColumns = 3;
 
         private readonly List<IFractalDefinition> fractals = new();
 
@@ -53,11 +56,6 @@ namespace FractalVisio.UI
 
         protected override void OnBuild(Transform parent)
         {
-            var padding = UiTheme.Px(UiTheme.PanelPadding);
-            var sectionGap = UiTheme.Px(UiTheme.SectionSpacing);
-            var titleHeight = UiTheme.Px(28f);
-            var margin = UiTheme.Px(UiTheme.ScreenMargin);
-
             fractals.Clear();
             for (var i = 0; i < Services.Catalog.Count; i++)
             {
@@ -66,18 +64,68 @@ namespace FractalVisio.UI
 
             var palettes = PaletteLibrary.All;
 
-            var contentHeight = padding * 2f + titleHeight + sectionGap +
-                                SettingsSection.MeasureHeight(fractals.Count) + sectionGap +
-                                SettingsSection.MeasureHeight(palettes.Count) + sectionGap +
-                                SettingsSection.MeasureHeight(ColoringNames.Length) + sectionGap +
-                                SettingsSection.MeasureHeight(ResolutionNames.Length) + sectionGap +
-                                SettingsSection.MeasureHeight(InterfaceNames.Length);
+            var fractalNames = new string[fractals.Count];
+            for (var i = 0; i < fractals.Count; i++)
+            {
+                fractalNames[i] = fractals[i].DisplayName;
+            }
 
-            // The panel sits above the toggle and never runs off the top of the screen; whatever
-            // does not fit scrolls. On a phone held sideways that is most of it.
-            var width = Mathf.Min(UiTheme.Px(UiTheme.PanelWidth), Screen.width - margin * 2f);
-            var maxHeight = Mathf.Max(UiTheme.Px(160f), Screen.height - (margin * 3f + UiTheme.Px(UiTheme.ToggleSize)));
-            var height = Mathf.Min(contentHeight, maxHeight);
+            var paletteNames = new string[palettes.Count];
+            for (var i = 0; i < palettes.Count; i++)
+            {
+                paletteNames[i] = palettes[i].DisplayName;
+            }
+
+            var specs = new[]
+            {
+                new SectionSpec("FRACTAL", fractalNames, SelectFractal),
+                new SectionSpec("PALETTE", paletteNames, SelectPalette),
+                new SectionSpec("COLOURING", ColoringNames, SelectColoring),
+                new SectionSpec("RESOLUTION", ResolutionNames, SelectResolution),
+                new SectionSpec("INTERFACE SIZE", InterfaceNames, SelectInterfaceScale)
+            };
+
+            var margin = UiTheme.Px(UiTheme.ScreenMargin);
+            var availableWidth = UiTheme.AvailablePanelWidth;
+            var availableHeight = UiTheme.AvailablePanelHeight;
+
+            // Columns are how the panel uses a wide screen. One natural column is what a phone in
+            // portrait has room for; a tablet or a desktop window fits two or three, which turns a
+            // long scroll into something readable at a glance.
+            var naturalWidth = UiTheme.PanelPx(UiTheme.PanelWidth);
+            var columns = Mathf.Clamp(Mathf.FloorToInt(availableWidth / naturalWidth), 1, MaximumColumns);
+            var width = Mathf.Min(columns * naturalWidth, availableWidth);
+
+            var padding = UiTheme.PanelInset(width, UiTheme.PanelPadding, 0.06f);
+            var sectionGap = Mathf.Min(UiTheme.PanelPx(UiTheme.SectionSpacing), availableHeight * 0.04f);
+            var titleHeight = UiTheme.PanelPx(28f);
+            var columnWidth = (width - padding * 2f - padding * (columns - 1)) / columns;
+
+            // Shortest column first, so five sections of different lengths end up balanced instead
+            // of one column running off the bottom while the next is half empty.
+            var cursors = new float[columns];
+            var top = -(padding + titleHeight + sectionGap);
+            for (var i = 0; i < columns; i++)
+            {
+                cursors[i] = top;
+            }
+
+            var plan = new int[specs.Length];
+            for (var i = 0; i < specs.Length; i++)
+            {
+                var column = ShortestColumn(cursors);
+                plan[i] = column;
+                cursors[column] -= SettingsSection.MeasureHeight(specs[i].Options.Count) + sectionGap;
+            }
+
+            var tallest = 0f;
+            for (var i = 0; i < columns; i++)
+            {
+                tallest = Mathf.Max(tallest, -cursors[i]);
+            }
+
+            var contentHeight = tallest - sectionGap + padding;
+            var height = Mathf.Min(contentHeight, availableHeight);
 
             Panel = GlassPanel.Create(
                 "SettingsPanel",
@@ -94,47 +142,63 @@ namespace FractalVisio.UI
                 new Vector2(width, height));
 
             var content = BuildScroll(contentHeight, height);
-            var rowWidth = width - padding * 2f;
-            var cursor = -padding;
 
             var title = UiFactory.CreateText(
-                "Title", content, "Settings", UiTheme.TitleFontSize, UiTheme.Text, TextAnchor.UpperLeft);
-            Place(title.rectTransform, padding, cursor, rowWidth, titleHeight);
+                "Title", content, "Settings", UiTheme.TitleFontSize, UiTheme.Text,
+                TextAnchor.UpperLeft, fitToRect: true, panelScale: true);
+            Place(title.rectTransform, padding, -padding, width - padding * 2f, titleHeight);
             title.fontStyle = FontStyle.Bold;
-            cursor -= titleHeight + sectionGap;
 
-            var fractalNames = new string[fractals.Count];
-            for (var i = 0; i < fractals.Count; i++)
+            for (var i = 0; i < columns; i++)
             {
-                fractalNames[i] = fractals[i].DisplayName;
+                cursors[i] = top;
             }
 
-            fractalSection = SettingsSection.Create(
-                content, "FRACTAL", fractalNames, SelectFractal, padding, cursor, rowWidth);
-            cursor -= fractalSection.Height + sectionGap;
-
-            var paletteNames = new string[palettes.Count];
-            for (var i = 0; i < palettes.Count; i++)
+            var built = new SettingsSection[specs.Length];
+            for (var i = 0; i < specs.Length; i++)
             {
-                paletteNames[i] = palettes[i].DisplayName;
+                var column = plan[i];
+                var x = padding + column * (columnWidth + padding);
+                built[i] = SettingsSection.Create(
+                    content, specs[i].Label, specs[i].Options, specs[i].OnSelect, x, cursors[column], columnWidth);
+                cursors[column] -= built[i].Height + sectionGap;
             }
 
-            paletteSection = SettingsSection.Create(
-                content, "PALETTE", paletteNames, SelectPalette, padding, cursor, rowWidth);
-            cursor -= paletteSection.Height + sectionGap;
-
-            coloringSection = SettingsSection.Create(
-                content, "COLOURING", ColoringNames, SelectColoring, padding, cursor, rowWidth);
-            cursor -= coloringSection.Height + sectionGap;
-
-            resolutionSection = SettingsSection.Create(
-                content, "RESOLUTION", ResolutionNames, SelectResolution, padding, cursor, rowWidth);
-            cursor -= resolutionSection.Height + sectionGap;
-
-            interfaceSection = SettingsSection.Create(
-                content, "INTERFACE SIZE", InterfaceNames, SelectInterfaceScale, padding, cursor, rowWidth);
+            fractalSection = built[0];
+            paletteSection = built[1];
+            coloringSection = built[2];
+            resolutionSection = built[3];
+            interfaceSection = built[4];
 
             RefreshSelection();
+        }
+
+        private static int ShortestColumn(float[] cursors)
+        {
+            var best = 0;
+            for (var i = 1; i < cursors.Length; i++)
+            {
+                if (cursors[i] > cursors[best])
+                {
+                    best = i;
+                }
+            }
+
+            return best;
+        }
+
+        private readonly struct SectionSpec
+        {
+            public SectionSpec(string label, IReadOnlyList<string> options, System.Action<int> onSelect)
+            {
+                Label = label;
+                Options = options;
+                OnSelect = onSelect;
+            }
+
+            public string Label { get; }
+            public IReadOnlyList<string> Options { get; }
+            public System.Action<int> OnSelect { get; }
         }
 
         protected override void OnTick()
@@ -171,7 +235,7 @@ namespace FractalVisio.UI
             scroll.elasticity = 0.1f;
             scroll.inertia = true;
             scroll.decelerationRate = 0.135f;
-            scroll.scrollSensitivity = UiTheme.Px(28f);
+            scroll.scrollSensitivity = UiTheme.PanelPx(28f);
 
             return content;
         }

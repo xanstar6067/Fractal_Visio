@@ -180,10 +180,25 @@ any feature that is not a bug fix, and update it when a design decision changes.
 - Adding a setting is one `SettingsSection.Create` call plus the two lines that read and write it
   on the session. If a setting needs a new control type, add the widget in `UI/Widgets` - do not
   hand-lay-out rows in `SettingsScreen`.
+- **One canvas unit is one device pixel.** `AppBootstrap.EnsureUi` forces the `CanvasScaler` to
+  ConstantPixelSize with scaleFactor 1, and it must stay that way: every size in the UI is already
+  computed from the screen's own density, so a scaler in Scale-With-Screen-Size mode applies a
+  second, contradictory scaling on top. The scene had one set to a 3440x1444 reference with Shrink
+  matching, which multiplied the whole interface by ~0.3 on a phone - the real cause of two rounds
+  of "the UI is too small" from device tests. The HUD prints `canvas x<factor>`; if it is not 1.00
+  something has reintroduced a scaler.
 - `Core/View/ScreenScale.Density` is the one definition of "how big is a millimetre here", shared
   by `UiTheme` and the gesture layer (which cannot see each other). It takes the **larger** of the
-  reported dpi and what the resolution implies, because Android devices misreport density often
-  enough that a UI sized purely from `Screen.dpi` came back unusable from a device test.
+  reported dpi and what the resolution implies, because Android devices misreport density.
+- Two UI scales, on purpose. `UiTheme.Scale` sizes chrome (the settings button, the HUD) and is
+  bounded by a fraction of the screen's short edge. `UiTheme.PanelScale` sizes everything inside
+  the settings panel and is additionally bounded by the height left for it, because the panel is
+  the one thing with enough content to run out of screen. Inside a panel use `PanelPx` /
+  `PanelInset`, never `Px`.
+- Insets inside a fixed-width box go through `UiTheme.PanelInset`, which caps them as a fraction of
+  the container. A dp gutter grows without limit as the scale rises while the container does not;
+  that is how a row's paddings ate the row and its label showed two letters. Row labels are
+  `fitToRect` for the same reason.
 - **`FractalGestureFrame.IsInteracting` means the user is moving the view, not that a finger is
   down.** Every gesture crosses a dp-sized dead zone before it engages, and the dead zone is a
   start condition, not a per-frame filter. Reporting a resting finger as interaction made the

@@ -44,21 +44,55 @@ namespace FractalVisio.UI
             return raw;
         }
 
-        public static Text CreateText(string name, Transform parent, string content, int referenceFontSize, Color color, TextAnchor anchor)
+        /// <param name="panelScale">
+        /// Size the type at <see cref="UiTheme.PanelScale"/> instead of the chrome scale. True for
+        /// anything inside the settings panel, so the type shrinks with the box it lives in.
+        /// </param>
+        /// <param name="fitToRect">
+        /// Shrink the type until the string fits its rectangle. The last line of defence for a
+        /// label: the interface scale can be pushed far past what the screen has room for, and a
+        /// row that shows "Mand" is worse than one whose type is a size smaller. Only for text in a
+        /// bounded box - a free-floating readout should overflow instead.
+        /// </param>
+        public static Text CreateText(
+            string name,
+            Transform parent,
+            string content,
+            int referenceFontSize,
+            Color color,
+            TextAnchor anchor,
+            bool fitToRect = false,
+            bool panelScale = false)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
             var rect = go.GetComponent<RectTransform>();
             rect.SetParent(parent, false);
+
+            var size = Mathf.Max(8, Mathf.RoundToInt(
+                panelScale ? UiTheme.PanelPx(referenceFontSize) : UiTheme.Px(referenceFontSize)));
 
             var text = go.GetComponent<Text>();
             text.font = UiTheme.Font;
             text.text = content;
             text.color = color;
             text.alignment = anchor;
-            text.fontSize = Mathf.Max(8, Mathf.RoundToInt(UiTheme.Px(referenceFontSize)));
-            text.horizontalOverflow = HorizontalWrapMode.Overflow;
-            text.verticalOverflow = VerticalWrapMode.Overflow;
+            text.fontSize = size;
             text.raycastTarget = false;
+
+            if (fitToRect)
+            {
+                text.resizeTextForBestFit = true;
+                text.resizeTextMaxSize = size;
+                text.resizeTextMinSize = Mathf.Max(8, Mathf.RoundToInt(size * 0.45f));
+                text.horizontalOverflow = HorizontalWrapMode.Wrap;
+                text.verticalOverflow = VerticalWrapMode.Truncate;
+            }
+            else
+            {
+                text.horizontalOverflow = HorizontalWrapMode.Overflow;
+                text.verticalOverflow = VerticalWrapMode.Overflow;
+            }
+
             return text;
         }
 

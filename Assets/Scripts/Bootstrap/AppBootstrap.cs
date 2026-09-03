@@ -30,7 +30,8 @@ namespace FractalVisio.Bootstrap
         [SerializeField] private Text computeBackendText;
 
         [Header("Debug HUD")]
-        [SerializeField, Min(8)] private int hudFontSize = 110;
+        [SerializeField, Range(30, 400), Tooltip("Readout size as a percentage of the density-derived default.")]
+        private int hudFontSize = 110;
 
         [Header("Fractal")]
         [SerializeField, Tooltip("IFractalDefinition.Id, e.g. mandelbrot or burning-ship. Falls back to the first in the catalog.")]
@@ -252,6 +253,20 @@ namespace FractalVisio.Bootstrap
         {
             var canvas = GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+
+            // One canvas unit must be one device pixel. Everything in UiTheme is computed from the
+            // screen's own density, so a CanvasScaler in Scale-With-Screen-Size mode would apply a
+            // second, contradictory scaling on top - the scene had it set to a 3440x1444 reference
+            // with Shrink matching, which multiplied the whole interface by about 0.3 on a phone
+            // and is why it came back from the device unusably small. Forced here rather than
+            // fixed in the scene so the assumption cannot drift out from under the code again.
+            var scaler = GetComponent<CanvasScaler>();
+            if (scaler != null)
+            {
+                scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+                scaler.scaleFactor = 1f;
+                scaler.referencePixelsPerUnit = 100f;
+            }
 
             if (targetImage == null)
             {

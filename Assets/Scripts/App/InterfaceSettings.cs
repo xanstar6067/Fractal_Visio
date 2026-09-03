@@ -17,6 +17,12 @@ namespace FractalVisio.App
         /// </summary>
         public float Scale;
 
+        /// <summary>
+        /// 1.0 means "whatever the screen's density says", which is now the right answer: the
+        /// device test that asked for 2.5 was measuring a UI a stray CanvasScaler was shrinking by
+        /// about 0.3 (see AppBootstrap.EnsureUi). With that fixed the density figure stands on its
+        /// own and this is a taste multiplier on top of it.
+        /// </summary>
         public static InterfaceSettings Default => new InterfaceSettings { Scale = 1f }.Sanitized();
 
         public InterfaceSettings Sanitized()

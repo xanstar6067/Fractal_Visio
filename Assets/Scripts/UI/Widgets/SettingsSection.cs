@@ -31,9 +31,9 @@ namespace FractalVisio.UI
         public static float MeasureHeight(int optionCount)
         {
             var count = Mathf.Max(1, optionCount);
-            return UiTheme.Px(20f) + UiTheme.Px(UiTheme.RowSpacing) +
-                   count * UiTheme.Px(UiTheme.SegmentHeight) +
-                   (count - 1) * UiTheme.Px(UiTheme.RowSpacing);
+            return UiTheme.PanelPx(20f) + UiTheme.PanelPx(UiTheme.RowSpacing) +
+                   count * UiTheme.PanelPx(UiTheme.SegmentHeight) +
+                   (count - 1) * UiTheme.PanelPx(UiTheme.RowSpacing);
         }
 
         /// <summary>
@@ -49,15 +49,16 @@ namespace FractalVisio.UI
             float y,
             float width)
         {
-            var labelHeight = UiTheme.Px(20f);
-            var rowHeight = UiTheme.Px(UiTheme.SegmentHeight);
-            var gap = UiTheme.Px(UiTheme.RowSpacing);
-            var radius = UiTheme.PxInt(UiTheme.SegmentRadius);
+            var labelHeight = UiTheme.PanelPx(20f);
+            var rowHeight = UiTheme.PanelPx(UiTheme.SegmentHeight);
+            var gap = UiTheme.PanelPx(UiTheme.RowSpacing);
+            var radius = UiTheme.PanelPxInt(UiTheme.SegmentRadius);
 
             var cursor = y;
 
             var caption = UiFactory.CreateText(
-                "Label_" + label, parent, label, UiTheme.LabelFontSize, UiTheme.TextMuted, TextAnchor.LowerLeft);
+                "Label_" + label, parent, label, UiTheme.LabelFontSize, UiTheme.TextMuted,
+                TextAnchor.LowerLeft, fitToRect: true, panelScale: true);
             Place(caption.rectTransform, x, cursor, width, labelHeight);
             cursor -= labelHeight + gap;
 
@@ -72,21 +73,29 @@ namespace FractalVisio.UI
                 background.raycastTarget = true;
                 Place(background.rectTransform, x, cursor, width, rowHeight);
 
+                // Insets are capped against the row's own width. At a large interface scale the
+                // fixed dp gutters were wider than the row, which is how a label ended up showing
+                // two letters; the marker gutter is the worst offender because it is the biggest.
+                var textInset = UiTheme.PanelInset(width, 14f, 0.05f);
+                var markerGutter = UiTheme.PanelInset(width, 40f, 0.16f);
+                var markerSize = UiTheme.PanelInset(width, 10f, 0.05f);
+
                 var name = UiFactory.CreateText(
-                    "Name", background.transform, options[i], UiTheme.SegmentFontSize, UiTheme.Text, TextAnchor.MiddleLeft);
+                    "Name", background.transform, options[i], UiTheme.SegmentFontSize, UiTheme.Text,
+                    TextAnchor.MiddleLeft, fitToRect: true, panelScale: true);
                 UiFactory.Stretch(name.rectTransform);
-                name.rectTransform.offsetMin = new Vector2(UiTheme.Px(14f), 0f);
-                name.rectTransform.offsetMax = new Vector2(-UiTheme.Px(40f), 0f);
+                name.rectTransform.offsetMin = new Vector2(textInset, 0f);
+                name.rectTransform.offsetMax = new Vector2(-markerGutter, 0f);
 
                 // A dot rather than a tick: no glyph to depend on, and it reads at a glance.
                 var marker = UiFactory.CreateImage(
-                    "Marker", background.transform, UiSprites.Rounded(UiTheme.PxInt(5f)), UiTheme.Accent);
+                    "Marker", background.transform, UiSprites.Rounded(Mathf.Max(1, Mathf.RoundToInt(markerSize * 0.5f))), UiTheme.Accent);
                 UiFactory.Anchor(
                     marker.rectTransform,
                     new Vector2(1f, 0.5f),
                     new Vector2(1f, 0.5f),
-                    new Vector2(-UiTheme.Px(14f), 0f),
-                    new Vector2(UiTheme.Px(10f), UiTheme.Px(10f)));
+                    new Vector2(-textInset, 0f),
+                    new Vector2(markerSize, markerSize));
 
                 AttachButton(background, i, onSelect);
 

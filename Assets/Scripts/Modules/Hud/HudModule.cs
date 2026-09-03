@@ -16,19 +16,31 @@ namespace FractalVisio.Modules
     {
         private const float UpdateInterval = 0.1f;
 
-        private readonly int fontSize;
+        /// <summary>Readout type size in dp, before the inspector's percentage.</summary>
+        private const float FontSizeDp = 12f;
+
+        private readonly float fontPercent;
 
         private Text scaleValueText;
         private Text computeBackendText;
         private AppServices context;
         private float nextUpdateTime;
 
-        public HudModule(Text scaleValueText, Text computeBackendText, int fontSize)
+        /// <param name="fontPercent">
+        /// Inspector size, as a percentage of the density-derived default. It used to be a raw
+        /// pixel count, and the value tuned into the scene (110) was compensating for a
+        /// CanvasScaler that shrank the whole interface - reading it as a percentage keeps that
+        /// tuned number meaningful (110 = a tenth larger) now that the scaler is fixed.
+        /// </param>
+        public HudModule(Text scaleValueText, Text computeBackendText, int fontPercent)
         {
             this.scaleValueText = scaleValueText;
             this.computeBackendText = computeBackendText;
-            this.fontSize = Mathf.Max(8, fontSize);
+            this.fontPercent = Mathf.Clamp(fontPercent, 30, 400) / 100f;
         }
+
+        /// <summary>Type size in device pixels, from the screen's density like everything else.</summary>
+        private int FontSize => Mathf.Max(8, Mathf.RoundToInt(ScreenScale.Dp(FontSizeDp) * fontPercent));
 
         public string Id => "hud";
 
@@ -105,7 +117,17 @@ namespace FractalVisio.Modules
                     : "iter " + status.Iterations + "  done";
             }
 
-            computeBackendText.text = engineLine + "\n" + detailLine;
+            // Screen metrics on the readout: the interface scale is derived from a density that
+            // Android devices are free to misreport, and the only way to tell a formula bug
+            // from a lying panel is to see the numbers the device actually gave.
+            var densityLine = string.Concat(
+                "screen ", Screen.width.ToString(CultureInfo.InvariantCulture),
+                "x", Screen.height.ToString(CultureInfo.InvariantCulture),
+                "  dpi ", Screen.dpi.ToString("0", CultureInfo.InvariantCulture),
+                "  dens ", ScreenScale.Density.ToString("0.00", CultureInfo.InvariantCulture),
+                "  canvas x", CanvasScaleFactor().ToString("0.00", CultureInfo.InvariantCulture));
+
+            computeBackendText.text = engineLine + "\n" + detailLine + "\n" + densityLine;
         }
 
         public void Shutdown()
@@ -113,9 +135,25 @@ namespace FractalVisio.Modules
             context = null;
         }
 
-        private Vector2 ScalePosition => new(24f, -24f);
+        /// <summary>
+        /// What the canvas multiplies our pixel sizes by. It must be 1: every size in the UI is
+        /// already in device pixels. A value other than 1 means a CanvasScaler is fighting the
+        /// layout, which is exactly the bug that made the interface unusable on the phone.
+        /// </summary>
+        private float CanvasScaleFactor()
+        {
+            if (context == null || context.UiRoot == null)
+            {
+                return 1f;
+            }
 
-        private Vector2 BackendPosition => new(24f, -24f - 5.6f * fontSize);
+            var canvas = context.UiRoot.GetComponentInParent<Canvas>();
+            return canvas != null ? canvas.scaleFactor : 1f;
+        }
+
+        private Vector2 ScalePosition => new(ScreenScale.Dp(10f), -ScreenScale.Dp(10f));
+
+        private Vector2 BackendPosition => new(ScreenScale.Dp(10f), -ScreenScale.Dp(10f) - 5.6f * FontSize);
 
         private Text CreateText(string objectName, Vector2 anchoredPosition)
         {
@@ -150,9 +188,9 @@ namespace FractalVisio.Modules
             rect.anchorMax = new Vector2(0f, 1f);
             rect.pivot = new Vector2(0f, 1f);
             rect.anchoredPosition = anchoredPosition;
-            rect.sizeDelta = new Vector2(3600f, 8f * fontSize);
+            rect.sizeDelta = new Vector2(Screen.width * 2f, 8f * FontSize);
             text.alignment = TextAnchor.UpperLeft;
-            text.fontSize = fontSize;
+            text.fontSize = FontSize;
             text.fontStyle = FontStyle.Bold;
             text.horizontalOverflow = HorizontalWrapMode.Overflow;
             text.verticalOverflow = VerticalWrapMode.Overflow;
@@ -167,7 +205,8 @@ namespace FractalVisio.Modules
             }
 
             outline.effectColor = Color.black;
-            outline.effectDistance = new Vector2(4f, -4f);
+            var edge = Mathf.Max(1f, FontSize * 0.04f);
+            outline.effectDistance = new Vector2(edge, -edge);
         }
     }
 }
