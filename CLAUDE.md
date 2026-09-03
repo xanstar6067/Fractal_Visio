@@ -180,6 +180,18 @@ any feature that is not a bug fix, and update it when a design decision changes.
 - Adding a setting is one `SettingsSection.Create` call plus the two lines that read and write it
   on the session. If a setting needs a new control type, add the widget in `UI/Widgets` - do not
   hand-lay-out rows in `SettingsScreen`.
+- `Core/View/ScreenScale.Density` is the one definition of "how big is a millimetre here", shared
+  by `UiTheme` and the gesture layer (which cannot see each other). It takes the **larger** of the
+  reported dpi and what the resolution implies, because Android devices misreport density often
+  enough that a UI sized purely from `Screen.dpi` came back unusable from a device test.
+- **`FractalGestureFrame.IsInteracting` means the user is moving the view, not that a finger is
+  down.** Every gesture crosses a dp-sized dead zone before it engages, and the dead zone is a
+  start condition, not a per-frame filter. Reporting a resting finger as interaction made the
+  renderer re-request with a widened field and drop the picture to its 16x16 pass the instant the
+  screen was touched.
+- A coarse pass does not replace a finer frame that still covers the view: the presenter passes a
+  `minimumPublishStep` and the renderer computes the early passes but holds them back. The last
+  pass of a run always publishes, or a capped interactive render would show nothing at all.
 - Saved state (`FractalStateDto`) stores centre/scale as `decimal` strings and parameters by
   string key, with a `version` field. Never serialise the centre as `double`.
 

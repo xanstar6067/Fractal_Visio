@@ -22,7 +22,7 @@ namespace FractalVisio.App
         public InterfaceSettings Sanitized()
         {
             var result = this;
-            result.Scale = Mathf.Clamp(result.Scale <= 0f ? 1f : result.Scale, 0.6f, 2f);
+            result.Scale = Mathf.Clamp(result.Scale <= 0f ? 1f : result.Scale, 0.6f, 2.5f);
             return result;
         }
 

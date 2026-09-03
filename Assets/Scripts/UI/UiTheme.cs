@@ -1,71 +1,41 @@
 using UnityEngine;
+using FractalVisio.Core;
 
 namespace FractalVisio.UI
 {
     /// <summary>
     /// One place for every colour and size in the UI.
     ///
-    /// Sizes are written in <b>density-independent pixels</b> - the Android convention, where one
-    /// unit is one pixel at 160 dpi - and <see cref="Px"/> converts them to the device pixels the
-    /// canvas actually runs in. The scale therefore comes from <see cref="Screen.dpi"/>, not from
-    /// the resolution: a control has to be a certain number of millimetres wide to be hit with a
-    /// finger, and pixel counts say nothing about millimetres. Scaling by screen height, which is
-    /// what this did before, made every control shrink to a third of its size the moment the phone
-    /// was held in landscape.
+    /// Sizes are written in <b>density-independent pixels</b> and <see cref="Px"/> converts them
+    /// to the device pixels the canvas runs in, using <see cref="ScreenScale.Density"/>. A control
+    /// has to be a certain number of millimetres wide to be hit with a finger, and pixel counts say
+    /// nothing about millimetres - scaling by screen height, which is what this did originally,
+    /// made every control a third of its size the moment the phone was held in landscape.
     ///
-    /// Because `Screen.dpi` is unreliable on some Android devices (it can be zero, or the panel's
-    /// nominal rather than actual density), the result is clamped and multiplied by
-    /// <see cref="UserScale"/>, which the interface section of the settings panel drives. That
-    /// setting is the escape hatch for a device that lies about itself.
+    /// <see cref="UserScale"/> - the INTERFACE SIZE setting - multiplies on top. It exists because
+    /// a device can misreport its density badly enough that even a correct formula lands too small,
+    /// which is what the first device test found; the only reliable fix for that is a knob.
     /// </summary>
     public static class UiTheme
     {
-        /// <summary>Density the reference pixels are quoted at.</summary>
-        private const float ReferenceDpi = 160f;
-
-        /// <summary>Plausible range for a reported dpi. Outside it, the value is not believed.</summary>
-        private const float MinimumBelievableDpi = 50f;
-        private const float MaximumBelievableDpi = 900f;
-
         private const float MinimumScale = 1f;
-        private const float MaximumScale = 6f;
-
-        /// <summary>Short edge, in dp, a phone is assumed to be when the dpi cannot be trusted.</summary>
-        private const float FallbackShortEdgeDp = 360f;
+        private const float MaximumScale = 8f;
 
         private static float userScale = 1f;
 
         /// <summary>
-        /// User multiplier on top of the device scale, from the settings panel. Changing it does
+        /// User multiplier on top of the device density, from the settings panel. Changing it does
         /// not rescale anything by itself - <see cref="UiRouter"/> rebuilds the interface, because
         /// the rounded-corner sprites are generated at a fixed pixel radius.
         /// </summary>
         public static float UserScale
         {
             get => userScale;
-            set => userScale = Mathf.Clamp(value, 0.6f, 2f);
+            set => userScale = Mathf.Clamp(value, 0.6f, 2.5f);
         }
 
         /// <summary>What one reference pixel is worth on this screen, before the user multiplier.</summary>
-        public static float DeviceScale
-        {
-            get
-            {
-                var dpi = Screen.dpi;
-                if (dpi >= MinimumBelievableDpi && dpi <= MaximumBelievableDpi)
-                {
-                    return dpi / ReferenceDpi;
-                }
-
-                if (!Application.isMobilePlatform)
-                {
-                    return 1f;
-                }
-
-                var shortEdge = Mathf.Min(Mathf.Max(1, Screen.width), Mathf.Max(1, Screen.height));
-                return shortEdge / FallbackShortEdgeDp;
-            }
-        }
+        public static float DeviceScale => ScreenScale.Density;
 
         public static float Scale => Mathf.Clamp(DeviceScale * userScale, MinimumScale, MaximumScale);
 
@@ -98,22 +68,22 @@ namespace FractalVisio.UI
         // Metrics, in reference pixels (dp)
         public const float PanelRadius = 18f;
         public const float PanelPadding = 16f;
-        public const float PanelWidth = 300f;
+        public const float PanelWidth = 320f;
         public const float SectionSpacing = 16f;
         public const float RowSpacing = 8f;
 
         /// <summary>
-        /// Row height. 48 dp is the smallest target a finger hits reliably; everything tappable in
-        /// this UI is at least this tall, and nothing should be added below it.
+        /// Row height. 48 dp is the documented floor for a finger target; 54 is what the device
+        /// test actually asked for. Everything tappable is at least this tall.
         /// </summary>
-        public const float SegmentHeight = 48f;
+        public const float SegmentHeight = 54f;
 
         public const float SegmentRadius = 12f;
-        public const float ToggleSize = 56f;
-        public const float ScreenMargin = 16f;
-        public const int TitleFontSize = 19;
-        public const int LabelFontSize = 13;
-        public const int SegmentFontSize = 16;
+        public const float ToggleSize = 66f;
+        public const float ScreenMargin = 18f;
+        public const int TitleFontSize = 22;
+        public const int LabelFontSize = 14;
+        public const int SegmentFontSize = 18;
 
         public static Font Font => Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
     }

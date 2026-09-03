@@ -162,10 +162,12 @@ namespace FractalVisio.Rendering
             in ViewState view,
             int iterations,
             bool extendedPrecision,
-            bool interacting)
+            bool interacting,
+            int minimumPublishStep = 16)
         {
             queued = new FrameRequest(
-                texture, viewport, definition, parameters, view, Mathf.Max(1, iterations), extendedPrecision, interacting);
+                texture, viewport, definition, parameters, view, Mathf.Max(1, iterations),
+                extendedPrecision, interacting, minimumPublishStep);
             hasQueued = true;
 
             if (renderActive)
@@ -700,6 +702,15 @@ namespace FractalVisio.Rendering
 
                 RenderPass(job, tiles, step, p == job.PassFloor, sampler, token);
 
+                // A pass coarser than the caller's floor is computed but not shown: something
+                // better is already on screen, and replacing it with 16x16 blocks would be a
+                // downgrade. The last pass of the run always publishes, or a capped interactive
+                // render would produce nothing at all.
+                if (step > job.MinimumPublishStep && p < job.PassCeiling - 1)
+                {
+                    continue;
+                }
+
                 // Whole frame now covered at this step: colour it and publish it as one piece.
                 // Marking dirty per tile instead would upload a frame that is part this
                 // pass and part the coarser image beneath it, and that boundary is the
@@ -843,8 +854,10 @@ namespace FractalVisio.Rendering
                 ViewState view,
                 int iterations,
                 bool extendedPrecision,
-                bool interacting)
+                bool interacting,
+                int minimumPublishStep)
             {
+                MinimumPublishStep = minimumPublishStep;
                 Target = target;
                 Viewport = viewport;
                 Definition = definition;
@@ -863,6 +876,9 @@ namespace FractalVisio.Rendering
             public int Iterations { get; }
             public bool ExtendedPrecision { get; }
             public bool Interacting { get; }
+
+            /// <summary>Coarsest pass step this render may publish. See RunPasses.</summary>
+            public int MinimumPublishStep { get; }
         }
 
         private sealed class RenderJob
@@ -898,6 +914,7 @@ namespace FractalVisio.Rendering
                 RotationSin = Math.Sin(request.View.rotation);
                 MaxIterations = request.Iterations;
                 ExtendedPrecision = request.ExtendedPrecision;
+                MinimumPublishStep = request.MinimumPublishStep;
                 // Distrust "interior" only where a gesture forces a capped budget
                 // (deep double-double). Plain fp64 interaction paints real verdicts.
                 TrustInterior = !(request.Interacting && request.ExtendedPrecision);
@@ -934,6 +951,10 @@ namespace FractalVisio.Rendering
             public int MaxIterations { get; }
             public bool ExtendedPrecision { get; }
             public bool TrustInterior { get; }
+
+            /// <summary>Coarsest pass step this render may publish. See RunPasses.</summary>
+            public int MinimumPublishStep { get; }
+
             public int Workers { get; }
             public int PassFloor { get; }
             public int PassCeiling { get; }

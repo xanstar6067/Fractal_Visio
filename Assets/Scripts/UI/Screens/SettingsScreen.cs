@@ -36,9 +36,12 @@ namespace FractalVisio.UI
 
         private static readonly string[] ColoringNames = { "Bands", "Smooth", "Smooth log" };
 
-        private static readonly float[] InterfaceScales = { 0.85f, 1f, 1.25f, 1.5f };
+        // The device test found the interface still too small at the old top setting, so the range
+        // now reaches well past "comfortable". A scale nobody needs costs one row; a scale the
+        // device needs and does not have costs an unusable app.
+        private static readonly float[] InterfaceScales = { 0.85f, 1f, 1.25f, 1.6f, 2f, 2.5f };
 
-        private static readonly string[] InterfaceNames = { "Compact", "Normal", "Large", "Huge" };
+        private static readonly string[] InterfaceNames = { "Compact", "Normal", "Large", "Huge", "Giant", "Max" };
 
         private readonly List<IFractalDefinition> fractals = new();
 

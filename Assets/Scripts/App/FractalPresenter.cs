@@ -41,6 +41,12 @@ namespace FractalVisio.App
         /// </summary>
         private const float InFlightOverhangLimit = -0.02f;
 
+        /// <summary>Publish every pass, including the coarsest. Matches the first entry of StepPlan.</summary>
+        private const int CoarsestPublishStep = 16;
+
+        /// <summary>Hold back passes coarser than this while a covering frame is already on screen.</summary>
+        private const int CoveredPublishFloor = 4;
+
         private static readonly Rect FullRect = new(0f, 0f, 1f, 1f);
 
         private readonly RawImage targetImage;
@@ -159,11 +165,6 @@ namespace FractalVisio.App
                 renderDirty = true;
                 currentBackend = backend;
                 hasBackend = true;
-            }
-
-            if (interacting != lastRequestWasInteractive)
-            {
-                renderDirty = true;
             }
 
             if (currentBackend == RenderBackend.GpuFloat)
@@ -293,7 +294,7 @@ namespace FractalVisio.App
             var displayAspect = compositeViewport.Aspect;
             if (ShouldRequestCpuRender(view, interacting, fieldFactor, displayAspect))
             {
-                RequestCpuRender(view, interacting, fieldFactor);
+                RequestCpuRender(view, interacting, fieldFactor, displayAspect);
             }
 
             cpuRenderer.Update();
@@ -323,13 +324,20 @@ namespace FractalVisio.App
                 return true;
             }
 
+            // The gesture ended and the last render was widened to anticipate it: redo it at full
+            // resolution. This, and not the touch itself, is what "interacting" is allowed to
+            // trigger - a finger resting on the glass must leave a finished frame alone.
+            if (!interacting && lastFieldFactor > 1.0001d)
+            {
+                return true;
+            }
+
             if (!renderDirty)
             {
                 return false;
             }
 
-            // Settling, or the interaction state just flipped: the settled pass must be exact.
-            if (!interacting || interacting != lastRequestWasInteractive)
+            if (!interacting)
             {
                 return true;
             }
@@ -343,7 +351,7 @@ namespace FractalVisio.App
             return !placement.IsValid || placement.Overhang > InFlightOverhangLimit;
         }
 
-        private void RequestCpuRender(in ViewState view, bool interacting, double fieldFactor)
+        private void RequestCpuRender(in ViewState view, bool interacting, double fieldFactor, double displayAspect)
         {
             var viewport = profile.ResolveCpuViewport(cpuBuffer, fieldFactor);
             lastCpuViewport = viewport;
@@ -359,7 +367,8 @@ namespace FractalVisio.App
                 requestedView,
                 view.iterations,
                 lastUsedExtendedPrecision,
-                interacting);
+                interacting,
+                ResolvePublishFloor(view, displayAspect));
 
             lastRequestWasInteractive = interacting;
             hasRequestedView = true;
@@ -397,6 +406,24 @@ namespace FractalVisio.App
             // Correct at rest, simply does not follow the gesture.
             targetImage.texture = cpuTexture;
             targetImage.uvRect = lastCpuViewport.VisibleUvRect;
+        }
+
+        /// <summary>
+        /// Coarsest pass this render may put on screen. While the frame already displayed still
+        /// covers the view, a magnified sharp frame beats a fresh 16x16 one, so the early passes
+        /// are computed but held back. With nothing usable on screen, anything beats nothing.
+        /// </summary>
+        private int ResolvePublishFloor(in ViewState view, double displayAspect)
+        {
+            if (!cpuRenderer.HasPublished)
+            {
+                return CoarsestPublishStep;
+            }
+
+            var placement = FramePlacement.Resolve(
+                cpuRenderer.PublishedView, cpuRenderer.PublishedAspect, view, displayAspect);
+
+            return placement.Covers ? CoveredPublishFloor : CoarsestPublishStep;
         }
 
         private bool ResolveExtendedPrecision(double scale)
