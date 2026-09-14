@@ -58,6 +58,8 @@ namespace FractalVisio.Bootstrap
         private FractalGestureInput gestureInput;
         private UiRouter uiRouter;
         private float lastInteractionTime;
+        private readonly ViewInertia inertia = new();
+        private ViewState inertiaView;
 
         /// <summary>The one place anything outside may read or change what is on screen.</summary>
         public FractalSession Session
@@ -96,9 +98,29 @@ namespace FractalVisio.Bootstrap
             {
                 gesture = default;
             }
-            else if (gesture.ResetRequested)
+
+            // Catching the picture with a finger stops the coast; so does anything else moving the
+            // view - a bookmark, a reset, another fractal - or the coast would carry on from there.
+            if (inertia.IsActive && (gesture.Touching || !SameView(session.View, inertiaView)))
+            {
+                inertia.Stop();
+            }
+
+            if (gesture.ResetRequested)
             {
                 ResetView();
+            }
+            else if (gesture.HasFling)
+            {
+                var quality = session.Quality;
+                inertia.Start(
+                    gesture.Fling,
+                    presenter.DisplayViewport,
+                    Time.unscaledTimeAsDouble,
+                    session.Interface.InertiaSeconds,
+                    pinchZoomSpeed,
+                    quality.MinimumScale,
+                    quality.MaximumScale);
             }
             else if (gesture.Changed)
             {
@@ -106,8 +128,18 @@ namespace FractalVisio.Bootstrap
                 lastInteractionTime = Time.unscaledTime;
             }
 
-            var interacting = gesture.IsInteracting || Time.unscaledTime - lastInteractionTime < settleDelay;
-            presenter.Tick(interacting);
+            if (inertia.IsActive)
+            {
+                var view = session.View;
+                inertia.Step(ref view, Time.unscaledTimeAsDouble);
+                session.SetView(view);
+                inertiaView = session.View;
+                lastInteractionTime = Time.unscaledTime;
+            }
+
+            var interacting = gesture.IsInteracting || inertia.IsActive ||
+                              Time.unscaledTime - lastInteractionTime < settleDelay;
+            presenter.Tick(interacting, inertia);
 
             for (var i = 0; i < modules.Count; i++)
             {
@@ -163,7 +195,9 @@ namespace FractalVisio.Bootstrap
                 return;
             }
 
-            Application.targetFrameRate = Application.isMobilePlatform ? 60 : -1;
+            // Run at the panel's own refresh rate. A phone at 90 or 120 Hz held to 60 is the most
+            // direct way to make every pan and pinch look less smooth than the phone's own apps.
+            Application.targetFrameRate = Application.isMobilePlatform ? DisplayRefreshRate() : -1;
 
             EnsureUi();
 
@@ -207,6 +241,17 @@ namespace FractalVisio.Bootstrap
             }
 
             lastInteractionTime = -100f;
+        }
+
+        private static int DisplayRefreshRate()
+        {
+            var rate = Screen.currentResolution.refreshRateRatio.value;
+            return double.IsNaN(rate) || rate < 59d ? 60 : Mathf.Clamp(Mathf.RoundToInt((float)rate), 60, 144);
+        }
+
+        private static bool SameView(in ViewState a, in ViewState b)
+        {
+            return a.x.Equals(b.x) && a.y.Equals(b.y) && a.scale.Equals(b.scale) && a.rotation == b.rotation;
         }
 
         private RenderQuality BuildQuality()

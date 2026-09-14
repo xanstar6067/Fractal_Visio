@@ -24,15 +24,23 @@ namespace FractalVisio.App
         /// about 0.3 (see AppBootstrap.EnsureUi). With that fixed the density figure stands on its
         /// own and this is a taste multiplier on top of it.
         /// </summary>
-        public static InterfaceSettings Default => new InterfaceSettings { Scale = 1f }.Sanitized();
+        public static InterfaceSettings Default => new InterfaceSettings { Scale = 1f, InertiaSeconds = 5f }.Sanitized();
+
+        /// <summary>
+        /// How long a flicked view keeps coasting before it stops: the time for its speed to fall to
+        /// 0.2%. Zero turns inertia off. Five seconds is the reference app's default ("Medium").
+        /// </summary>
+        public float InertiaSeconds;
 
         public InterfaceSettings Sanitized()
         {
             var result = this;
             result.Scale = Mathf.Clamp(result.Scale <= 0f ? 1f : result.Scale, 0.6f, 2.5f);
+            result.InertiaSeconds = Mathf.Clamp(result.InertiaSeconds, 0f, 60f);
             return result;
         }
 
-        public bool Equals(in InterfaceSettings other) => Mathf.Approximately(Scale, other.Scale);
+        public bool Equals(in InterfaceSettings other) =>
+            Mathf.Approximately(Scale, other.Scale) && Mathf.Approximately(InertiaSeconds, other.InertiaSeconds);
     }
 }

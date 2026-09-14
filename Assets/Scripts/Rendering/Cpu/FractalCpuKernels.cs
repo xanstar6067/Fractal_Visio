@@ -166,9 +166,24 @@ namespace FractalVisio.Rendering
                 return;
             }
 
-            MapAndStage(escape, publishView);
+            MapAndStage(escape, publishView, publishStep);
         }
 
+        /// <summary>Progressive step of the published frame: 16 for the coarsest pass, 1 for full detail.</summary>
+        public int PublishedStep { get; private set; } = StepPlan[0];
+
+        /// <summary>
+        /// Raised on the main thread just before the texture is overwritten with a newer frame, with
+        /// the view and step of the incoming one. The last moment the outgoing picture can still be
+        /// copied - which is how a sharper frame is kept on screen over a coarser successor.
+        /// </summary>
+        public event Action<ViewState, int> FrameReplacing;
+
+        /// <param name="timeBudgetSeconds">
+        /// Stop after the passes that fit in this much time, estimated from how fast the previous
+        /// passes went; 0 renders every pass. A moving view wants a fresh coarse frame soon rather
+        /// than a sharp one of a place it has already left - the reference app aims for ~250 ms.
+        /// </param>
         public void Request(
             Texture2D texture,
             in Viewport viewport,
@@ -177,12 +192,11 @@ namespace FractalVisio.Rendering
             in ViewState view,
             int iterations,
             bool extendedPrecision,
-            bool interacting,
-            int minimumPublishStep = 16)
+            double timeBudgetSeconds = 0d)
         {
             queued = new FrameRequest(
                 texture, viewport, definition, parameters, view, Mathf.Max(1, iterations),
-                extendedPrecision, interacting, minimumPublishStep);
+                extendedPrecision, timeBudgetSeconds);
             hasQueued = true;
 
             if (renderActive)
@@ -325,13 +339,29 @@ namespace FractalVisio.Rendering
         /// between passes, so the buffer holds one coherent step size rather than a torn pass
         /// boundary.
         /// </summary>
-        internal void PublishPass(float[] source, in ViewState view)
+        internal void PublishPass(float[] source, in ViewState view, int step)
         {
             hasEscapeData = true;
-            MapAndStage(source, view);
+            MapAndStage(source, view, step);
         }
 
-        private void MapAndStage(float[] source, in ViewState view)
+        /// <summary>
+        /// Fold one pass's measured cost into the per-sample estimate the time budget is planned
+        /// with. Weighted towards the newest pass: the cost follows the view, and the view moves.
+        /// </summary>
+        internal void RecordThroughput(double seconds, long samples)
+        {
+            if (samples < MinimumTimedSamples || !(seconds > 0d))
+            {
+                return;
+            }
+
+            var measured = seconds / samples;
+            var previous = Volatile.Read(ref secondsPerSample);
+            Volatile.Write(ref secondsPerSample, previous > 0d ? previous + (measured - previous) * 0.5d : measured);
+        }
+
+        private void MapAndStage(float[] source, in ViewState view, int step)
         {
             var length = source.Length;
             if (length <= 0)
@@ -376,6 +406,7 @@ namespace FractalVisio.Rendering
 
                 Array.Copy(localTarget, publishFrame, length);
                 publishView = view;
+                publishStep = step;
                 publishValid = true;
             }
 
@@ -408,24 +439,35 @@ namespace FractalVisio.Rendering
                 floor++;
             }
 
-            // Every depth renders every pass, gesture or not. Deep renders used to stop at 8x8
-            // blocks mid-gesture because double-double could not afford more; perturbation runs at
-            // fp64 cost, and a cap that only applies past one scale is a visible cliff in how sharp
-            // the picture gets while zooming through it.
+            var visibleRect = ResolveVisibleRect(activeRequest.Viewport);
+            var fullRect = new RectInt(0, 0, frameWidth, frameHeight);
+
+            // The time budget decides how fine this run goes, the same way at every depth: passes
+            // are added while their estimated cost still fits. The first pass always runs - a run
+            // that publishes nothing would leave a moving view with no new picture at all.
             var ceiling = StepPlan.Length;
+            var perSample = Volatile.Read(ref secondsPerSample);
+            var estimated = 0d;
+            samplesTotal = 0;
+            for (var p = floor; p < StepPlan.Length; p++)
+            {
+                var region = StepPlan[p] >= MarginStepThreshold ? fullRect : visibleRect;
+                var samples = CountNewSamples(region.width, region.height, StepPlan[p], p == floor);
+                estimated += samples * perSample;
+                if (p > floor && activeRequest.TimeBudgetSeconds > 0d && perSample > 0d &&
+                    estimated > activeRequest.TimeBudgetSeconds)
+                {
+                    ceiling = p;
+                    break;
+                }
+
+                samplesTotal += samples;
+            }
 
             passFloorIndex = floor;
             passCeilingIndex = ceiling;
             passCursor = floor;
             samplesDone = 0;
-            samplesTotal = 0;
-            var visibleRect = ResolveVisibleRect(activeRequest.Viewport);
-            var fullRect = new RectInt(0, 0, frameWidth, frameHeight);
-            for (var p = floor; p < ceiling; p++)
-            {
-                var region = StepPlan[p] >= MarginStepThreshold ? fullRect : visibleRect;
-                samplesTotal += CountNewSamples(region.width, region.height, StepPlan[p], p == floor);
-            }
 
             Progress = 0f;
             lastUploadTime = 0d;

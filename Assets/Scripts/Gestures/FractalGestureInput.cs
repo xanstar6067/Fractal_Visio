@@ -14,7 +14,10 @@ namespace FractalVisio.Gestures
             float zoomRatio,
             float rotationDelta,
             Vector2 rotationPivot,
-            bool resetRequested)
+            bool resetRequested,
+            bool touching = false,
+            bool hasFling = false,
+            FlingVelocity fling = default)
         {
             IsInteracting = isInteracting;
             Changed = changed;
@@ -25,6 +28,9 @@ namespace FractalVisio.Gestures
             RotationDelta = rotationDelta;
             RotationPivot = rotationPivot;
             ResetRequested = resetRequested;
+            Touching = touching;
+            HasFling = hasFling;
+            Fling = fling;
         }
 
         /// <summary>
@@ -46,6 +52,19 @@ namespace FractalVisio.Gestures
         /// <summary>Screen-space point the rotation turns around (two-finger midpoint / cursor).</summary>
         public Vector2 RotationPivot { get; }
         public bool ResetRequested { get; }
+
+        /// <summary>
+        /// A finger (or the mouse button) is down on the picture, moving or not. This - not
+        /// <see cref="IsInteracting"/> - is what stops a coasting view: catching it with a still
+        /// finger is how the user says "stop here".
+        /// </summary>
+        public bool Touching { get; }
+
+        /// <summary>The gesture ended this frame while moving; <see cref="Fling"/> says how fast.</summary>
+        public bool HasFling { get; }
+
+        public FlingVelocity Fling { get; }
+
         public bool HasZoom => ZoomRatio > 0f && Mathf.Abs(ZoomRatio - 1f) > 0.0001f;
         public bool HasRotation => Mathf.Abs(RotationDelta) > 0f;
     }
@@ -62,6 +81,10 @@ namespace FractalVisio.Gestures
     ///
     /// Once engaged, a gesture stays engaged until the fingers lift; the dead zone is a start
     /// condition, not a per-frame filter, or a slow drag would stutter through it.
+    ///
+    /// It also measures how fast an engaged gesture moves over its last
+    /// <see cref="VelocityWindowSeconds"/>, and reports that as a fling the frame the gesture ends.
+    /// Only the last moment counts: a finger that stopped before lifting flings nothing.
     /// </summary>
     [DefaultExecutionOrder(-100)]
     public sealed class FractalGestureInput : MonoBehaviour
@@ -75,6 +98,36 @@ namespace FractalVisio.Gestures
 
         /// <summary>Pinch has to change the finger distance by this fraction before it engages.</summary>
         private const float PinchSlop = 0.02f;
+
+        /// <summary>How much of the end of a gesture its fling velocity is measured over. The reference app's figure.</summary>
+        private const float VelocityWindowSeconds = 0.1f;
+
+        private const int SampleCapacity = 32;
+
+        private enum GestureKind
+        {
+            None,
+            Drag,
+            Pinch
+        }
+
+        private readonly float[] sampleTime = new float[SampleCapacity];
+        private readonly Vector2[] samplePan = new Vector2[SampleCapacity];
+        private readonly float[] sampleZoom = new float[SampleCapacity];
+        private readonly float[] sampleRotation = new float[SampleCapacity];
+        private int sampleHead;
+        private int sampleCount;
+
+        private GestureKind engagedKind;
+        private float engagedSince;
+        private Vector2 lastPivot;
+
+        /// <summary>
+        /// After a pinch ends by lifting one finger, the other is ignored until it lifts too. The
+        /// zoom is coasting by then, and a leftover finger that starts panning would stop it -
+        /// fingers never leave the glass at exactly the same moment.
+        /// </summary>
+        private bool ignoreUntilRelease;
 
         private Vector2 previousMousePosition;
         private bool mouseWasPressed;
@@ -96,6 +149,7 @@ namespace FractalVisio.Gestures
         private void Update()
         {
             var touchCount = Input.touchCount;
+            var fling = default(FractalGestureFrame);
 
             if (touchCount < 2)
             {
@@ -109,6 +163,17 @@ namespace FractalVisio.Gestures
             // spread jump, and carrying the old engagement across would send the view with them.
             if (touchCount != previousTouchCount)
             {
+                if (touchCount < previousTouchCount)
+                {
+                    fling = EndGesture(touchCount);
+                }
+                else
+                {
+                    ClearSamples();
+                    engagedKind = GestureKind.None;
+                    ignoreUntilRelease = false;
+                }
+
                 dragTravel = Vector2.zero;
                 dragEngaged = false;
                 pinchTravel = 0f;
@@ -116,7 +181,52 @@ namespace FractalVisio.Gestures
                 previousTouchCount = touchCount;
             }
 
+            if (touchCount == 0)
+            {
+                ignoreUntilRelease = false;
+            }
+
+            if (fling.HasFling)
+            {
+                Current = fling;
+                return;
+            }
+
+            if (ignoreUntilRelease)
+            {
+                Current = default;
+                return;
+            }
+
             Current = touchCount > 0 ? ReadTouches() : ReadMouse();
+        }
+
+        /// <summary>
+        /// Fingers lifted. A drag flings when the last finger leaves; a pinch flings as soon as it
+        /// stops being a pinch, and the finger left behind is ignored until it lifts.
+        /// </summary>
+        private FractalGestureFrame EndGesture(int remainingTouches)
+        {
+            var kind = engagedKind;
+            var ended = kind == GestureKind.Pinch
+                ? remainingTouches < 2
+                : kind == GestureKind.Drag && remainingTouches == 0;
+
+            if (!ended)
+            {
+                return default;
+            }
+
+            var frame = BuildFling(kind);
+            engagedKind = GestureKind.None;
+            ClearSamples();
+
+            if (kind == GestureKind.Pinch && remainingTouches > 0 && frame.HasFling)
+            {
+                ignoreUntilRelease = true;
+            }
+
+            return frame;
         }
 
         private FractalGestureFrame ReadTouches()
@@ -126,7 +236,7 @@ namespace FractalVisio.Gestures
             {
                 var reset = Input.GetTouch(2).phase == TouchPhase.Began;
                 return new FractalGestureFrame(
-                    reset, reset, Vector2.zero, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, reset);
+                    reset, reset, Vector2.zero, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, reset, touching: true);
             }
 
             if (touchCount == 2)
@@ -146,21 +256,23 @@ namespace FractalVisio.Gestures
                 dragTravel += touch.deltaPosition;
                 if (dragTravel.magnitude < DragSlop)
                 {
-                    // Below the dead zone: the finger is resting, not dragging. Report nothing at
-                    // all, so the renderer keeps the frame it has finished.
-                    return default;
+                    // Below the dead zone: the finger is resting, not dragging. Report nothing but
+                    // the touch itself, so the renderer keeps the frame it has finished.
+                    return Resting();
                 }
 
                 // Engage without applying the travel so far - otherwise the picture jumps by the
                 // width of the dead zone at the moment the drag starts.
                 dragEngaged = true;
+                Engage(GestureKind.Drag, touch.position);
                 return new FractalGestureFrame(
-                    true, false, Vector2.zero, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false);
+                    true, false, Vector2.zero, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false, touching: true);
             }
 
+            AddSample(touch.deltaPosition, 0f, 0f);
             var moved = touch.deltaPosition.sqrMagnitude > 0f;
             return new FractalGestureFrame(
-                true, moved, touch.deltaPosition, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false);
+                true, moved, touch.deltaPosition, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false, touching: true);
         }
 
         private FractalGestureFrame ReadPinch()
@@ -204,13 +316,17 @@ namespace FractalVisio.Gestures
                     dragTravel.magnitude < DragSlop &&
                     !rotationEngaged)
                 {
-                    return default;
+                    return Resting();
                 }
 
                 pinchEngaged = true;
+                Engage(GestureKind.Pinch, currentCenter);
                 return new FractalGestureFrame(
-                    true, false, Vector2.zero, currentCenter, currentCenter, 1f, 0f, currentCenter, false);
+                    true, false, Vector2.zero, currentCenter, currentCenter, 1f, 0f, currentCenter, false, touching: true);
             }
+
+            lastPivot = currentCenter;
+            AddSample(Vector2.zero, zoomRatio > 0f ? Mathf.Log(zoomRatio) : 0f, rotationDelta);
 
             var centerMoved = (currentCenter - previousCenter).sqrMagnitude > 0f;
             var changed = centerMoved ||
@@ -226,7 +342,8 @@ namespace FractalVisio.Gestures
                 zoomRatio,
                 rotationDelta,
                 currentCenter,
-                false);
+                false,
+                touching: true);
         }
 
         private FractalGestureFrame ReadMouse()
@@ -236,6 +353,21 @@ namespace FractalVisio.Gestures
 
             if (!pressed)
             {
+                if (mouseWasPressed && engagedKind == GestureKind.Drag)
+                {
+                    var fling = BuildFling(GestureKind.Drag);
+                    engagedKind = GestureKind.None;
+                    ClearSamples();
+                    dragTravel = Vector2.zero;
+                    dragEngaged = false;
+                    previousMousePosition = position;
+                    mouseWasPressed = false;
+                    if (fling.HasFling)
+                    {
+                        return fling;
+                    }
+                }
+
                 dragTravel = Vector2.zero;
                 dragEngaged = false;
             }
@@ -245,17 +377,25 @@ namespace FractalVisio.Gestures
 
             if (pressed)
             {
+                if (!mouseWasPressed)
+                {
+                    ClearSamples();
+                    engagedKind = GestureKind.None;
+                }
+
                 if (!dragEngaged)
                 {
                     dragTravel += rawDelta;
                     if (dragTravel.magnitude >= DragSlop)
                     {
                         dragEngaged = true;
+                        Engage(GestureKind.Drag, position);
                     }
                 }
                 else
                 {
                     panDelta = rawDelta;
+                    AddSample(rawDelta, 0f, 0f);
                 }
             }
 
@@ -291,7 +431,81 @@ namespace FractalVisio.Gestures
                 zoomRatio,
                 keyRotate,
                 position,
-                reset);
+                reset,
+                touching: pressed);
+        }
+
+        private static FractalGestureFrame Resting() =>
+            new(false, false, Vector2.zero, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false, touching: true);
+
+        private void Engage(GestureKind kind, Vector2 pivot)
+        {
+            engagedKind = kind;
+            engagedSince = Time.unscaledTime;
+            lastPivot = pivot;
+            ClearSamples();
+        }
+
+        private void AddSample(Vector2 pan, float zoomLog, float rotation)
+        {
+            sampleTime[sampleHead] = Time.unscaledTime;
+            samplePan[sampleHead] = pan;
+            sampleZoom[sampleHead] = zoomLog;
+            sampleRotation[sampleHead] = rotation;
+            sampleHead = (sampleHead + 1) % SampleCapacity;
+            sampleCount = Mathf.Min(SampleCapacity, sampleCount + 1);
+        }
+
+        private void ClearSamples()
+        {
+            sampleHead = 0;
+            sampleCount = 0;
+        }
+
+        /// <summary>
+        /// Velocity over the end of the gesture: the motion inside the window divided by the window.
+        /// Dividing by the whole window even when the samples do not fill it is deliberate - a
+        /// finger that paused before lifting leaves the window mostly empty and flings little.
+        /// </summary>
+        private FractalGestureFrame BuildFling(GestureKind kind)
+        {
+            if (kind == GestureKind.None || sampleCount == 0)
+            {
+                return default;
+            }
+
+            var now = Time.unscaledTime;
+            var gestureSeconds = now - engagedSince;
+            var window = Mathf.Clamp(gestureSeconds, Time.unscaledDeltaTime, VelocityWindowSeconds);
+            if (!(window > 0f))
+            {
+                return default;
+            }
+
+            var pan = Vector2.zero;
+            var zoom = 0d;
+            var rotation = 0d;
+            for (var i = 0; i < sampleCount; i++)
+            {
+                var index = (sampleHead - 1 - i + SampleCapacity) % SampleCapacity;
+                if (now - sampleTime[index] > window)
+                {
+                    break;
+                }
+
+                pan += samplePan[index];
+                zoom += sampleZoom[index];
+                rotation += sampleRotation[index];
+            }
+
+            var velocity = kind == GestureKind.Drag
+                ? new FlingVelocity(pan / window, 0d, 0d, lastPivot, gestureSeconds)
+                : new FlingVelocity(Vector2.zero, zoom / window, rotation / window, lastPivot, gestureSeconds);
+
+            return velocity.IsZero
+                ? default
+                : new FractalGestureFrame(false, false, Vector2.zero, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false,
+                    hasFling: true, fling: velocity);
         }
 
         private static float ShortestAngle(float fromRadians, float toRadians)
