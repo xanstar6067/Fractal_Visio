@@ -221,9 +221,22 @@ any feature that is not a bug fix, and update it when a design decision changes.
   start condition, not a per-frame filter. Reporting a resting finger as interaction made the
   renderer re-request with a widened field and drop the picture to its 16x16 pass the instant the
   screen was touched.
-- A coarse pass does not replace a finer frame that still covers the view: the presenter passes a
-  `minimumPublishStep` and the renderer computes the early passes but holds them back. The last
-  pass of a run always publishes, or a capped interactive render would show nothing at all.
+- Every pass is published; a coarse pass still never makes the picture worse. Before the texture is
+  overwritten the renderer raises `FrameReplacing`, and the presenter copies the outgoing frame into
+  `RetainedFrame` (third compositor layer) if it is sharper - compared as `step x scale`, clamped to
+  the current view's own scale, with a 25% tolerance - and dissolves it (0.15 s) once a newer frame
+  catches up. Drop the clamp and a frame from deeper in stays on top forever after a zoom-out.
+  Palette, fractal, backend and resize changes release the copy (it is colour, not escape values).
+- Coarse passes are coloured by bilinear interpolation between samples (`MapInterpolated`), never
+  shown as blocks; the escape buffer itself keeps its blocks for later passes and remaps.
+- Motion (docs\ARCHITECTURE.md §5.6): a gesture or coast requests renders with a 0.2 s time budget,
+  planned from the measured per-sample cost (timed only on passes of 16k+ samples). While coasting
+  (`ViewInertia`, an `IViewForecast`) the request is aimed at the predicted view mid-way through the
+  frame's life and widened to cover it; do **not** restart a forecast render because the current view
+  is outside it - during a zoom-in it always is, and that bug published nothing for a whole coast.
+- Inertia stops on any touch of the picture (`FractalGestureFrame.Touching`) and on any view change
+  it did not make. After a pinch ends with a fling, the finger left on the glass is ignored until it
+  lifts. On mobile `targetFrameRate` follows the panel's refresh rate.
 - Saved state (`FractalStateDto`) stores centre/scale as `decimal` strings and parameters by
   string key, with a `version` field. Never serialise the centre as `double`. Every number goes
   through `StateCodec` in the invariant culture, and restoring goes through

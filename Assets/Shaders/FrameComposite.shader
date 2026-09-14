@@ -7,6 +7,7 @@ Shader "FractalVisio/FrameComposite"
     {
         _MainTex ("Frame", 2D) = "black" {}
         _FallbackColor ("Uncovered colour", Color) = (0.012, 0.02, 0.047, 1)
+        _LayerAlpha ("Over-layer opacity", Range(0, 1)) = 1
     }
 
     SubShader
@@ -28,6 +29,10 @@ Shader "FractalVisio/FrameComposite"
         float4 _FrameUvRow0;
         float4 _FrameUvRow1;
         float4 _FallbackColor;
+
+        // Opacity of the whole over-layer. 1 for a sharp frame on top; less while a retained frame
+        // fades out over its successor, which is what turns a pass swap into a dissolve.
+        float _LayerAlpha;
 
         struct Attributes
         {
@@ -105,7 +110,7 @@ Shader "FractalVisio/FrameComposite"
             {
                 float2 uv = FrameUv(input.uv);
                 half4 frame = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, saturate(uv));
-                return half4(frame.rgb, Coverage(uv));
+                return half4(frame.rgb, Coverage(uv) * _LayerAlpha);
             }
             ENDHLSL
         }

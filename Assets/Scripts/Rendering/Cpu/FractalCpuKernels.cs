@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -55,6 +56,19 @@ namespace FractalVisio.Rendering
         /// <summary>How long a worker parked by <see cref="CpuWorkerBudget"/> waits before looking again.</summary>
         private const int ParkSleepMilliseconds = 4;
 
+        /// <summary>
+        /// A pass with fewer samples than this is too short to time: the coarse passes are a few
+        /// thousand samples, and waking the workers is most of their wall time. Timed, they inflated
+        /// the per-sample estimate and the time budget cut the next run after its first pass.
+        /// </summary>
+        private const long MinimumTimedSamples = 16384;
+
+        /// <summary>
+        /// Measured wall-clock cost of one sample in the most recent passes, 0 until the first
+        /// timed pass. Written by the render worker, read when the next request is planned.
+        /// </summary>
+        private double secondsPerSample;
+
         // Passes at or above this step also cover the overscan margin; finer passes stay inside
         // the visible rectangle. The margin is only ever seen mid-gesture, where a coarse but
         // correct edge is enough, and refining it at every step would spend a quarter of the
@@ -76,12 +90,20 @@ namespace FractalVisio.Rendering
         /// <summary>Colours for the escape buffer, produced at publish time.</summary>
         private Color32[] mapScratch = Array.Empty<Color32>();
 
+        // Scratch for smoothing a coarse pass (see MapInterpolated), reused between publishes.
+        private float[] blockEscape = Array.Empty<float>();
+        private Color32[] blockColors = Array.Empty<Color32>();
+        private int[] columnLower = Array.Empty<int>();
+        private int[] columnUpper = Array.Empty<int>();
+        private int[] columnWeight = Array.Empty<int>();
+
         // What the main thread actually uploads. The render worker fills it only between passes -
         // i.e. when the escape buffer is a whole-image render at one step size, never a
         // half-updated mix of a pass and the coarser image beneath it. Guarded by `publishLock`
         // so SetPixels32 never reads it mid-copy. The view that snapshot stands for travels with it.
         private Color32[] publishFrame = Array.Empty<Color32>();
         private ViewState publishView;
+        private int publishStep = StepPlan[0];
         private bool publishValid;
         private readonly object publishLock = new object();
 
@@ -361,6 +383,107 @@ namespace FractalVisio.Rendering
             Volatile.Write(ref secondsPerSample, previous > 0d ? previous + (measured - previous) * 0.5d : measured);
         }
 
+        /// <summary>
+        /// Colour a coarse pass as a smooth picture rather than as blocks: map one colour per sample
+        /// and blend between neighbouring samples bilinearly. A 16x16 pass shown as hard squares
+        /// reads as a broken picture; the same samples filtered read as an out-of-focus one, which
+        /// is what the reference app shows while it moves - it renders coarse phases small and lets
+        /// the canvas filter them up. Only the colours are smoothed: the escape buffer keeps its
+        /// blocks, because later passes and remaps read it.
+        /// </summary>
+        private void MapInterpolated(float[] source, Color32[] target, int step, ColorState state)
+        {
+            var width = frameWidth;
+            var height = frameHeight;
+            var columns = (width + step - 1) / step;
+            var rows = (height + step - 1) / step;
+            var samples = columns * rows;
+
+            if (blockEscape.Length < samples)
+            {
+                blockEscape = new float[samples];
+                blockColors = new Color32[samples];
+            }
+
+            if (columnLower.Length < width)
+            {
+                columnLower = new int[width];
+                columnUpper = new int[width];
+                columnWeight = new int[width];
+            }
+
+            for (var row = 0; row < rows; row++)
+            {
+                var sourceRow = row * step * width;
+                var blockRow = row * columns;
+                for (var column = 0; column < columns; column++)
+                {
+                    blockEscape[blockRow + column] = source[sourceRow + column * step];
+                }
+            }
+
+            mapper.MapRange(blockEscape, blockColors, 0, samples, state.Palette, state.Settings);
+
+            // Pixel centre in units of samples, where sample k sits at the middle of block k.
+            // Weights are fixed-point out of 256 so the inner loop stays integer.
+            for (var x = 0; x < width; x++)
+            {
+                var position = (x + 0.5f) / step - 0.5f;
+                var lower = Mathf.Clamp(Mathf.FloorToInt(position), 0, columns - 1);
+                columnLower[x] = lower;
+                columnUpper[x] = Math.Min(lower + 1, columns - 1);
+                columnWeight[x] = Mathf.Clamp(Mathf.RoundToInt((position - lower) * 256f), 0, 256);
+            }
+
+            var localBlocks = blockColors;
+            var lowerColumns = columnLower;
+            var upperColumns = columnUpper;
+            var weights = columnWeight;
+            var rowsPerChunk = Math.Max(16, height / Math.Max(1, workerCount * 4));
+            var chunks = (height + rowsPerChunk - 1) / rowsPerChunk;
+
+            Parallel.For(
+                0,
+                chunks,
+                new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+                chunk =>
+                {
+                    var endRow = Math.Min(height, (chunk + 1) * rowsPerChunk);
+                    for (var y = chunk * rowsPerChunk; y < endRow; y++)
+                    {
+                        var position = (y + 0.5f) / step - 0.5f;
+                        var lower = Mathf.Clamp(Mathf.FloorToInt(position), 0, rows - 1);
+                        var upper = Math.Min(lower + 1, rows - 1);
+                        var wy = Mathf.Clamp(Mathf.RoundToInt((position - lower) * 256f), 0, 256);
+                        var top = lower * columns;
+                        var bottom = upper * columns;
+                        var pixelRow = y * width;
+
+                        for (var x = 0; x < width; x++)
+                        {
+                            var wx = weights[x];
+                            var c00 = localBlocks[top + lowerColumns[x]];
+                            var c10 = localBlocks[top + upperColumns[x]];
+                            var c01 = localBlocks[bottom + lowerColumns[x]];
+                            var c11 = localBlocks[bottom + upperColumns[x]];
+
+                            var r0 = c00.r * (256 - wx) + c10.r * wx;
+                            var g0 = c00.g * (256 - wx) + c10.g * wx;
+                            var b0 = c00.b * (256 - wx) + c10.b * wx;
+                            var r1 = c01.r * (256 - wx) + c11.r * wx;
+                            var g1 = c01.g * (256 - wx) + c11.g * wx;
+                            var b1 = c01.b * (256 - wx) + c11.b * wx;
+
+                            target[pixelRow + x] = new Color32(
+                                (byte)((r0 * (256 - wy) + r1 * wy + 32768) >> 16),
+                                (byte)((g0 * (256 - wy) + g1 * wy + 32768) >> 16),
+                                (byte)((b0 * (256 - wy) + b1 * wy + 32768) >> 16),
+                                255);
+                        }
+                    }
+                });
+        }
+
         private void MapAndStage(float[] source, in ViewState view, int step)
         {
             var length = source.Length;
@@ -375,26 +498,34 @@ namespace FractalVisio.Rendering
             }
 
             var state = colorState;
-            var chunk = Math.Max(4096, length / Math.Max(1, workerCount * 4));
-            var chunks = (length + chunk - 1) / chunk;
-            var localMapper = mapper;
-            var localSource = source;
             var localTarget = mapScratch;
-            var settings = state.Settings;
-            var palette = state.Palette;
 
-            if (chunks <= 1)
+            if (step > 1 && frameWidth * frameHeight == length)
             {
-                localMapper.MapRange(localSource, localTarget, 0, length, palette, settings);
+                MapInterpolated(source, localTarget, step, state);
             }
             else
             {
-                Parallel.For(
-                    0,
-                    chunks,
-                    new ParallelOptions { MaxDegreeOfParallelism = workerCount },
-                    index => localMapper.MapRange(
-                        localSource, localTarget, index * chunk, chunk, palette, settings));
+                var chunk = Math.Max(4096, length / Math.Max(1, workerCount * 4));
+                var chunks = (length + chunk - 1) / chunk;
+                var localMapper = mapper;
+                var localSource = source;
+                var settings = state.Settings;
+                var palette = state.Palette;
+
+                if (chunks <= 1)
+                {
+                    localMapper.MapRange(localSource, localTarget, 0, length, palette, settings);
+                }
+                else
+                {
+                    Parallel.For(
+                        0,
+                        chunks,
+                        new ParallelOptions { MaxDegreeOfParallelism = workerCount },
+                        index => localMapper.MapRange(
+                            localSource, localTarget, index * chunk, chunk, palette, settings));
+                }
             }
 
             lock (publishLock)
@@ -501,7 +632,7 @@ namespace FractalVisio.Rendering
                     continue;
                 }
 
-                Debug.LogError("CPU fractal render failed: " + inner);
+                UnityEngine.Debug.LogError("CPU fractal render failed: " + inner);
             }
         }
 
@@ -513,6 +644,7 @@ namespace FractalVisio.Rendering
             }
 
             ViewState uploadedView;
+            int uploadedStep;
             lock (publishLock)
             {
                 if (!publishValid || publishFrame.Length != frameWidth * frameHeight)
@@ -520,14 +652,31 @@ namespace FractalVisio.Rendering
                     return false;
                 }
 
+                uploadedView = publishView;
+                uploadedStep = publishStep;
+            }
+
+            // Outside the lock: a handler copies the texture on the GPU, and the worker must not wait
+            // on that to stage its next pass.
+            if (HasPublished)
+            {
+                FrameReplacing?.Invoke(uploadedView, uploadedStep);
+            }
+
+            lock (publishLock)
+            {
+                // The worker may have staged a newer pass in between; upload whatever is newest and
+                // report the view that belongs to it.
                 target.SetPixels32(publishFrame);
                 uploadedView = publishView;
+                uploadedStep = publishStep;
             }
 
             target.Apply(false, false);
             frameDirty = false;
 
             PublishedView = uploadedView;
+            PublishedStep = uploadedStep;
             PublishedAspect = frameWidth / (double)Math.Max(1, frameHeight);
             HasPublished = true;
 
@@ -814,16 +963,22 @@ namespace FractalVisio.Rendering
                 // visible rectangle. See MarginStepThreshold.
                 var tiles = step >= MarginStepThreshold ? fullTiles : visibleTiles;
 
+                var started = Stopwatch.GetTimestamp();
                 RenderPass(job, tiles, step, p == job.PassFloor, sampler, token);
 
-                // A pass coarser than the caller's floor is computed but not shown: something
-                // better is already on screen, and replacing it with 16x16 blocks would be a
-                // downgrade. The last pass of the run always publishes, or a capped interactive
-                // render would produce nothing at all.
-                if (step > job.MinimumPublishStep && p < job.PassCeiling - 1)
+                if (token.IsCancellationRequested)
                 {
-                    continue;
+                    return;
                 }
+
+                var region = step >= MarginStepThreshold ? new RectInt(0, 0, job.Width, job.Height) : job.VisibleRect;
+                job.Owner.RecordThroughput(
+                    (Stopwatch.GetTimestamp() - started) / (double)Stopwatch.Frequency,
+                    CountNewSamples(region.width, region.height, step, p == job.PassFloor));
+
+                // Every pass is published. A coarse pass never makes the picture worse: while a
+                // sharper earlier frame still covers the view, the presenter keeps a copy of it on
+                // top (see FrameReplacing), so the new pass only shows where the old one runs out.
 
                 // Whole frame now covered at this step: colour it and publish it as one piece.
                 // Marking dirty per tile instead would upload a frame that is part this
@@ -835,7 +990,7 @@ namespace FractalVisio.Rendering
                     return;
                 }
 
-                job.Owner.PublishPass(job.Escape, job.View);
+                job.Owner.PublishPass(job.Escape, job.View, step);
             }
         }
 
@@ -996,10 +1151,8 @@ namespace FractalVisio.Rendering
                 ViewState view,
                 int iterations,
                 bool extendedPrecision,
-                bool interacting,
-                int minimumPublishStep)
+                double timeBudgetSeconds)
             {
-                MinimumPublishStep = minimumPublishStep;
                 Target = target;
                 Viewport = viewport;
                 Definition = definition;
@@ -1007,7 +1160,7 @@ namespace FractalVisio.Rendering
                 View = view;
                 Iterations = iterations;
                 ExtendedPrecision = extendedPrecision;
-                Interacting = interacting;
+                TimeBudgetSeconds = timeBudgetSeconds;
             }
 
             public Texture2D Target { get; }
@@ -1017,10 +1170,9 @@ namespace FractalVisio.Rendering
             public ViewState View { get; }
             public int Iterations { get; }
             public bool ExtendedPrecision { get; }
-            public bool Interacting { get; }
 
-            /// <summary>Coarsest pass step this render may publish. See RunPasses.</summary>
-            public int MinimumPublishStep { get; }
+            /// <summary>Seconds the run may take, 0 for no limit. See <see cref="Request"/>.</summary>
+            public double TimeBudgetSeconds { get; }
         }
 
         private sealed class RenderJob
@@ -1061,7 +1213,6 @@ namespace FractalVisio.Rendering
                 RotationSin = Math.Sin(request.View.rotation);
                 MaxIterations = request.Iterations;
                 ExtendedPrecision = request.ExtendedPrecision;
-                MinimumPublishStep = request.MinimumPublishStep;
                 Workers = ranks.Length;
                 PassFloor = passFloor;
                 PassCeiling = passCeiling;
@@ -1094,9 +1245,6 @@ namespace FractalVisio.Rendering
             public double RotationSin { get; }
             public int MaxIterations { get; }
             public bool ExtendedPrecision { get; }
-
-            /// <summary>Coarsest pass step this render may publish. See RunPasses.</summary>
-            public int MinimumPublishStep { get; }
 
             public CpuWorkerBudget Budget { get; }
 

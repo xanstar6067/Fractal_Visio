@@ -41,11 +41,23 @@ namespace FractalVisio.App
         /// </summary>
         private const float InFlightOverhangLimit = -0.02f;
 
-        /// <summary>Publish every pass, including the coarsest. Matches the first entry of StepPlan.</summary>
-        private const int CoarsestPublishStep = 16;
+        /// <summary>
+        /// Time a render may take while the view moves. Past it the run stops at the passes that
+        /// fit, so a moving view gets a fresh frame several times a second instead of one sharp frame
+        /// of a place already left. The reference app plans manual moves around 250 ms.
+        /// </summary>
+        private const double InteractiveTimeBudgetSeconds = 0.2d;
 
-        /// <summary>Hold back passes coarser than this while a covering frame is already on screen.</summary>
-        private const int CoveredPublishFloor = 4;
+        /// <summary>A budgeted render still running after this many budgets is treated as stuck and restarted.</summary>
+        private const double StaleRequestBudgets = 4d;
+
+        /// <summary>
+        /// Spacings within this ratio count as equally sharp. Pass steps differ by factors of two, so
+        /// a real reason to hold a copy is always well past it; what stays inside is two frames of
+        /// the same step whose fields were widened a few percent differently, and holding the older
+        /// one over the newer for that gains nothing but a faint seam at its edge.
+        /// </summary>
+        private const double SharpnessTolerance = 1.25d;
 
         private static readonly Rect FullRect = new(0f, 0f, 1f, 1f);
 
@@ -59,6 +71,8 @@ namespace FractalVisio.App
         private FractalCpuRenderer cpuRenderer;
         private WideFieldLayer wideLayer;
         private FrameCompositor compositor;
+        private readonly RetainedFrame retained = new();
+        private IViewForecast forecast;
 
         private RenderTexture interactiveGpuTexture;
         private RenderTexture settledGpuTexture;
@@ -81,6 +95,7 @@ namespace FractalVisio.App
         private bool lastRequestWasInteractive;
         private bool lastUsedExtendedPrecision;
         private double lastFieldFactor = 1d;
+        private double lastRequestTime;
         private float builtRenderScale = -1f;
         private int cachedScreenWidth;
         private int cachedScreenHeight;
@@ -97,6 +112,7 @@ namespace FractalVisio.App
             cpuRenderer = new FractalCpuRenderer(colorMapper, workerBudget, false);
             wideLayer = new WideFieldLayer(colorMapper, workerBudget);
             compositor = new FrameCompositor(session.Coloring.InteriorColor);
+            cpuRenderer.FrameReplacing += OnMainFrameReplacing;
 
             session.Changed += OnSessionChanged;
             RecreateTargets();
@@ -132,9 +148,13 @@ namespace FractalVisio.App
             }
         }
 
-        /// <summary>Frame interval the pacing budget aims for. Uncapped desktops are held to 60 Hz.</summary>
+        /// <summary>
+        /// Frame interval the pacing budget aims for. Uncapped desktops are held to 60 Hz, and a
+        /// 120 Hz phone to 90: past that, parking fractal workers to win the last few milliseconds of
+        /// a frame costs more in render speed than the eye gains in smoothness.
+        /// </summary>
         private static double TargetFrameSeconds =>
-            Application.targetFrameRate > 0 ? 1d / Application.targetFrameRate : 1d / 60d;
+            Application.targetFrameRate > 0 ? 1d / Math.Min(Application.targetFrameRate, 90) : 1d / 60d;
 
         public string ActiveTextureName => targetImage != null && targetImage.texture != null
             ? targetImage.texture.name
@@ -151,12 +171,15 @@ namespace FractalVisio.App
         Rect IBackdropSource.UvRect => targetImage != null ? targetImage.uvRect : FullRect;
 
         /// <summary>Drive one frame. <paramref name="interacting"/> comes from the input layer.</summary>
-        public void Tick(bool interacting)
+        /// <param name="viewForecast">Where the view is going, when that is known - a coasting view. May be null.</param>
+        public void Tick(bool interacting, IViewForecast viewForecast = null)
         {
             if (targetImage == null)
             {
                 return;
             }
+
+            forecast = viewForecast;
 
             if (Screen.width != cachedScreenWidth ||
                 Screen.height != cachedScreenHeight ||
@@ -201,6 +224,12 @@ namespace FractalVisio.App
         public void Dispose()
         {
             session.Changed -= OnSessionChanged;
+            if (cpuRenderer != null)
+            {
+                cpuRenderer.FrameReplacing -= OnMainFrameReplacing;
+            }
+
+            retained.Dispose();
             cpuRenderer?.Dispose();
             gpuRenderer?.Dispose();
             wideLayer?.Dispose();
@@ -250,6 +279,9 @@ namespace FractalVisio.App
             var palette = session.Palette;
             var coloring = session.Coloring;
 
+            // The retained copy is colour, not escape values: it would show the old palette on top.
+            retained.Release();
+
             cpuRenderer?.SetColoring(palette, coloring);
             wideLayer?.SetColoring(palette, coloring);
             gpuRenderer?.SetColoring(palette, coloring);
@@ -273,6 +305,7 @@ namespace FractalVisio.App
 
         private void TickGpu(in ViewState view, bool interacting)
         {
+            retained.Release();
             cpuRenderer?.Invalidate();
             wideLayer?.Suspend();
             DropStalePlaceholders();
@@ -332,6 +365,8 @@ namespace FractalVisio.App
             Compose(view, displayAspect);
         }
 
+        private bool ForecastActive => forecast != null && forecast.IsActive;
+
         /// <summary>
         /// Whether to start a new CPU render. The interesting case is the middle one: mid-gesture,
         /// with a render already running for a view that still covers the screen. Cancelling it
@@ -358,27 +393,57 @@ namespace FractalVisio.App
                 return false;
             }
 
-            if (!interacting)
+            if (!interacting || !cpuRenderer.IsBusy)
             {
                 return true;
             }
 
-            if (Math.Abs(fieldFactor - lastFieldFactor) > FieldChangeThreshold || !cpuRenderer.IsBusy)
+            // A coasting view was rendered ahead of itself on purpose, so "does the running render
+            // cover where the viewer is right now" is the wrong question: during a zoom-in the view
+            // now is wider than the frame aimed at a moment from now, and asking it restarted the
+            // render every frame so that nothing was ever published. A budgeted run is short anyway;
+            // restart only a render that was never budgeted (the settle render from before the
+            // flick) or one that has overrun its budget several times over.
+            if (ForecastActive)
             {
-                return true;
+                return !lastRequestWasInteractive ||
+                       Time.unscaledTimeAsDouble - lastRequestTime > InteractiveTimeBudgetSeconds * StaleRequestBudgets;
             }
 
             var placement = FramePlacement.Resolve(requestedView, compositeViewport.Aspect, view, displayAspect);
+
+            if (Math.Abs(fieldFactor - lastFieldFactor) > FieldChangeThreshold)
+            {
+                return true;
+            }
+
             return !placement.IsValid || placement.Overhang > InFlightOverhangLimit;
         }
 
         private void RequestCpuRender(in ViewState view, bool interacting, double fieldFactor, double displayAspect)
         {
+            // A coasting view's future is known exactly, so aim the frame at the middle of the time it
+            // will be on screen - from when it lands to when the next one does - and widen the field
+            // until it covers both ends. Rendering the view as it is now would deliver a frame of a
+            // place the viewer has already left.
+            var target = view;
+            if (interacting && ForecastActive)
+            {
+                var budget = InteractiveTimeBudgetSeconds;
+                target = forecast.Predict(view, budget * 1.5d);
+                fieldFactor = CoveringFieldFactor(
+                    target,
+                    forecast.Predict(view, budget),
+                    forecast.Predict(view, budget * 2d),
+                    fieldFactor,
+                    displayAspect);
+            }
+
             var viewport = profile.ResolveCpuViewport(cpuBuffer, fieldFactor);
             lastCpuViewport = viewport;
             lastFieldFactor = fieldFactor;
-            lastUsedExtendedPrecision = ResolveExtendedPrecision(view.scale.AsDouble);
-            requestedView = ViewNavigator.ForViewport(view, viewport);
+            lastUsedExtendedPrecision = ResolveExtendedPrecision(target.scale.AsDouble);
+            requestedView = ViewNavigator.ForViewport(target, viewport);
 
             cpuRenderer.Request(
                 cpuTexture,
@@ -386,14 +451,99 @@ namespace FractalVisio.App
                 session.Definition,
                 session.Parameters,
                 requestedView,
-                view.iterations,
+                target.iterations,
                 lastUsedExtendedPrecision,
-                interacting,
-                ResolvePublishFloor(view, displayAspect));
+                interacting ? InteractiveTimeBudgetSeconds : 0d);
 
             lastRequestWasInteractive = interacting;
+            lastRequestTime = Time.unscaledTimeAsDouble;
             hasRequestedView = true;
             renderDirty = false;
+        }
+
+        /// <summary>
+        /// How sharp a frame of plane sample spacing <paramref name="spacing"/> actually looks right
+        /// now. Detail finer than the display's own pixels is invisible - and, minified without mip
+        /// maps, it only shimmers - so everything is clamped to the spacing a full-detail frame of
+        /// the current view would have. Without the clamp, a frame from deeper in held its place over
+        /// every later frame after a zoom-out, because nothing at the new scale could ever be "sharper".
+        /// </summary>
+        private double VisibleSpacing(double spacing) => Math.Max(spacing, Math.Abs(session.View.scale.AsDouble));
+
+        /// <summary>
+        /// Smallest field factor, from <paramref name="baseFactor"/> up, at which a frame of
+        /// <paramref name="center"/> covers both <paramref name="entry"/> and <paramref name="exit"/>.
+        /// Overhang is a fraction of the display, so widening by twice it closes the gap in one or
+        /// two rounds; the profile's ceiling still applies.
+        /// </summary>
+        private double CoveringFieldFactor(in ViewState center, in ViewState entry, in ViewState exit, double baseFactor, double displayAspect)
+        {
+            var factor = Math.Max(1d, baseFactor);
+            for (var round = 0; round < 4 && factor < profile.CpuFieldMax; round++)
+            {
+                var frame = ViewNavigator.ForViewport(center, profile.ResolveCpuViewport(cpuBuffer, factor));
+                var atEntry = FramePlacement.Resolve(frame, compositeViewport.Aspect, entry, displayAspect);
+                var atExit = FramePlacement.Resolve(frame, compositeViewport.Aspect, exit, displayAspect);
+                if (!atEntry.IsValid || !atExit.IsValid)
+                {
+                    break;
+                }
+
+                var overhang = Math.Max(atEntry.Overhang, atExit.Overhang);
+                if (overhang <= 0f)
+                {
+                    break;
+                }
+
+                factor = Math.Min(profile.CpuFieldMax, factor * (1d + 2d * overhang));
+            }
+
+            return factor;
+        }
+
+        /// <summary>
+        /// The main frame is about to be overwritten. If the outgoing picture is sharper than the
+        /// incoming one, copy it and keep it on top; otherwise copy it to dissolve into its
+        /// successor. See <see cref="RetainedFrame"/>.
+        /// </summary>
+        private void OnMainFrameReplacing(ViewState incomingView, int incomingStep)
+        {
+            if (!cpuRenderer.HasPublished || compositor == null || !compositor.IsSupported)
+            {
+                return;
+            }
+
+            var outgoingView = cpuRenderer.PublishedView;
+            var outgoingStep = cpuRenderer.PublishedStep;
+            if (outgoingStep == incomingStep && SameView(outgoingView, incomingView))
+            {
+                return; // a recolour of the same frame, not a new one
+            }
+
+            var now = Time.unscaledTimeAsDouble;
+            var outgoingSpacing = RetainedFrame.SpacingOf(outgoingView, outgoingStep);
+            var incomingSpacing = VisibleSpacing(RetainedFrame.SpacingOf(incomingView, incomingStep));
+
+            if (retained.IsHolding && VisibleSpacing(retained.Spacing) <= VisibleSpacing(outgoingSpacing))
+            {
+                // Already holding something at least as sharp as what is leaving: keep that.
+                if (incomingSpacing <= VisibleSpacing(retained.Spacing) * SharpnessTolerance)
+                {
+                    retained.BeginFade(now);
+                }
+
+                return;
+            }
+
+            var placement = FramePlacement.Resolve(
+                outgoingView, cpuRenderer.PublishedAspect, session.View, compositeViewport.Aspect);
+            if (!placement.IsValid || placement.Overhang >= 1f)
+            {
+                return; // not on screen at all: nothing to keep or to dissolve from
+            }
+
+            var hold = VisibleSpacing(outgoingSpacing) * SharpnessTolerance < incomingSpacing;
+            retained.Capture(cpuTexture, outgoingView, cpuRenderer.PublishedAspect, outgoingSpacing, hold, now);
         }
 
         /// <summary>
@@ -403,6 +553,8 @@ namespace FractalVisio.App
         /// </summary>
         private void Compose(in ViewState view, double displayAspect)
         {
+            var now = Time.unscaledTimeAsDouble;
+
             var mainPlacement = cpuRenderer.HasPublished
                 ? FramePlacement.Resolve(cpuRenderer.PublishedView, cpuRenderer.PublishedAspect, view, displayAspect)
                 : FramePlacement.Invalid;
@@ -411,8 +563,30 @@ namespace FractalVisio.App
                 ? FramePlacement.Resolve(wideLayer.FrameView, wideLayer.FrameAspect, view, displayAspect)
                 : FramePlacement.Invalid;
 
+            var retainedPlacement = retained.IsActive
+                ? FramePlacement.Resolve(retained.View, retained.Aspect, view, displayAspect)
+                : FramePlacement.Invalid;
+
+            if (retained.IsHolding)
+            {
+                if (cpuRenderer.HasPublished &&
+                    VisibleSpacing(RetainedFrame.SpacingOf(cpuRenderer.PublishedView, cpuRenderer.PublishedStep)) <=
+                    VisibleSpacing(retained.Spacing) * SharpnessTolerance)
+                {
+                    retained.BeginFade(now);
+                }
+                else if (!retainedPlacement.IsValid || retainedPlacement.Overhang >= 1f)
+                {
+                    retained.Release(); // the view has left it entirely
+                }
+            }
+
+            var retainedAlpha = retained.Alpha(now);
+
             var composed = mainPlacement.IsValid
-                ? compositor.Compose(compositeViewport, cpuTexture, mainPlacement, wideLayer.Texture, widePlacement)
+                ? compositor.Compose(
+                    compositeViewport, cpuTexture, mainPlacement, wideLayer.Texture, widePlacement,
+                    retained.Texture, retainedPlacement, retainedAlpha)
                 : widePlacement.IsValid &&
                   compositor.Compose(compositeViewport, wideLayer.Texture, widePlacement, null, FramePlacement.Invalid);
 
@@ -429,22 +603,9 @@ namespace FractalVisio.App
             targetImage.uvRect = lastCpuViewport.VisibleUvRect;
         }
 
-        /// <summary>
-        /// Coarsest pass this render may put on screen. While the frame already displayed still
-        /// covers the view, a magnified sharp frame beats a fresh 16x16 one, so the early passes
-        /// are computed but held back. With nothing usable on screen, anything beats nothing.
-        /// </summary>
-        private int ResolvePublishFloor(in ViewState view, double displayAspect)
+        private static bool SameView(in ViewState a, in ViewState b)
         {
-            if (!cpuRenderer.HasPublished)
-            {
-                return CoarsestPublishStep;
-            }
-
-            var placement = FramePlacement.Resolve(
-                cpuRenderer.PublishedView, cpuRenderer.PublishedAspect, view, displayAspect);
-
-            return placement.Covers ? CoveredPublishFloor : CoarsestPublishStep;
+            return a.x.Equals(b.x) && a.y.Equals(b.y) && a.scale.Equals(b.scale) && a.rotation == b.rotation;
         }
 
         private bool ResolveExtendedPrecision(double scale)
@@ -461,6 +622,7 @@ namespace FractalVisio.App
             }
 
             placeholdersStale = false;
+            retained.Release();
             cpuRenderer?.DiscardPublished();
             wideLayer?.Discard();
         }
@@ -468,6 +630,7 @@ namespace FractalVisio.App
         private void RecreateTargets()
         {
             cpuRenderer?.CompletePendingWork();
+            retained.Release();
 
             DestroyTargets();
             cachedScreenWidth = Mathf.Max(64, Screen.width);

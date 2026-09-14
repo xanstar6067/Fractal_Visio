@@ -88,6 +88,7 @@ namespace FractalVisio.Modules
 
                 var interfaceSettings = services.Session.Interface;
                 interfaceSettings.Scale = settings.interfaceScale;
+                interfaceSettings.InertiaSeconds = settings.inertiaSeconds;
                 services.Session.SetInterface(interfaceSettings);
             }
 
@@ -113,7 +114,8 @@ namespace FractalVisio.Modules
             services.Storage.Write(SettingsKey, StateCodec.ToJson(new AppSettingsDto
             {
                 renderScale = session.Quality.RenderScale,
-                interfaceScale = session.Interface.Scale
+                interfaceScale = session.Interface.Scale,
+                inertiaSeconds = session.Interface.InertiaSeconds
             }));
         }
 
@@ -123,6 +125,9 @@ namespace FractalVisio.Modules
             public int version = 1;
             public float renderScale;
             public float interfaceScale = 1f;
+
+            /// <summary>Missing from files written before inertia existed; the initialiser is what they read as.</summary>
+            public float inertiaSeconds = 5f;
         }
     }
 }

@@ -9,8 +9,9 @@ namespace FractalVisio.Rendering
     /// view. Nothing here recomputes or rewrites fractal pixels: every layer is sampled once,
     /// through the affine map from <see cref="FramePlacement"/>, straight into the display buffer.
     ///
-    /// Two layers, in order: a wide, coarse frame that covers far more than the screen, and the
-    /// sharp frame for the current view over it. The wide one exists for exactly one job - a
+    /// Up to three layers, in order: a wide, coarse frame that covers far more than the screen; the
+    /// newest frame for the current view over it; and, over both, a retained earlier frame that is
+    /// still the sharper picture, or is dissolving away. The wide one exists for exactly one job - a
     /// zoom-out asks to see area that the sharp frame never contained, and something correct has to
     /// be there while the new render arrives.
     /// </summary>
@@ -23,6 +24,7 @@ namespace FractalVisio.Rendering
         private static readonly int FrameUvRow0Id = Shader.PropertyToID("_FrameUvRow0");
         private static readonly int FrameUvRow1Id = Shader.PropertyToID("_FrameUvRow1");
         private static readonly int FallbackColorId = Shader.PropertyToID("_FallbackColor");
+        private static readonly int LayerAlphaId = Shader.PropertyToID("_LayerAlpha");
 
         private readonly Material material;
         private RenderTexture target;
@@ -63,12 +65,20 @@ namespace FractalVisio.Rendering
         /// anything <paramref name="main"/> does not cover shows <see cref="FallbackColor"/>.
         /// Returns false when nothing could be composed and the caller should keep its old output.
         /// </summary>
+        /// <param name="retained">
+        /// Optional third layer drawn over <paramref name="main"/> at <paramref name="retainedAlpha"/>:
+        /// an earlier frame that is still sharper than the newest one, or one dissolving away. See
+        /// <see cref="RetainedFrame"/>.
+        /// </param>
         public bool Compose(
             Viewport display,
             Texture main,
             in FramePlacement mainPlacement,
             Texture wide,
-            in FramePlacement widePlacement)
+            in FramePlacement widePlacement,
+            Texture retained = null,
+            in FramePlacement retainedPlacement = default,
+            float retainedAlpha = 0f)
         {
             if (material == null || main == null || !mainPlacement.IsValid)
             {
@@ -83,12 +93,17 @@ namespace FractalVisio.Rendering
             var hasWide = wide != null && widePlacement.IsValid;
             if (hasWide)
             {
-                Draw(wide, widePlacement, BasePass);
-                Draw(main, mainPlacement, OverPass);
+                Draw(wide, widePlacement, BasePass, 1f);
+                Draw(main, mainPlacement, OverPass, 1f);
             }
             else
             {
-                Draw(main, mainPlacement, BasePass);
+                Draw(main, mainPlacement, BasePass, 1f);
+            }
+
+            if (retained != null && retainedPlacement.IsValid && retainedAlpha > 0.001f)
+            {
+                Draw(retained, retainedPlacement, OverPass, Mathf.Clamp01(retainedAlpha));
             }
 
             return true;
@@ -104,10 +119,11 @@ namespace FractalVisio.Rendering
             ReleaseTarget();
         }
 
-        private void Draw(Texture frame, in FramePlacement placement, int pass)
+        private void Draw(Texture frame, in FramePlacement placement, int pass, float alpha)
         {
             material.SetVector(FrameUvRow0Id, placement.UvRow0);
             material.SetVector(FrameUvRow1Id, placement.UvRow1);
+            material.SetFloat(LayerAlphaId, alpha);
             Graphics.Blit(frame, target, material, pass);
         }
 

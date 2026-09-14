@@ -44,6 +44,11 @@ namespace FractalVisio.UI
 
         private static readonly string[] InterfaceNames = { "XS", "S", "M", "L", "XL", "XXL" };
 
+        /// <summary>Seconds a flicked view coasts for; 0 is off. The reference app offers the same ladder.</summary>
+        private static readonly float[] InertiaLengths = { 0f, 2f, 5f, 10f };
+
+        private static readonly string[] InertiaNames = { "Off", "Short", "Medium", "Long" };
+
         private static readonly string[] BoolNames = { "Off", "On" };
 
         /// <summary>Most columns to split into. Past three the rows get too narrow to read.</summary>
@@ -58,6 +63,7 @@ namespace FractalVisio.UI
         private SettingsSection coloringSection;
         private SettingsSection resolutionSection;
         private SettingsSection interfaceSection;
+        private SettingsSection inertiaSection;
 
         private IFractalDefinition builtFor;
         private int builtPaletteCount;
@@ -95,6 +101,7 @@ namespace FractalVisio.UI
                 "Edit palette", openPaletteEditor));
             blocks.Add(new OptionsBlock("COLOURING", ColoringNames, SelectColoring, s => coloringSection = s));
             blocks.Add(new OptionsBlock("RESOLUTION", ResolutionNames, SelectResolution, s => resolutionSection = s));
+            blocks.Add(new OptionsBlock("INERTIA", InertiaNames, SelectInertia, s => inertiaSection = s));
             blocks.Add(new OptionsBlock("INTERFACE SIZE", InterfaceNames, SelectInterfaceScale, s => interfaceSection = s));
 
             var width = ResolvePanelWidth(MaximumColumns, out var columns);
@@ -235,6 +242,18 @@ namespace FractalVisio.UI
             Services.Session.SetInterface(settings);
         }
 
+        private void SelectInertia(int index)
+        {
+            if (index < 0 || index >= InertiaLengths.Length)
+            {
+                return;
+            }
+
+            var settings = Services.Session.Interface;
+            settings.InertiaSeconds = InertiaLengths[index];
+            Services.Session.SetInterface(settings);
+        }
+
         private void RefreshSelection()
         {
             var session = Services.Session;
@@ -244,6 +263,7 @@ namespace FractalVisio.UI
             coloringSection?.SetSelected(ColoringIndex(session.Coloring));
             resolutionSection?.SetSelected(NearestIndex(ResolutionScales, session.Quality.RenderScale));
             interfaceSection?.SetSelected(NearestIndex(InterfaceScales, session.Interface.Scale));
+            inertiaSection?.SetSelected(NearestIndex(InertiaLengths, session.Interface.InertiaSeconds));
 
             for (var i = 0; i < parameterControls.Count; i++)
             {

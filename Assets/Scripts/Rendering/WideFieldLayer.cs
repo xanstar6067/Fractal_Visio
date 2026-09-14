@@ -157,8 +157,7 @@ namespace FractalVisio.Rendering
                 parameters,
                 wideView,
                 iterations,
-                extendedPrecision,
-                false);
+                extendedPrecision);
         }
 
         public void Dispose()
