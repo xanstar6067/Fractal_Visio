@@ -39,6 +39,12 @@ namespace FractalVisio.Rendering
                 material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
                 material.SetColor(FallbackColorId, fallbackColor);
             }
+            else
+            {
+                Debug.LogError("Fractal frame compositor is unavailable. Include " + ShaderName +
+                               " in Graphics Settings / Always Included Shaders. CPU frames cannot " +
+                               "follow gestures without this shader.");
+            }
         }
 
         /// <summary>Colour for display pixels no layer could cover. Follows the interior colour.</summary>
