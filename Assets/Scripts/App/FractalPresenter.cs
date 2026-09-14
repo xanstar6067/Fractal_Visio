@@ -310,7 +310,7 @@ namespace FractalVisio.App
             wideLayer?.Suspend();
             DropStalePlaceholders();
 
-            if (!renderDirty && hasRequestedView)
+            if (!renderDirty && hasRequestedView && !(lastRequestWasInteractive && !interacting))
             {
                 return;
             }

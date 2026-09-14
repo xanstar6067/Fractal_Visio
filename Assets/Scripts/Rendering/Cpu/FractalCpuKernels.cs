@@ -424,11 +424,13 @@ namespace FractalVisio.Rendering
 
             mapper.MapRange(blockEscape, blockColors, 0, samples, state.Palette, state.Settings);
 
-            // Pixel centre in units of samples, where sample k sits at the middle of block k.
+            // Samples stay at pixel (k * step)'s centre at every refinement level.
+            // Interpolate that fixed lattice; centring them in their blocks would shift
+            // the picture by half a block whenever the pass changes.
             // Weights are fixed-point out of 256 so the inner loop stays integer.
             for (var x = 0; x < width; x++)
             {
-                var position = (x + 0.5f) / step - 0.5f;
+                var position = x / (float)step;
                 var lower = Mathf.Clamp(Mathf.FloorToInt(position), 0, columns - 1);
                 columnLower[x] = lower;
                 columnUpper[x] = Math.Min(lower + 1, columns - 1);
@@ -451,7 +453,7 @@ namespace FractalVisio.Rendering
                     var endRow = Math.Min(height, (chunk + 1) * rowsPerChunk);
                     for (var y = chunk * rowsPerChunk; y < endRow; y++)
                     {
-                        var position = (y + 0.5f) / step - 0.5f;
+                        var position = y / (float)step;
                         var lower = Mathf.Clamp(Mathf.FloorToInt(position), 0, rows - 1);
                         var upper = Math.Min(lower + 1, rows - 1);
                         var wy = Mathf.Clamp(Mathf.RoundToInt((position - lower) * 256f), 0, 256);
@@ -1016,6 +1018,13 @@ namespace FractalVisio.Rendering
 
                 while (!token.IsCancellationRequested)
                 {
+                    // A parked worker must still leave a finished pass. Otherwise Parallel.For
+                    // waits for it forever while the reduced budget stays in effect.
+                    if (Volatile.Read(ref cursor.Next) >= tiles.Length)
+                    {
+                        break;
+                    }
+
                     // Parked by the frame-pacing budget: hold the thread, not a tile, so the rest
                     // of the pass keeps flowing to the workers that are still allowed to run.
                     if (!job.Budget.MayRun(rank))
@@ -1069,19 +1078,10 @@ namespace FractalVisio.Rendering
                         continue; // this sample was already computed in a coarser pass
                     }
 
-                    var sx = bx + (step >> 1);
-                    if (sx >= job.Width)
-                    {
-                        sx = job.Width - 1;
-                    }
-
-                    var sy = by + (step >> 1);
-                    if (sy >= job.Height)
-                    {
-                        sy = job.Height - 1;
-                    }
-
-                    var value = sampler.SampleAt(job, sx, sy, token);
+                    // Nested grids must sample the same coordinates where they overlap.
+                    // A block-centred sample moves when step halves and cannot be reused
+                    // by the coarse-grid skip above, even at the final one-pixel pass.
+                    var value = sampler.SampleAt(job, bx, by, token);
                     produced++;
 
                     // A cancelled sampler returns whatever it had; that value must not reach the
