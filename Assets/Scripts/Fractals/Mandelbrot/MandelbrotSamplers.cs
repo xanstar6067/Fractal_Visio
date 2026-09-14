@@ -36,7 +36,7 @@ namespace FractalVisio.Fractals
             {
                 if ((iteration & 127) == 0 && token.IsCancellationRequested)
                 {
-                    token.ThrowIfCancellationRequested();
+                    return EscapeMath.Interior;
                 }
 
                 var nextX = zx * zx - zy * zy + cx;
@@ -68,7 +68,7 @@ namespace FractalVisio.Fractals
             {
                 if ((iteration & 63) == 0 && token.IsCancellationRequested)
                 {
-                    token.ThrowIfCancellationRequested();
+                    return EscapeMath.Interior;
                 }
 
                 var xSquared = DoubleDouble.Square(zx);
@@ -83,6 +83,124 @@ namespace FractalVisio.Fractals
                 zy = DoubleDouble.Add(DoubleDouble.Multiply(DoubleDouble.Multiply(zx, zy), 2d), cy);
                 zx = nextX;
                 iteration++;
+            }
+
+            return EscapeMath.Interior;
+        }
+    }
+
+    /// <summary>
+    /// Deep zoom by perturbation, with rebasing and BLA. Ported from the WPF engine's
+    /// <c>DeepZoomPixel</c>, reduced to smooth colouring. See <see cref="IPerturbationSampler"/>.
+    /// </summary>
+    public readonly struct MandelbrotPerturbationSampler : IPerturbationSampler
+    {
+        /// <summary>
+        /// Escape radius of the reference, squared. Far past the pixel bailout so the orbit stays
+        /// usable as long as possible; pixels that outlive it are rebased.
+        /// </summary>
+        private const double ReferenceEscape = 1e18d;
+
+        /// <summary>Pauldelbrot's criterion: |z|^2 below this fraction of |Z|^2 means rebase.</summary>
+        private const double GlitchToleranceSquared = 1e-6d;
+
+        public void BuildReference(ReferenceOrbit orbit, in DoubleDouble cx, in DoubleDouble cy, int maxIterations, double maxDeltaC)
+        {
+            orbit.Begin(maxIterations);
+
+            var zx = new DoubleDouble(0d);
+            var zy = new DoubleDouble(0d);
+
+            for (var index = 0; index <= maxIterations; index++)
+            {
+                var real = zx.ToDouble();
+                var imaginary = zy.ToDouble();
+                if (!orbit.Append(real, imaginary))
+                {
+                    break;
+                }
+
+                // Z_0 and Z_1 are always kept; see IPerturbationSampler.
+                var magnitude = real * real + imaginary * imaginary;
+                if (index >= 1 && (!(magnitude <= ReferenceEscape)))
+                {
+                    break;
+                }
+
+                var xSquared = DoubleDouble.Square(zx);
+                var ySquared = DoubleDouble.Square(zy);
+                var nextX = DoubleDouble.Add(DoubleDouble.Subtract(xSquared, ySquared), cx);
+                zy = DoubleDouble.Add(DoubleDouble.Multiply(DoubleDouble.Multiply(zx, zy), 2d), cy);
+                zx = nextX;
+            }
+
+            orbit.BuildQuadraticBla(MandelbrotSamplerD.Bailout, maxDeltaC);
+        }
+
+        public float Sample(ReferenceOrbit orbit, double deltaCx, double deltaCy, int maxIterations, CancellationToken token)
+        {
+            var re = orbit.Re;
+            var im = orbit.Im;
+            var length = orbit.Length;
+            var bla = orbit.HasBla ? orbit.Bla : null;
+
+            var dx = 0d;
+            var dy = 0d;
+            var referenceIndex = 0;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 1023) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                if (bla != null &&
+                    bla.TryLookup(referenceIndex, dx * dx + dy * dy, maxIterations - iteration,
+                        out var aX, out var aY, out var bX, out var bY, out var steps))
+                {
+                    // d <- A d + B dc, skipping `steps` iterations at once.
+                    var skippedX = aX * dx - aY * dy + bX * deltaCx - bY * deltaCy;
+                    var skippedY = aX * dy + aY * dx + bX * deltaCy + bY * deltaCx;
+                    dx = skippedX;
+                    dy = skippedY;
+                    referenceIndex += steps;
+                    iteration += steps;
+                }
+                else
+                {
+                    // d <- 2 Z d + d^2 + dc
+                    var zr = re[referenceIndex];
+                    var zi = im[referenceIndex];
+                    var nextX = 2d * (zr * dx - zi * dy) + dx * dx - dy * dy + deltaCx;
+                    var nextY = 2d * (zr * dy + zi * dx) + 2d * dx * dy + deltaCy;
+                    dx = nextX;
+                    dy = nextY;
+                    referenceIndex++;
+                    iteration++;
+                }
+
+                var referenceX = referenceIndex < length ? re[referenceIndex] : 0d;
+                var referenceY = referenceIndex < length ? im[referenceIndex] : 0d;
+                var fullX = referenceX + dx;
+                var fullY = referenceY + dy;
+                var magnitude = fullX * fullX + fullY * fullY;
+
+                if (magnitude > MandelbrotSamplerD.Bailout)
+                {
+                    return EscapeMath.Smooth(iteration, magnitude, MandelbrotSamplerD.Bailout);
+                }
+
+                if (referenceIndex >= length - 1 ||
+                    magnitude < dx * dx + dy * dy ||
+                    magnitude < GlitchToleranceSquared * (referenceX * referenceX + referenceY * referenceY))
+                {
+                    // Z_0 = 0 for the Mandelbrot, so d = z - Z_0 is z itself.
+                    dx = fullX - re[0];
+                    dy = fullY - im[0];
+                    referenceIndex = 0;
+                }
             }
 
             return EscapeMath.Interior;

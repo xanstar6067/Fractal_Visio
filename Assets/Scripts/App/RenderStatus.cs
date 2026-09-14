@@ -1,3 +1,5 @@
+using FractalVisio.Core;
+
 namespace FractalVisio.App
 {
     public enum RenderBackend
@@ -17,29 +19,44 @@ namespace FractalVisio.App
             bool interacting,
             int iterations,
             bool extendedPrecision,
+            PrecisionTier precision,
             bool isBusy,
             int pass,
             int passCount,
-            float progress)
+            float progress,
+            int workers,
+            int workerBudget)
         {
             Backend = backend;
             Interacting = interacting;
             Iterations = iterations;
             ExtendedPrecision = extendedPrecision;
+            Precision = precision;
             IsBusy = isBusy;
             Pass = pass;
             PassCount = passCount;
             Progress = progress;
+            Workers = workers;
+            WorkerBudget = workerBudget;
         }
 
         public RenderBackend Backend { get; }
         public bool Interacting { get; }
         public int Iterations { get; }
         public bool ExtendedPrecision { get; }
+
+        /// <summary>Arithmetic the picture is actually computed in, as chosen by the fractal.</summary>
+        public PrecisionTier Precision { get; }
+
         public bool IsBusy { get; }
         public int Pass { get; }
         public int PassCount { get; }
         public float Progress { get; }
+
+        /// <summary>CPU workers allowed to run right now; below <see cref="WorkerBudget"/> while frame pacing throttles.</summary>
+        public int Workers { get; }
+
+        public int WorkerBudget { get; }
     }
 
     public interface IRenderStatusSource

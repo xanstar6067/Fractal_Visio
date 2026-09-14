@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.UI;
 using FractalVisio.App;
 
 namespace FractalVisio.UI
@@ -28,6 +29,7 @@ namespace FractalVisio.UI
         public void Build(Transform parent, AppServices services)
         {
             Services = services;
+            NeedsRebuild = false;
             OnBuild(parent);
 
             if (Panel == null)
@@ -42,11 +44,45 @@ namespace FractalVisio.UI
             Apply();
         }
 
-        public void Open() => target = 1f;
+        /// <summary>
+        /// Set by a screen whose content no longer matches the session - another fractal with other
+        /// parameters, a palette added. The router rebuilds the interface and reopens the screen.
+        /// </summary>
+        public bool NeedsRebuild { get; protected set; }
 
-        public void Close() => target = 0f;
+        public void Open() => SetOpen(true);
 
-        public void Toggle() => target = IsOpen ? 0f : 1f;
+        public void Close() => SetOpen(false);
+
+        public void Toggle() => SetOpen(!IsOpen);
+
+        /// <summary>Show at once, without the fade. For a screen rebuilt while it was open.</summary>
+        public void OpenImmediately()
+        {
+            SetOpen(true);
+            if (Panel == null)
+            {
+                return;
+            }
+
+            visibility = 1f;
+            Apply();
+        }
+
+        private void SetOpen(bool open)
+        {
+            var wasOpen = IsOpen;
+            target = open ? 1f : 0f;
+            if (wasOpen != open)
+            {
+                OnOpenChanged(open);
+            }
+        }
+
+        /// <summary>Called when the screen is asked to open or close, before the animation.</summary>
+        protected virtual void OnOpenChanged(bool open)
+        {
+        }
 
         public virtual void Tick(float deltaTime, Texture backdrop)
         {
@@ -93,6 +129,101 @@ namespace FractalVisio.UI
         /// <summary>Called once per frame while visible, after the backdrop is refreshed.</summary>
         protected virtual void OnTick()
         {
+        }
+
+        /// <summary>Width of a panel with up to <paramref name="maximumColumns"/> natural columns on this screen.</summary>
+        protected static float ResolvePanelWidth(int maximumColumns, out int columns)
+        {
+            var availableWidth = UiTheme.AvailablePanelWidth;
+            var naturalWidth = UiTheme.PanelPx(UiTheme.PanelWidth);
+            columns = Mathf.Clamp(Mathf.FloorToInt(availableWidth / naturalWidth), 1, Mathf.Max(1, maximumColumns));
+            return Mathf.Min(columns * naturalWidth, availableWidth);
+        }
+
+        /// <summary>
+        /// The glass panel every screen sits in, anchored bottom-right above the toolbar, and a
+        /// scrolling content rectangle inside it of height <paramref name="contentHeight"/>.
+        /// </summary>
+        protected RectTransform CreateScrollingPanel(Transform parent, string name, float width, float contentHeight)
+        {
+            var margin = UiTheme.Px(UiTheme.ScreenMargin);
+            var height = Mathf.Min(contentHeight, UiTheme.AvailablePanelHeight);
+
+            Panel = GlassPanel.Create(name, parent, UiTheme.PanelRadius, UiTheme.PanelTint, UiTheme.PanelBorder);
+            UiFactory.Anchor(
+                Panel.Root,
+                new Vector2(1f, 0f),
+                new Vector2(1f, 0f),
+                new Vector2(-margin, margin * 2f + UiTheme.Px(UiTheme.ToggleSize)),
+                new Vector2(width, height));
+
+            return BuildScroll(contentHeight, height);
+        }
+
+        /// <summary>Title line at the top of a panel's content. Returns its height.</summary>
+        protected static float AddTitle(RectTransform content, string text, float padding, float width)
+        {
+            var titleHeight = UiTheme.PanelPx(28f);
+            var title = UiFactory.CreateText(
+                "Title", content, text, UiTheme.TitleFontSize, UiTheme.Text,
+                TextAnchor.UpperLeft, fitToRect: true, panelScale: true);
+            Place(title.rectTransform, padding, -padding, width - padding * 2f, titleHeight);
+            title.fontStyle = FontStyle.Bold;
+            return titleHeight;
+        }
+
+        /// <summary>Section caption in the muted label style. Returns its height.</summary>
+        protected static float AddCaption(RectTransform content, string text, float x, float y, float width)
+        {
+            var height = UiTheme.PanelPx(20f);
+            var caption = UiFactory.CreateText(
+                "Caption_" + text, content, text, UiTheme.LabelFontSize, UiTheme.TextMuted,
+                TextAnchor.LowerLeft, fitToRect: true, panelScale: true);
+            Place(caption.rectTransform, x, y, width, height);
+            return height;
+        }
+
+        protected static void Place(RectTransform rect, float x, float y, float width, float height)
+        {
+            rect.anchorMin = new Vector2(0f, 1f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 1f);
+            rect.anchoredPosition = new Vector2(x, y);
+            rect.sizeDelta = new Vector2(width, height);
+        }
+
+        /// <summary>
+        /// Wrap the panel content in a scroll view. The viewport is the glass panel's own content
+        /// rectangle, which is already inside its rounded mask - so the list is clipped by the same
+        /// shape that draws the panel, with no second mask to keep in sync.
+        /// </summary>
+        private RectTransform BuildScroll(float contentHeight, float viewportHeight)
+        {
+            var content = UiFactory.CreateRect("ScrollContent", Panel.Content);
+            content.anchorMin = new Vector2(0f, 1f);
+            content.anchorMax = new Vector2(1f, 1f);
+            content.pivot = new Vector2(0.5f, 1f);
+            content.anchoredPosition = Vector2.zero;
+            content.sizeDelta = new Vector2(0f, contentHeight);
+
+            // Something has to catch the drag in the gaps between rows, or a finger that starts
+            // between two options scrolls nothing.
+            var dragArea = UiFactory.CreateImage("DragArea", content, null, new Color(0f, 0f, 0f, 0f));
+            UiFactory.Stretch(dragArea.rectTransform);
+            dragArea.raycastTarget = true;
+
+            var scroll = Panel.Content.gameObject.AddComponent<ScrollRect>();
+            scroll.content = content;
+            scroll.viewport = Panel.Content;
+            scroll.horizontal = false;
+            scroll.vertical = contentHeight > viewportHeight + 1f;
+            scroll.movementType = ScrollRect.MovementType.Elastic;
+            scroll.elasticity = 0.1f;
+            scroll.inertia = true;
+            scroll.decelerationRate = 0.135f;
+            scroll.scrollSensitivity = UiTheme.PanelPx(28f);
+
+            return content;
         }
 
         private void Apply()

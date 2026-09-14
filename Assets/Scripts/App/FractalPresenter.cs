@@ -53,6 +53,7 @@ namespace FractalVisio.App
         private readonly FractalSession session;
         private readonly MobileRenderProfile profile;
         private readonly IColorMapper colorMapper = new EscapeColorMapper();
+        private readonly CpuWorkerBudget workerBudget;
 
         private FractalGpuRenderer gpuRenderer;
         private FractalCpuRenderer cpuRenderer;
@@ -90,10 +91,11 @@ namespace FractalVisio.App
             this.session = session;
 
             profile = MobileRenderProfile.Detect();
+            workerBudget = CpuWorkerBudget.Detect(profile.WideWorkers);
 
             gpuRenderer = new FractalGpuRenderer();
-            cpuRenderer = new FractalCpuRenderer(colorMapper);
-            wideLayer = new WideFieldLayer(colorMapper, profile.WideWorkers);
+            cpuRenderer = new FractalCpuRenderer(colorMapper, workerBudget, false);
+            wideLayer = new WideFieldLayer(colorMapper, workerBudget);
             compositor = new FrameCompositor(session.Coloring.InteriorColor);
 
             session.Changed += OnSessionChanged;
@@ -109,17 +111,30 @@ namespace FractalVisio.App
             get
             {
                 var busy = cpuRenderer != null && cpuRenderer.IsBusy;
+                var precision = currentBackend == RenderBackend.GpuFloat
+                    ? PrecisionTier.Float
+                    : cpuRenderer != null && cpuRenderer.ActivePrecision != PrecisionTier.None
+                        ? cpuRenderer.ActivePrecision
+                        : lastUsedExtendedPrecision ? PrecisionTier.DoubleDouble : PrecisionTier.Double;
+
                 return new RenderStatus(
                     currentBackend,
                     lastRequestWasInteractive,
                     session.View.iterations,
                     lastUsedExtendedPrecision,
+                    precision,
                     busy,
                     cpuRenderer != null ? cpuRenderer.CurrentPass : 0,
                     cpuRenderer != null ? cpuRenderer.PassCount : 0,
-                    cpuRenderer != null ? cpuRenderer.Progress : 0f);
+                    cpuRenderer != null ? cpuRenderer.Progress : 0f,
+                    workerBudget.Allowed,
+                    workerBudget.Total);
             }
         }
+
+        /// <summary>Frame interval the pacing budget aims for. Uncapped desktops are held to 60 Hz.</summary>
+        private static double TargetFrameSeconds =>
+            Application.targetFrameRate > 0 ? 1d / Application.targetFrameRate : 1d / 60d;
 
         public string ActiveTextureName => targetImage != null && targetImage.texture != null
             ? targetImage.texture.name
@@ -157,6 +172,12 @@ namespace FractalVisio.App
             motion.Sample(view.scale.AsDouble, Time.unscaledDeltaTime);
 
             var backend = ResolveBackend(view);
+
+            // Frame pacing: only the CPU path competes with the main thread for cores.
+            workerBudget.Regulate(
+                Time.unscaledDeltaTime,
+                TargetFrameSeconds,
+                interacting && hasBackend && currentBackend == RenderBackend.Cpu);
             if (!hasBackend || backend != currentBackend)
             {
                 // Nothing computed for the outgoing backend stands for what the incoming one is
@@ -429,7 +450,7 @@ namespace FractalVisio.App
         private bool ResolveExtendedPrecision(double scale)
         {
             return scale < session.Quality.ExtendedPrecisionScale &&
-                   (session.Definition.SupportedPrecision & PrecisionTier.DoubleDouble) != 0;
+                   (session.Definition.SupportedPrecision & (PrecisionTier.DoubleDouble | PrecisionTier.Perturbation)) != 0;
         }
 
         private void DropStalePlaceholders()

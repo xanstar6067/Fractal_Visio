@@ -217,13 +217,7 @@ namespace FractalVisio.App
         public void SetView(in ViewState value)
         {
             var next = value;
-            var scale = Math.Clamp(next.scale.AsDouble, quality.MinimumScale, quality.MaximumScale);
-            if (scale != next.scale.AsDouble)
-            {
-                next.scale = HighPrecision.FromDouble(scale);
-            }
-
-            ApplyBudget(ref next);
+            Normalize(ref next);
             if (Same(next, view))
             {
                 return;
@@ -246,6 +240,129 @@ namespace FractalVisio.App
         public void ResetView()
         {
             SetView(definition.DefaultView);
+        }
+
+        /// <summary>The picture as saved state: fractal, view, parameters, palette and colouring.</summary>
+        public FractalStateDto Capture()
+        {
+            var values = new ParameterValueDto[parameters.Count];
+            for (var i = 0; i < values.Length; i++)
+            {
+                values[i] = new ParameterValueDto { key = parameters.Descriptors[i].Key, value = parameters[i] };
+            }
+
+            return new FractalStateDto
+            {
+                version = FractalStateDto.CurrentVersion,
+                fractal = definition.Id,
+                centerX = StateCodec.FormatDecimal(view.x.AsDecimal),
+                centerY = StateCodec.FormatDecimal(view.y.AsDecimal),
+                scale = StateCodec.FormatDecimal(view.scale.AsDecimal),
+                rotation = view.rotation,
+                palette = palette.Id,
+                coloring = StateCodec.ToDto(coloring),
+                parameters = values
+            };
+        }
+
+        /// <summary>
+        /// Put a saved picture back, as one change. Anything the file names that no longer exists -
+        /// a removed palette, a renamed parameter - keeps its current value instead of failing the
+        /// whole restore. Returns false, and changes nothing, when the fractal itself is unknown.
+        /// </summary>
+        public bool Apply(
+            FractalStateDto state,
+            System.Collections.Generic.IReadOnlyList<IFractalDefinition> catalog,
+            PaletteCatalog palettes)
+        {
+            state = StateCodec.Upgrade(state);
+            if (state == null || catalog == null)
+            {
+                return false;
+            }
+
+            IFractalDefinition target = null;
+            for (var i = 0; i < catalog.Count; i++)
+            {
+                if (catalog[i].Id == state.fractal)
+                {
+                    target = catalog[i];
+                    break;
+                }
+            }
+
+            if (target == null)
+            {
+                return false;
+            }
+
+            var change = SessionChange.View | SessionChange.Parameters;
+            if (!ReferenceEquals(target, definition))
+            {
+                definition = target;
+                change |= SessionChange.Definition;
+            }
+
+            var nextParameters = FractalParameterSet.Defaults(target.Parameters);
+            if (state.parameters != null)
+            {
+                foreach (var value in state.parameters)
+                {
+                    if (value != null)
+                    {
+                        nextParameters = nextParameters.With(value.key, value.value);
+                    }
+                }
+            }
+
+            parameters = nextParameters;
+
+            var nextView = target.DefaultView;
+            if (StateCodec.TryParseDecimal(state.centerX, out var x) &&
+                StateCodec.TryParseDecimal(state.centerY, out var y) &&
+                StateCodec.TryParseDecimal(state.scale, out var scale) &&
+                scale > 0m)
+            {
+                nextView.x = new HighPrecision(x);
+                nextView.y = new HighPrecision(y);
+                nextView.scale = new HighPrecision(scale);
+                nextView.rotation = double.IsNaN(state.rotation) ? 0d : state.rotation;
+            }
+
+            Normalize(ref nextView);
+            view = nextView;
+
+            var nextPalette = palettes?.Find(state.palette);
+            if (nextPalette != null && !ReferenceEquals(nextPalette, palette))
+            {
+                palette = nextPalette;
+                change |= SessionChange.Palette;
+            }
+
+            if (state.coloring != null)
+            {
+                var nextColoring = StateCodec.FromDto(state.coloring);
+                if (!nextColoring.Equals(coloring))
+                {
+                    coloring = nextColoring;
+                    change |= SessionChange.Coloring;
+                }
+            }
+
+            Raise(change);
+            return true;
+        }
+
+        /// <summary>Clamp the scale and derive the iteration budget: the one definition of both.</summary>
+        private void Normalize(ref ViewState target)
+        {
+            var scale = Math.Clamp(target.scale.AsDouble, quality.MinimumScale, quality.MaximumScale);
+            if (scale != target.scale.AsDouble)
+            {
+                target.scale = HighPrecision.FromDouble(scale);
+            }
+
+            ApplyBudget(ref target);
         }
 
         private void ApplyBudget(ref ViewState target)

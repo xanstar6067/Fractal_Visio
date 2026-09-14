@@ -83,6 +83,21 @@ Identify by `$env:COMPUTERNAME`, or by which project root exists.
   (`decimal` is not Burst-compatible); only the `double`/`float` delta loop goes into the job.
 - GPU stays fp32-only by decision (deep-zoom perturbation on the GPU was unstable in Unity);
   deep zoom is CPU-only.
+- Deep CPU renders (below `ExtendedPrecisionScale`) go through **perturbation**
+  (`IPerturbationSampler`, `ICpuPassHost.RunPerturbed`), ported from the WPF project's
+  `MandelbrotFamilyRenderer.DeepZoom/Bla`: reference orbit in `DoubleDouble` stored as doubles,
+  fp64 offsets, Zhuoran rebasing + Pauldelbrot criterion, BLA for z^2+c. The `*SamplerDD` structs
+  stay as the exact reference to check perturbation against (`docs\ARCHITECTURE.md` §4.8). A folded
+  map (Burning Ship, anything with per-component `abs`) must rebase **per component**
+  (`|z_r| < |d_r|` or `|z_i| < |d_i|`); the modulus test alone left up to half the frame wrong at 1e-23.
+- `ReferenceOrbit` and its BLA table are owned by the renderer and rebuilt in place. Do not allocate
+  them per request: gestures restart renders several times a second.
+- Samplers **return** on cancellation, never throw, and `Parallel.For` gets no cancellation token.
+  Exceptions on every restart cost every worker and the main thread.
+- All CPU renderers share one `CpuWorkerBudget`: two cores stay free for Unity's main and render
+  threads on mobile, the wide layer's workers come out of the same budget, and while a gesture runs
+  `Regulate` parks workers when frames run late (never below half). Do not construct a renderer
+  with its own thread count again - oversubscription during zoom-out was the stutter.
 
 ## Architecture
 
@@ -119,9 +134,11 @@ any feature that is not a bug fix, and update it when a design decision changes.
   while `Rendering` still cannot see `Fractals`. Keep samplers `struct`; a `class` sampler
   compiles and silently runs several times slower. This is also the Burst seam: only
   `ICpuPassHost`'s two methods have to learn to schedule jobs.
-- Until the fractal menu exists, the active fractal is chosen by `AppBootstrap.startupFractalId`
-  (an `IFractalDefinition.Id`, e.g. `mandelbrot` or `burning-ship`) or at runtime through
-  `FractalSession.SetDefinition`. Do not add a second way.
+- The active fractal is chosen at runtime through `FractalSession.SetDefinition` (the settings
+  panel) or restored with the rest of the saved session by `StateStoreModule`.
+  `AppBootstrap.startupFractalId` (e.g. `mandelbrot`, `burning-ship`) is only the first-launch
+  default - once a session is saved it wins. To test from a clean start, delete `session.json`
+  in `Application.persistentDataPath`.
 - The UI is uGUI, built in code, with no imported art: rounded shapes come from `UiSprites`
   (procedural nine-slice) and every size from `UiTheme.Px`, which scales by screen height.
   Frosted glass is a real backdrop blur - `BackdropBlur` keeps one small blurred copy of the
@@ -208,7 +225,22 @@ any feature that is not a bug fix, and update it when a design decision changes.
   `minimumPublishStep` and the renderer computes the early passes but holds them back. The last
   pass of a run always publishes, or a capped interactive render would show nothing at all.
 - Saved state (`FractalStateDto`) stores centre/scale as `decimal` strings and parameters by
-  string key, with a `version` field. Never serialise the centre as `double`.
+  string key, with a `version` field. Never serialise the centre as `double`. Every number goes
+  through `StateCodec` in the invariant culture, and restoring goes through
+  `FractalSession.Apply`, which shares `Normalize` with `SetView`.
+- A module that offers something to the rest of the app declares the interface in `App`
+  (`IBookmarkService`, `IScreenshotService`) and registers it with `AppServices.Provide<T>` in
+  `Initialize`; screens call `Get<T>`. This is the only way UI reaches module functionality - the
+  UI assembly must not reference Modules. Module order in `AppBootstrap` matters: `StateStoreModule`
+  first (restores the session), `UiRouter` last (its screens need the services).
+- User palettes are JSON (`PaletteCatalog`, stored as stops), not ScriptableObjects - they are made
+  on the phone. Built-ins stay in `PaletteLibrary` and are never overwritten; the palette editor
+  saves a copy.
+- Screens are created once by `UiRouter` and survive rebuilds; only their GameObjects are rebuilt.
+  A screen whose shape no longer matches the session sets `NeedsRebuild`. One panel is open at a time.
+- A slider that changes something which re-renders the fractal (a parameter) applies on release
+  (`SliderRow.onCommitted`); one that only recolours applies live. Sync session values into a
+  control only when they actually changed, or the thumb jumps back under the finger.
 
 Migration is staged (0 -> 12 in `docs\ARCHITECTURE.md`); each stage must leave the project
 compiling. `docs\RESEARCH-mandelbrot-browser.md` is the teardown of the reference app that

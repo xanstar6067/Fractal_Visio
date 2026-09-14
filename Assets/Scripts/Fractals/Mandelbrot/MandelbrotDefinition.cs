@@ -30,7 +30,7 @@ namespace FractalVisio.Fractals
         public IReadOnlyList<FractalParameterDescriptor> Parameters => NoParameters;
 
         public PrecisionTier SupportedPrecision =>
-            PrecisionTier.Float | PrecisionTier.Double | PrecisionTier.DoubleDouble;
+            PrecisionTier.Float | PrecisionTier.Double | PrecisionTier.DoubleDouble | PrecisionTier.Perturbation;
 
         public string ShaderName => "FractalVisio/Mandelbrot";
 
@@ -41,9 +41,11 @@ namespace FractalVisio.Fractals
 
         public void RunCpuPass(ICpuPassHost host, in FractalParameterSet parameters, bool extendedPrecision)
         {
+            // Deep renders go through perturbation. MandelbrotSamplerDD stays as the exact
+            // reference the perturbation result is checked against.
             if (extendedPrecision)
             {
-                host.RunExtended(new MandelbrotSamplerDD());
+                host.RunPerturbed(new MandelbrotPerturbationSampler());
                 return;
             }
 

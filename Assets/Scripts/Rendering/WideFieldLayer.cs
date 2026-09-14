@@ -52,9 +52,10 @@ namespace FractalVisio.Rendering
         private double lastRequestTime = double.NegativeInfinity;
         private double requestedFieldFactor = 1d;
 
-        public WideFieldLayer(IColorMapper colorMapper, int maximumWorkers)
+        /// <param name="workerBudget">Shared thread budget; this layer takes its background share.</param>
+        public WideFieldLayer(IColorMapper colorMapper, CpuWorkerBudget workerBudget)
         {
-            renderer = new FractalCpuRenderer(colorMapper, Mathf.Max(1, maximumWorkers));
+            renderer = new FractalCpuRenderer(colorMapper, workerBudget, true);
         }
 
         /// <summary>Keep the backdrop on the same palette as the sharp frame in front of it.</summary>

@@ -25,6 +25,8 @@ namespace FractalVisio.Modules
         private Text computeBackendText;
         private AppServices context;
         private float nextUpdateTime;
+        private float smoothedFrameSeconds = 1f / 60f;
+        private float worstFrameSeconds;
 
         /// <param name="fontPercent">
         /// Inspector size, as a percentage of the density-derived default. It used to be a raw
@@ -65,10 +67,19 @@ namespace FractalVisio.Modules
 
         public void Tick()
         {
+            // Frame time is sampled every frame, shown every UpdateInterval: the slowest frame of
+            // the window is what a stutter looks like, and an average hides it.
+            var delta = Time.unscaledDeltaTime;
+            smoothedFrameSeconds += (delta - smoothedFrameSeconds) * 0.1f;
+            worstFrameSeconds = Mathf.Max(worstFrameSeconds, delta);
+
             if (context == null || Time.unscaledTime < nextUpdateTime)
             {
                 return;
             }
+
+            var worstFrameMs = worstFrameSeconds * 1000f;
+            worstFrameSeconds = 0f;
 
             nextUpdateTime = Time.unscaledTime + UpdateInterval;
 
@@ -106,7 +117,12 @@ namespace FractalVisio.Modules
             }
             else
             {
-                var precision = status.ExtendedPrecision ? "double-double" : "fp64";
+                var precision = status.Precision switch
+                {
+                    PrecisionTier.Perturbation => "perturbation",
+                    PrecisionTier.DoubleDouble => "double-double",
+                    _ => "fp64"
+                };
                 engineLine = "CPU Parallel  " + precision + (status.Interacting ? "  interactive" : string.Empty);
                 detailLine = status.IsBusy
                     ? string.Concat(
@@ -127,7 +143,15 @@ namespace FractalVisio.Modules
                 "  dens ", ScreenScale.Density.ToString("0.00", CultureInfo.InvariantCulture),
                 "  canvas x", CanvasScaleFactor().ToString("0.00", CultureInfo.InvariantCulture));
 
-            computeBackendText.text = engineLine + "\n" + detailLine + "\n" + densityLine;
+            // Frame pacing on the readout: whether a stutter is the fractal starving the main thread
+            // (workers below budget) or something else entirely is the first thing to tell apart.
+            var paceLine = string.Concat(
+                "fps ", Mathf.RoundToInt(1f / Mathf.Max(0.001f, smoothedFrameSeconds)).ToString(CultureInfo.InvariantCulture),
+                "  worst ", Mathf.RoundToInt(worstFrameMs).ToString(CultureInfo.InvariantCulture), " ms",
+                "  workers ", status.Workers.ToString(CultureInfo.InvariantCulture),
+                "/", status.WorkerBudget.ToString(CultureInfo.InvariantCulture));
+
+            computeBackendText.text = engineLine + "\n" + detailLine + "\n" + paceLine + "\n" + densityLine;
         }
 
         public void Shutdown()

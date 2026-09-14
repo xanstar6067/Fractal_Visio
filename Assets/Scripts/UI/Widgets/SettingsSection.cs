@@ -6,9 +6,10 @@ using UnityEngine.UI;
 namespace FractalVisio.UI
 {
     /// <summary>
-    /// A labelled list of mutually exclusive options - the only control the settings panel has, and
-    /// deliberately so: every setting so far (fractal, palette, resolution, interface size) is a
-    /// choice from a short list, and one control type means one set of touch targets to get right.
+    /// A labelled list of mutually exclusive options - the default control for any setting that is
+    /// a choice from a short list (fractal, palette, resolution, interface size). Numbers on a range
+    /// use <see cref="SliderRow"/>, commands use <see cref="ActionRow"/>; all three share the row
+    /// height, so a panel that mixes them has one set of touch targets.
     ///
     /// Adding a section is one <see cref="Create"/> call plus advancing the caller's cursor by
     /// <see cref="Height"/>. Nothing here knows what the options mean.

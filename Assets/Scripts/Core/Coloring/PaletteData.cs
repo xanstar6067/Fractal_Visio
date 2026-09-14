@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace FractalVisio.Core
@@ -20,18 +21,31 @@ namespace FractalVisio.Core
         public const int Resolution = 256;
 
         private readonly Color32[] colors;
+        private readonly ColorStop[] stops;
 
         public PaletteData(string id, string displayName, Color32[] colors)
+            : this(id, displayName, colors, Array.Empty<ColorStop>())
+        {
+        }
+
+        private PaletteData(string id, string displayName, Color32[] colors, ColorStop[] stops)
         {
             Id = id ?? string.Empty;
             DisplayName = displayName ?? Id;
             this.colors = colors is { Length: > 0 } ? colors : new[] { new Color32(255, 255, 255, 255) };
+            this.stops = stops ?? Array.Empty<ColorStop>();
         }
 
         /// <summary>Stable key, used by saved state. Never localise it.</summary>
         public string Id { get; }
 
         public string DisplayName { get; }
+
+        /// <summary>
+        /// The gradient stops the palette was baked from, empty for one built from raw colours.
+        /// Kept because a palette is edited and saved as its stops, never as 256 baked colours.
+        /// </summary>
+        public IReadOnlyList<ColorStop> Stops => stops;
 
         public int Count => colors.Length;
 
@@ -78,12 +92,15 @@ namespace FractalVisio.Core
                 return new PaletteData(id, displayName, colors);
             }
 
+            var sorted = (ColorStop[])stops.Clone();
+            Array.Sort(sorted, (a, b) => a.Position.CompareTo(b.Position));
+
             for (var i = 0; i < Resolution; i++)
             {
-                colors[i] = EvaluateStops(stops, i / (float)Resolution);
+                colors[i] = EvaluateStops(sorted, i / (float)Resolution);
             }
 
-            return new PaletteData(id, displayName, colors);
+            return new PaletteData(id, displayName, colors, sorted);
         }
 
         private static Color32 EvaluateStops(ColorStop[] stops, float t)
@@ -127,6 +144,12 @@ namespace FractalVisio.Core
                     (byte)Mathf.Clamp(Mathf.RoundToInt(g * 255f), 0, 255),
                     (byte)Mathf.Clamp(Mathf.RoundToInt(b * 255f), 0, 255),
                     255);
+            }
+
+            public ColorStop(float position, Color32 color)
+            {
+                Position = Mathf.Clamp01(position);
+                Color = new Color32(color.r, color.g, color.b, 255);
             }
 
             public float Position { get; }

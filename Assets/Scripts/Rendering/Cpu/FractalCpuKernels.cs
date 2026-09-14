@@ -34,7 +34,6 @@ namespace FractalVisio.Rendering
     /// </summary>
     public sealed class FractalCpuRenderer : IDisposable
     {
-        private const int InteractivePassCount = 2;      // steps 16, 8 while the view keeps moving
         private const double UploadIntervalSeconds = 0.04d;
 
         internal static readonly int[] StepPlan = { 16, 8, 4, 2, 1 };
@@ -53,6 +52,9 @@ namespace FractalVisio.Rendering
         /// </summary>
         private const int TileSize = 64;
 
+        /// <summary>How long a worker parked by <see cref="CpuWorkerBudget"/> waits before looking again.</summary>
+        private const int ParkSleepMilliseconds = 4;
+
         // Passes at or above this step also cover the overscan margin; finer passes stay inside
         // the visible rectangle. The margin is only ever seen mid-gesture, where a coarse but
         // correct edge is enough, and refining it at every step would spend a quarter of the
@@ -60,7 +62,13 @@ namespace FractalVisio.Rendering
         private const int MarginStepThreshold = 4;
 
         private readonly IColorMapper mapper;
+        private readonly CpuWorkerBudget budget;
+        private readonly bool background;
+        private readonly int[] workerRanks;
         private readonly int workerCount;
+
+        /// <summary>Reference orbit for perturbation renders, reused between requests.</summary>
+        private readonly ReferenceOrbit referenceOrbit = new();
 
         /// <summary>Escape values, one per pixel. Negative means the point never escaped.</summary>
         private float[] escape = Array.Empty<float>();
@@ -108,23 +116,30 @@ namespace FractalVisio.Rendering
         private long samplesTotal;
         private double lastUploadTime;
 
-        /// <param name="maximumWorkers">
-        /// Cap on background threads, 0 for "as many as the machine can spare". The wide
-        /// background layer passes a small number so it cannot starve the renderer whose output
-        /// the viewer is actually looking at.
+        /// <param name="workerBudget">
+        /// Thread budget shared with every other CPU renderer. See <see cref="CpuWorkerBudget"/>.
         /// </param>
-        public FractalCpuRenderer(IColorMapper colorMapper, int maximumWorkers = 0)
+        /// <param name="isBackground">
+        /// True for the wide background layer: it takes the budget's small background share, so it
+        /// cannot starve the renderer whose output the viewer is actually looking at.
+        /// </param>
+        public FractalCpuRenderer(IColorMapper colorMapper, CpuWorkerBudget workerBudget, bool isBackground)
         {
             mapper = colorMapper ?? throw new ArgumentNullException(nameof(colorMapper));
-
-            // Keep one logical core free for Unity, rendering and Android OS work.
-            var available = Math.Max(1, SystemInfo.processorCount - 1);
-            workerCount = maximumWorkers > 0 ? Math.Min(available, maximumWorkers) : available;
+            budget = workerBudget ?? throw new ArgumentNullException(nameof(workerBudget));
+            background = isBackground;
+            workerRanks = budget.RanksFor(isBackground);
+            workerCount = workerRanks.Length;
         }
 
         public bool IsBusy => renderActive || hasQueued;
         public float Progress { get; private set; }
         public bool UsesExtendedPrecision => activeRequest.ExtendedPrecision;
+
+        /// <summary>Arithmetic the current or last render actually ran in. Set by the fractal's choice of sampler.</summary>
+        public PrecisionTier ActivePrecision => (PrecisionTier)activePrecision;
+
+        private volatile int activePrecision;
         public int PassCount => Mathf.Max(1, passCeilingIndex - passFloorIndex);
         public int CurrentPass => Mathf.Clamp(passCursor - passFloorIndex + 1, 1, PassCount);
 
@@ -393,12 +408,11 @@ namespace FractalVisio.Rendering
                 floor++;
             }
 
-            // Only the double-double range is heavy enough to need a cap during a
-            // gesture. Plain fp64 ("medium depth") renders every pass live.
-            var capPasses = activeRequest.Interacting && activeRequest.ExtendedPrecision;
-            var ceiling = capPasses
-                ? Math.Min(StepPlan.Length, floor + InteractivePassCount)
-                : StepPlan.Length;
+            // Every depth renders every pass, gesture or not. Deep renders used to stop at 8x8
+            // blocks mid-gesture because double-double could not afford more; perturbation runs at
+            // fp64 cost, and a cap that only applies past one scale is a visible cliff in how sharp
+            // the picture gets while zooming through it.
+            var ceiling = StepPlan.Length;
 
             passFloorIndex = floor;
             passCeilingIndex = ceiling;
@@ -419,35 +433,33 @@ namespace FractalVisio.Rendering
             cancellation = new CancellationTokenSource();
             var token = cancellation.Token;
             var job = new RenderJob(
-                this, escape, frameWidth, frameHeight, visibleRect, activeRequest, workerCount, floor, ceiling);
+                this, escape, frameWidth, frameHeight, visibleRect, activeRequest,
+                budget, workerRanks, referenceOrbit, floor, ceiling);
             renderActive = true;
-            renderTask = Task.Run(() => RenderProgressive(job, token), token);
+            renderTask = Task.Run(() => RenderProgressive(job, token));
         }
 
+        /// <summary>
+        /// Report a failed render. A cancelled one is not a failure and, by design, arrives here as
+        /// an ordinary completion: cancellation unwinds by returning, never by throwing, because a
+        /// gesture cancels renders several times a second and each throw would be paid on every
+        /// worker and again on the main thread.
+        /// </summary>
         private void DrainTask()
         {
-            try
+            if (!renderTask.IsFaulted || renderTask.Exception == null)
             {
-                renderTask.GetAwaiter().GetResult();
+                return;
             }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (AggregateException aggregate)
-            {
-                foreach (var inner in aggregate.InnerExceptions)
-                {
-                    if (inner is OperationCanceledException)
-                    {
-                        continue;
-                    }
 
-                    Debug.LogError("CPU fractal render failed: " + inner);
-                }
-            }
-            catch (Exception exception)
+            foreach (var inner in renderTask.Exception.Flatten().InnerExceptions)
             {
-                Debug.LogError("CPU fractal render failed: " + exception);
+                if (inner is OperationCanceledException)
+                {
+                    continue;
+                }
+
+                Debug.LogError("CPU fractal render failed: " + inner);
             }
         }
 
@@ -595,10 +607,25 @@ namespace FractalVisio.Rendering
 
         private static void RenderProgressive(RenderJob job, CancellationToken token)
         {
-            // The definition calls back into the host with its own sampler struct; everything from
-            // there down is compiled once per sampler type. See ICpuPassHost for why.
-            var host = new PassHost(job, token);
-            job.Definition.RunCpuPass(host, job.Parameters, job.ExtendedPrecision);
+            if (job.Owner.background)
+            {
+                job.Budget.BeginBackground();
+            }
+
+            try
+            {
+                // The definition calls back into the host with its own sampler struct; everything
+                // from there down is compiled once per sampler type. See ICpuPassHost for why.
+                var host = new PassHost(job, token);
+                job.Definition.RunCpuPass(host, job.Parameters, job.ExtendedPrecision);
+            }
+            finally
+            {
+                if (job.Owner.background)
+                {
+                    job.Budget.EndBackground();
+                }
+            }
         }
 
         /// <summary>
@@ -618,12 +645,31 @@ namespace FractalVisio.Rendering
 
             public void Run<TSampler>(TSampler sampler) where TSampler : struct, IEscapeSamplerD
             {
+                job.Owner.activePrecision = (int)PrecisionTier.Double;
                 RunPasses(job, new PlaneSamplerD<TSampler>(sampler), token);
             }
 
             public void RunExtended<TSampler>(TSampler sampler) where TSampler : struct, IEscapeSamplerDD
             {
+                job.Owner.activePrecision = (int)PrecisionTier.DoubleDouble;
                 RunPasses(job, new PlaneSamplerDD<TSampler>(sampler), token);
+            }
+
+            public void RunPerturbed<TSampler>(TSampler sampler) where TSampler : struct, IPerturbationSampler
+            {
+                job.Owner.activePrecision = (int)PrecisionTier.Perturbation;
+
+                // The reference is the centre of the request. Every buffer pixel lies within half
+                // the buffer's diagonal of it, which is the bound the BLA radii are built against.
+                var orbit = job.Orbit;
+                var maxDeltaC = job.ScaleDouble * 0.5d * Math.Sqrt(job.Aspect * job.Aspect + 1d) * 1.01d;
+                sampler.BuildReference(orbit, job.CenterX, job.CenterY, job.MaxIterations, maxDeltaC);
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                RunPasses(job, new PlaneSamplerPerturbed<TSampler>(sampler, orbit), token);
             }
         }
 
@@ -671,6 +717,28 @@ namespace FractalVisio.Rendering
             }
         }
 
+        private readonly struct PlaneSamplerPerturbed<TSampler> : IPlaneSampler
+            where TSampler : struct, IPerturbationSampler
+        {
+            private readonly TSampler sampler;
+            private readonly ReferenceOrbit orbit;
+
+            public PlaneSamplerPerturbed(TSampler sampler, ReferenceOrbit orbit)
+            {
+                this.sampler = sampler;
+                this.orbit = orbit;
+            }
+
+            public float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token)
+            {
+                // The offset from the centre is a screen-sized number times the scale: fp64 holds
+                // it to full relative precision at any depth, which is what perturbation relies on.
+                Normalize(job, pixelX, pixelY, out var rotatedX, out var rotatedY);
+                return sampler.Sample(
+                    orbit, job.ScaleDouble * rotatedX, job.ScaleDouble * rotatedY, job.MaxIterations, token);
+            }
+        }
+
         /// <summary>
         /// Pixel centre into view space. This applies the same screen-space rotation the GPU shader
         /// does, so the two backends agree across the fp32 -> fp64 handoff.
@@ -691,7 +759,11 @@ namespace FractalVisio.Rendering
 
             for (var p = job.PassFloor; p < job.PassCeiling; p++)
             {
-                token.ThrowIfCancellationRequested();
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 job.Owner.SetPassCursor(p);
 
                 var step = StepPlan[p];
@@ -716,7 +788,11 @@ namespace FractalVisio.Rendering
                 // pass and part the coarser image beneath it, and that boundary is the
                 // seam seen while panning - worst on the CPU-only deep-zoom path where a
                 // gesture keeps restarting the render before it can finish a pass.
-                token.ThrowIfCancellationRequested();
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 job.Owner.PublishPass(job.Escape, job.View);
             }
         }
@@ -730,64 +806,36 @@ namespace FractalVisio.Rendering
             CancellationToken token)
             where TPlane : struct, IPlaneSampler
         {
-            var coarse = step << 1;
             var cursor = new TileCursor();
-            var options = new ParallelOptions
-            {
-                CancellationToken = token,
-                MaxDegreeOfParallelism = job.Workers
-            };
 
-            Parallel.For(0, job.Workers, options, _ =>
+            // No CancellationToken in the options: Parallel.For would answer a cancel by throwing on
+            // every worker. The workers watch the token themselves and simply stop taking tiles.
+            var options = new ParallelOptions { MaxDegreeOfParallelism = job.Workers };
+
+            Parallel.For(0, job.Workers, options, worker =>
             {
+                var rank = job.Ranks[worker];
                 long produced = 0;
 
-                while (true)
+                while (!token.IsCancellationRequested)
                 {
+                    // Parked by the frame-pacing budget: hold the thread, not a tile, so the rest
+                    // of the pass keeps flowing to the workers that are still allowed to run.
+                    if (!job.Budget.MayRun(rank))
+                    {
+                        Thread.Sleep(ParkSleepMilliseconds);
+                        continue;
+                    }
+
                     var index = Interlocked.Increment(ref cursor.Next) - 1;
                     if (index >= tiles.Length)
                     {
                         break;
                     }
 
-                    token.ThrowIfCancellationRequested();
-                    var tile = tiles[index];
-
-                    for (var by = tile.yMin; by < tile.yMax; by += step)
+                    if (!RenderTile(job, tiles[index], step, first, sampler, token, ref produced))
                     {
-                        var rowOnCoarse = !first && by % coarse == 0;
-                        for (var bx = tile.xMin; bx < tile.xMax; bx += step)
-                        {
-                            if (rowOnCoarse && bx % coarse == 0)
-                            {
-                                continue; // this sample was already computed in a coarser pass
-                            }
-
-                            var sx = bx + (step >> 1);
-                            if (sx >= job.Width)
-                            {
-                                sx = job.Width - 1;
-                            }
-
-                            var sy = by + (step >> 1);
-                            if (sy >= job.Height)
-                            {
-                                sy = job.Height - 1;
-                            }
-
-                            var value = sampler.SampleAt(job, sx, sy, token);
-                            produced++;
-
-                            if (!job.TrustInterior && value < 0f)
-                            {
-                                // A budget-capped "did not escape" is unknown, not proven
-                                // interior. Keep whatever is already in the buffer (the
-                                // coarser pass) instead of stamping it interior-coloured.
-                                continue;
-                            }
-
-                            FillBlock(job.Escape, job.Width, job.Height, bx, by, step, value);
-                        }
+                        break;
                     }
 
                     if (produced >= 4096)
@@ -799,6 +847,58 @@ namespace FractalVisio.Rendering
 
                 job.Owner.AddSamples(produced);
             });
+        }
+
+        /// <summary>One tile of one pass. Returns false if the render was cancelled part-way.</summary>
+        private static bool RenderTile<TPlane>(
+            RenderJob job,
+            in RectInt tile,
+            int step,
+            bool first,
+            TPlane sampler,
+            CancellationToken token,
+            ref long produced)
+            where TPlane : struct, IPlaneSampler
+        {
+            var coarse = step << 1;
+
+            for (var by = tile.yMin; by < tile.yMax; by += step)
+            {
+                var rowOnCoarse = !first && by % coarse == 0;
+                for (var bx = tile.xMin; bx < tile.xMax; bx += step)
+                {
+                    if (rowOnCoarse && bx % coarse == 0)
+                    {
+                        continue; // this sample was already computed in a coarser pass
+                    }
+
+                    var sx = bx + (step >> 1);
+                    if (sx >= job.Width)
+                    {
+                        sx = job.Width - 1;
+                    }
+
+                    var sy = by + (step >> 1);
+                    if (sy >= job.Height)
+                    {
+                        sy = job.Height - 1;
+                    }
+
+                    var value = sampler.SampleAt(job, sx, sy, token);
+                    produced++;
+
+                    // A cancelled sampler returns whatever it had; that value must not reach the
+                    // buffer, which a later remap would otherwise show.
+                    if (token.IsCancellationRequested)
+                    {
+                        return false;
+                    }
+
+                    FillBlock(job.Escape, job.Width, job.Height, bx, by, step, value);
+                }
+            }
+
+            return true;
         }
 
         /// <summary>Shared "next tile please" counter. A class so the lambda can take it by ref.</summary>
@@ -890,10 +990,15 @@ namespace FractalVisio.Rendering
                 int height,
                 RectInt visibleRect,
                 in FrameRequest request,
-                int workers,
+                CpuWorkerBudget budget,
+                int[] ranks,
+                ReferenceOrbit orbit,
                 int passFloor,
                 int passCeiling)
             {
+                Budget = budget;
+                Ranks = ranks;
+                Orbit = orbit;
                 Owner = owner;
                 Escape = escape;
                 Width = width;
@@ -915,10 +1020,7 @@ namespace FractalVisio.Rendering
                 MaxIterations = request.Iterations;
                 ExtendedPrecision = request.ExtendedPrecision;
                 MinimumPublishStep = request.MinimumPublishStep;
-                // Distrust "interior" only where a gesture forces a capped budget
-                // (deep double-double). Plain fp64 interaction paints real verdicts.
-                TrustInterior = !(request.Interacting && request.ExtendedPrecision);
-                Workers = workers;
+                Workers = ranks.Length;
                 PassFloor = passFloor;
                 PassCeiling = passCeiling;
             }
@@ -950,10 +1052,17 @@ namespace FractalVisio.Rendering
             public double RotationSin { get; }
             public int MaxIterations { get; }
             public bool ExtendedPrecision { get; }
-            public bool TrustInterior { get; }
 
             /// <summary>Coarsest pass step this render may publish. See RunPasses.</summary>
             public int MinimumPublishStep { get; }
+
+            public CpuWorkerBudget Budget { get; }
+
+            /// <summary>Park rank of each worker index. See <see cref="CpuWorkerBudget.RanksFor"/>.</summary>
+            public int[] Ranks { get; }
+
+            /// <summary>Reference orbit storage for perturbation renders. Owned by the renderer.</summary>
+            public ReferenceOrbit Orbit { get; }
 
             public int Workers { get; }
             public int PassFloor { get; }

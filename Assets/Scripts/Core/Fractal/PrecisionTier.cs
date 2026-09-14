@@ -18,6 +18,14 @@ namespace FractalVisio.Core
         Double = 1 << 1,
 
         /// <summary>CPU double-double, about 30 decimal digits. Deep zoom only - it is slow.</summary>
-        DoubleDouble = 1 << 2
+        DoubleDouble = 1 << 2,
+
+        /// <summary>
+        /// CPU perturbation: one reference orbit in double-double, every pixel iterates only its
+        /// offset from it in fp64. Covers the depths of <see cref="DoubleDouble"/> at roughly fp64
+        /// cost. A definition that declares it takes deep renders through
+        /// <see cref="ICpuPassHost.RunPerturbed{T}"/> instead of its double-double sampler.
+        /// </summary>
+        Perturbation = 1 << 3
     }
 }

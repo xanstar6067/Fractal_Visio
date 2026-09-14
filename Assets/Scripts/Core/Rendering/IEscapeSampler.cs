@@ -19,6 +19,11 @@ namespace FractalVisio.Core
     /// </code>
     /// A bailout of 4 makes that approximation poor; use a few hundred instead. The extra
     /// iterations it costs are a handful per escaping pixel.
+    ///
+    /// <b>Cancellation returns, it does not throw.</b> Check the token every few hundred iterations
+    /// and return any value once it is set; the renderer discards samples of a cancelled pass. A
+    /// throw is the expensive way to say the same thing, and a gesture cancels renders several
+    /// times a second.
     /// </summary>
     public interface IEscapeSamplerD
     {

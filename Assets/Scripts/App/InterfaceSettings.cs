@@ -5,9 +5,10 @@ namespace FractalVisio.App
     /// <summary>
     /// Settings about the interface rather than the picture.
     ///
-    /// It lives on the session because the session is the only owner of saved, user-visible state
-    /// today; stage 7's <c>SettingsModule</c> is where it belongs long-term. Keeping it here now
-    /// costs one flag and means the state store will pick it up for free when it lands.
+    /// It lives on the session because the session is the one owner of user-visible state, and
+    /// the state store module saves it from there alongside the render resolution. Stage 7 was
+    /// to give it a settings module of its own; with nothing for that module to do beyond what the
+    /// session and the state store already do, it was not added.
     /// </summary>
     public struct InterfaceSettings
     {

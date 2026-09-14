@@ -41,7 +41,7 @@ namespace FractalVisio.Fractals
         public IReadOnlyList<FractalParameterDescriptor> Parameters => ParameterList;
 
         public PrecisionTier SupportedPrecision =>
-            PrecisionTier.Float | PrecisionTier.Double | PrecisionTier.DoubleDouble;
+            PrecisionTier.Float | PrecisionTier.Double | PrecisionTier.DoubleDouble | PrecisionTier.Perturbation;
 
         public string ShaderName => "FractalVisio/BurningShip";
 
@@ -56,7 +56,7 @@ namespace FractalVisio.Fractals
 
             if (extendedPrecision)
             {
-                host.RunExtended(new BurningShipSamplerDD(bailout));
+                host.RunPerturbed(new BurningShipPerturbationSampler(bailout));
                 return;
             }
 

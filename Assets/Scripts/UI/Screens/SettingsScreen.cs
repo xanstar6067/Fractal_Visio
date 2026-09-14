@@ -1,19 +1,20 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
 using FractalVisio.App;
 using FractalVisio.Core;
 
 namespace FractalVisio.UI
 {
     /// <summary>
-    /// The settings panel: a scrolling column of <see cref="SettingsSection"/>s. Adding a setting
-    /// is one section plus the two lines that read and write it on the session - the layout, the
-    /// scrolling and the touch targets are already handled.
+    /// The settings panel: blocks of controls laid out in one to three balanced columns. Adding a
+    /// setting is one block - an option list, or a widget from <c>UI/Widgets</c> - plus the lines
+    /// that read and write it on the session; layout, scrolling and touch targets are handled here.
     ///
-    /// It lists fractals from <c>AppServices.Catalog</c> and palettes from
-    /// <see cref="PaletteLibrary"/>, both as Core types: the UI never references the Fractals
-    /// assembly, so a new fractal or palette appears here on its own.
+    /// Fractals come from <c>AppServices.Catalog</c>, palettes from <c>AppServices.Palettes</c>, and
+    /// the PARAMETERS block is generated from the active fractal's
+    /// <see cref="IFractalDefinition.Parameters"/>. The UI never references the Fractals assembly,
+    /// so a new fractal - with its own knobs - appears here without this file changing.
     /// </summary>
     public sealed class SettingsScreen : UiScreen
     {
@@ -43,10 +44,14 @@ namespace FractalVisio.UI
 
         private static readonly string[] InterfaceNames = { "XS", "S", "M", "L", "XL", "XXL" };
 
+        private static readonly string[] BoolNames = { "Off", "On" };
+
         /// <summary>Most columns to split into. Past three the rows get too narrow to read.</summary>
         private const int MaximumColumns = 3;
 
+        private readonly Action openPaletteEditor;
         private readonly List<IFractalDefinition> fractals = new();
+        private readonly List<ParameterControl> parameterControls = new();
 
         private SettingsSection fractalSection;
         private SettingsSection paletteSection;
@@ -54,55 +59,52 @@ namespace FractalVisio.UI
         private SettingsSection resolutionSection;
         private SettingsSection interfaceSection;
 
+        private IFractalDefinition builtFor;
+        private int builtPaletteCount;
+
+        public SettingsScreen(Action openPaletteEditor)
+        {
+            this.openPaletteEditor = openPaletteEditor;
+        }
+
         protected override void OnBuild(Transform parent)
         {
+            var session = Services.Session;
+            parameterControls.Clear();
+            builtFor = session.Definition;
+            builtPaletteCount = Services.Palettes.All.Count;
+
             fractals.Clear();
             for (var i = 0; i < Services.Catalog.Count; i++)
             {
                 fractals.Add(Services.Catalog[i]);
             }
 
-            var palettes = PaletteLibrary.All;
-
-            var fractalNames = new string[fractals.Count];
-            for (var i = 0; i < fractals.Count; i++)
+            var blocks = new List<Block>
             {
-                fractalNames[i] = fractals[i].DisplayName;
-            }
-
-            var paletteNames = new string[palettes.Count];
-            for (var i = 0; i < palettes.Count; i++)
-            {
-                paletteNames[i] = palettes[i].DisplayName;
-            }
-
-            var specs = new[]
-            {
-                new SectionSpec("FRACTAL", fractalNames, SelectFractal),
-                new SectionSpec("PALETTE", paletteNames, SelectPalette),
-                new SectionSpec("COLOURING", ColoringNames, SelectColoring),
-                new SectionSpec("RESOLUTION", ResolutionNames, SelectResolution),
-                new SectionSpec("INTERFACE SIZE", InterfaceNames, SelectInterfaceScale)
+                new OptionsBlock("FRACTAL", Names(fractals, f => f.DisplayName), SelectFractal, s => fractalSection = s),
             };
 
-            var margin = UiTheme.Px(UiTheme.ScreenMargin);
-            var availableWidth = UiTheme.AvailablePanelWidth;
-            var availableHeight = UiTheme.AvailablePanelHeight;
+            if (session.Definition.Parameters.Count > 0)
+            {
+                blocks.Add(new ParametersBlock(this, session.Definition));
+            }
 
-            // Columns are how the panel uses a wide screen. One natural column is what a phone in
-            // portrait has room for; a tablet or a desktop window fits two or three, which turns a
-            // long scroll into something readable at a glance.
-            var naturalWidth = UiTheme.PanelPx(UiTheme.PanelWidth);
-            var columns = Mathf.Clamp(Mathf.FloorToInt(availableWidth / naturalWidth), 1, MaximumColumns);
-            var width = Mathf.Min(columns * naturalWidth, availableWidth);
+            blocks.Add(new OptionsBlock(
+                "PALETTE", Names(Services.Palettes.All, p => p.DisplayName), SelectPalette, s => paletteSection = s,
+                "Edit palette", openPaletteEditor));
+            blocks.Add(new OptionsBlock("COLOURING", ColoringNames, SelectColoring, s => coloringSection = s));
+            blocks.Add(new OptionsBlock("RESOLUTION", ResolutionNames, SelectResolution, s => resolutionSection = s));
+            blocks.Add(new OptionsBlock("INTERFACE SIZE", InterfaceNames, SelectInterfaceScale, s => interfaceSection = s));
 
+            var width = ResolvePanelWidth(MaximumColumns, out var columns);
             var padding = UiTheme.PanelInset(width, UiTheme.PanelPadding, 0.06f);
-            var sectionGap = Mathf.Min(UiTheme.PanelPx(UiTheme.SectionSpacing), availableHeight * 0.04f);
+            var sectionGap = Mathf.Min(UiTheme.PanelPx(UiTheme.SectionSpacing), UiTheme.AvailablePanelHeight * 0.04f);
             var titleHeight = UiTheme.PanelPx(28f);
             var columnWidth = (width - padding * 2f - padding * (columns - 1)) / columns;
 
-            // Shortest column first, so five sections of different lengths end up balanced instead
-            // of one column running off the bottom while the next is half empty.
+            // Shortest column first, so blocks of different lengths end up balanced instead of one
+            // column running off the bottom while the next is half empty.
             var cursors = new float[columns];
             var top = -(padding + titleHeight + sectionGap);
             for (var i = 0; i < columns; i++)
@@ -110,12 +112,12 @@ namespace FractalVisio.UI
                 cursors[i] = top;
             }
 
-            var plan = new int[specs.Length];
-            for (var i = 0; i < specs.Length; i++)
+            var plan = new int[blocks.Count];
+            for (var i = 0; i < blocks.Count; i++)
             {
                 var column = ShortestColumn(cursors);
                 plan[i] = column;
-                cursors[column] -= SettingsSection.MeasureHeight(specs[i].Options.Count) + sectionGap;
+                cursors[column] -= blocks[i].Measure() + sectionGap;
             }
 
             var tallest = 0f;
@@ -125,50 +127,35 @@ namespace FractalVisio.UI
             }
 
             var contentHeight = tallest - sectionGap + padding;
-            var height = Mathf.Min(contentHeight, availableHeight);
-
-            Panel = GlassPanel.Create(
-                "SettingsPanel",
-                parent,
-                UiTheme.PanelRadius,
-                UiTheme.PanelTint,
-                UiTheme.PanelBorder);
-
-            UiFactory.Anchor(
-                Panel.Root,
-                new Vector2(1f, 0f),
-                new Vector2(1f, 0f),
-                new Vector2(-margin, margin * 2f + UiTheme.Px(UiTheme.ToggleSize)),
-                new Vector2(width, height));
-
-            var content = BuildScroll(contentHeight, height);
-
-            var title = UiFactory.CreateText(
-                "Title", content, "Settings", UiTheme.TitleFontSize, UiTheme.Text,
-                TextAnchor.UpperLeft, fitToRect: true, panelScale: true);
-            Place(title.rectTransform, padding, -padding, width - padding * 2f, titleHeight);
-            title.fontStyle = FontStyle.Bold;
+            var content = CreateScrollingPanel(parent, "SettingsPanel", width, contentHeight);
+            AddTitle(content, "Settings", padding, width);
 
             for (var i = 0; i < columns; i++)
             {
                 cursors[i] = top;
             }
 
-            var built = new SettingsSection[specs.Length];
-            for (var i = 0; i < specs.Length; i++)
+            for (var i = 0; i < blocks.Count; i++)
             {
                 var column = plan[i];
                 var x = padding + column * (columnWidth + padding);
-                built[i] = SettingsSection.Create(
-                    content, specs[i].Label, specs[i].Options, specs[i].OnSelect, x, cursors[column], columnWidth);
-                cursors[column] -= built[i].Height + sectionGap;
+                blocks[i].Build(content, x, cursors[column], columnWidth);
+                cursors[column] -= blocks[i].Measure() + sectionGap;
             }
 
-            fractalSection = built[0];
-            paletteSection = built[1];
-            coloringSection = built[2];
-            resolutionSection = built[3];
-            interfaceSection = built[4];
+            RefreshSelection();
+        }
+
+        protected override void OnTick()
+        {
+            // Another fractal has other parameters, and a new palette is a new row: both change
+            // the shape of the panel, which is a rebuild rather than an update.
+            if (!ReferenceEquals(Services.Session.Definition, builtFor) ||
+                Services.Palettes.All.Count != builtPaletteCount)
+            {
+                NeedsRebuild = true;
+                return;
+            }
 
             RefreshSelection();
         }
@@ -187,57 +174,15 @@ namespace FractalVisio.UI
             return best;
         }
 
-        private readonly struct SectionSpec
+        private static string[] Names<T>(IReadOnlyList<T> items, Func<T, string> name)
         {
-            public SectionSpec(string label, IReadOnlyList<string> options, System.Action<int> onSelect)
+            var names = new string[items.Count];
+            for (var i = 0; i < items.Count; i++)
             {
-                Label = label;
-                Options = options;
-                OnSelect = onSelect;
+                names[i] = name(items[i]);
             }
 
-            public string Label { get; }
-            public IReadOnlyList<string> Options { get; }
-            public System.Action<int> OnSelect { get; }
-        }
-
-        protected override void OnTick()
-        {
-            RefreshSelection();
-        }
-
-        /// <summary>
-        /// Wrap the panel content in a scroll view. The viewport is the glass panel's own content
-        /// rectangle, which is already inside its rounded mask - so the list is clipped by the same
-        /// shape that draws the panel, with no second mask to keep in sync.
-        /// </summary>
-        private RectTransform BuildScroll(float contentHeight, float viewportHeight)
-        {
-            var content = UiFactory.CreateRect("ScrollContent", Panel.Content);
-            content.anchorMin = new Vector2(0f, 1f);
-            content.anchorMax = new Vector2(1f, 1f);
-            content.pivot = new Vector2(0.5f, 1f);
-            content.anchoredPosition = Vector2.zero;
-            content.sizeDelta = new Vector2(0f, contentHeight);
-
-            // Something has to catch the drag in the gaps between rows, or a finger that starts
-            // between two options scrolls nothing.
-            var dragArea = UiFactory.CreateImage("DragArea", content, null, new Color(0f, 0f, 0f, 0f));
-            UiFactory.Stretch(dragArea.rectTransform);
-            dragArea.raycastTarget = true;
-
-            var scroll = Panel.Content.gameObject.AddComponent<ScrollRect>();
-            scroll.content = content;
-            scroll.viewport = Panel.Content;
-            scroll.horizontal = false;
-            scroll.vertical = contentHeight > viewportHeight + 1f;
-            scroll.movementType = ScrollRect.MovementType.Elastic;
-            scroll.elasticity = 0.1f;
-            scroll.inertia = true;
-            scroll.decelerationRate = 0.135f;
-            scroll.scrollSensitivity = UiTheme.PanelPx(28f);
-
-            return content;
+            return names;
         }
 
         private void SelectFractal(int index)
@@ -250,7 +195,7 @@ namespace FractalVisio.UI
 
         private void SelectPalette(int index)
         {
-            var palettes = PaletteLibrary.All;
+            var palettes = Services.Palettes.All;
             if (index >= 0 && index < palettes.Count)
             {
                 Services.Session.SetPalette(palettes[index]);
@@ -295,10 +240,15 @@ namespace FractalVisio.UI
             var session = Services.Session;
 
             fractalSection?.SetSelected(fractals.IndexOf(session.Definition));
-            paletteSection?.SetSelected(PaletteLibrary.IndexOf(session.Palette));
+            paletteSection?.SetSelected(Services.Palettes.IndexOf(session.Palette));
             coloringSection?.SetSelected(ColoringIndex(session.Coloring));
             resolutionSection?.SetSelected(NearestIndex(ResolutionScales, session.Quality.RenderScale));
             interfaceSection?.SetSelected(NearestIndex(InterfaceScales, session.Interface.Scale));
+
+            for (var i = 0; i < parameterControls.Count; i++)
+            {
+                parameterControls[i].Refresh(session.Parameters);
+            }
         }
 
         private static int ColoringIndex(in ColoringSettings settings)
@@ -333,13 +283,171 @@ namespace FractalVisio.UI
             return bestDistance <= 0.01f ? best : -1;
         }
 
-        private static void Place(RectTransform rect, float x, float y, float width, float height)
+        /// <summary>One piece of the panel that the column planner can measure and place.</summary>
+        private abstract class Block
         {
-            rect.anchorMin = new Vector2(0f, 1f);
-            rect.anchorMax = new Vector2(0f, 1f);
-            rect.pivot = new Vector2(0f, 1f);
-            rect.anchoredPosition = new Vector2(x, y);
-            rect.sizeDelta = new Vector2(width, height);
+            public abstract float Measure();
+
+            public abstract void Build(RectTransform content, float x, float y, float width);
+        }
+
+        /// <summary>A <see cref="SettingsSection"/>, optionally followed by one action row.</summary>
+        private sealed class OptionsBlock : Block
+        {
+            private readonly string label;
+            private readonly IReadOnlyList<string> options;
+            private readonly Action<int> onSelect;
+            private readonly Action<SettingsSection> onBuilt;
+            private readonly string actionLabel;
+            private readonly Action action;
+
+            public OptionsBlock(
+                string label,
+                IReadOnlyList<string> options,
+                Action<int> onSelect,
+                Action<SettingsSection> onBuilt,
+                string actionLabel = null,
+                Action action = null)
+            {
+                this.label = label;
+                this.options = options;
+                this.onSelect = onSelect;
+                this.onBuilt = onBuilt;
+                this.actionLabel = actionLabel;
+                this.action = action;
+            }
+
+            private bool HasAction => actionLabel != null && action != null;
+
+            public override float Measure()
+            {
+                var height = SettingsSection.MeasureHeight(options.Count);
+                if (HasAction)
+                {
+                    height += UiTheme.PanelPx(UiTheme.RowSpacing) + ActionRow.MeasureHeight();
+                }
+
+                return height;
+            }
+
+            public override void Build(RectTransform content, float x, float y, float width)
+            {
+                var section = SettingsSection.Create(content, label, options, onSelect, x, y, width);
+                onBuilt(section);
+
+                if (HasAction)
+                {
+                    var actionY = y - section.Height - UiTheme.PanelPx(UiTheme.RowSpacing);
+                    ActionRow.Create(content, actionLabel, x, actionY, width, action, ActionStyle.Accent);
+                }
+            }
+        }
+
+        /// <summary>Controls generated from the active fractal's parameter descriptors.</summary>
+        private sealed class ParametersBlock : Block
+        {
+            private readonly SettingsScreen owner;
+            private readonly IReadOnlyList<FractalParameterDescriptor> descriptors;
+
+            public ParametersBlock(SettingsScreen owner, IFractalDefinition definition)
+            {
+                this.owner = owner;
+                descriptors = definition.Parameters;
+            }
+
+            public override float Measure()
+            {
+                var gap = UiTheme.PanelPx(UiTheme.RowSpacing);
+                var height = UiTheme.PanelPx(20f);
+                for (var i = 0; i < descriptors.Count; i++)
+                {
+                    height += gap + MeasureControl(descriptors[i]);
+                }
+
+                return height;
+            }
+
+            public override void Build(RectTransform content, float x, float y, float width)
+            {
+                var gap = UiTheme.PanelPx(UiTheme.RowSpacing);
+                var cursor = y - AddCaption(content, "PARAMETERS", x, y, width);
+                var session = owner.Services.Session;
+
+                for (var i = 0; i < descriptors.Count; i++)
+                {
+                    cursor -= gap;
+                    var descriptor = descriptors[i];
+                    var value = session.Parameters.Get(descriptor.Key, descriptor.Default);
+
+                    if (descriptor.Kind == FractalParameterKind.Bool)
+                    {
+                        var section = SettingsSection.Create(
+                            content, descriptor.Label, BoolNames,
+                            index => session.SetParameter(descriptor.Key, index),
+                            x, cursor, width);
+                        owner.parameterControls.Add(new ParameterControl(descriptor.Key, section));
+                    }
+                    else
+                    {
+                        var slider = SliderRow.Create(
+                            content, descriptor.Label, descriptor.Minimum, descriptor.Maximum, value,
+                            x, cursor, width,
+                            onChanged: null,
+                            // Applied on release: every parameter change re-renders the fractal
+                            // from scratch, which mid-drag would only ever show coarse passes.
+                            onCommitted: committed => session.SetParameter(descriptor.Key, committed),
+                            logarithmic: descriptor.Logarithmic,
+                            integer: descriptor.Kind == FractalParameterKind.Int);
+                        owner.parameterControls.Add(new ParameterControl(descriptor.Key, slider));
+                    }
+
+                    cursor -= MeasureControl(descriptor);
+                }
+            }
+
+            private static float MeasureControl(in FractalParameterDescriptor descriptor)
+            {
+                return descriptor.Kind == FractalParameterKind.Bool
+                    ? SettingsSection.MeasureHeight(BoolNames.Length)
+                    : SliderRow.MeasureHeight();
+            }
+        }
+
+        /// <summary>
+        /// Keeps a generated control in step with the session when the value changes elsewhere - a
+        /// bookmark, a restored session. Only on an actual change: pushing the session value every
+        /// frame would yank a slider back while the finger is still dragging it.
+        /// </summary>
+        private sealed class ParameterControl
+        {
+            private readonly string key;
+            private readonly SliderRow slider;
+            private readonly SettingsSection toggle;
+            private double lastSeen = double.NaN;
+
+            public ParameterControl(string key, SliderRow slider)
+            {
+                this.key = key;
+                this.slider = slider;
+            }
+
+            public ParameterControl(string key, SettingsSection toggle)
+            {
+                this.key = key;
+                this.toggle = toggle;
+            }
+
+            public void Refresh(in FractalParameterSet parameters)
+            {
+                if (!parameters.TryGet(key, out var value) || value.Equals(lastSeen))
+                {
+                    return;
+                }
+
+                lastSeen = value;
+                slider?.SetValue(value);
+                toggle?.SetSelected(value >= 0.5d ? 1 : 0);
+            }
         }
     }
 }

@@ -54,6 +54,7 @@ namespace FractalVisio.Bootstrap
         private FractalSession session;
         private FractalPresenter presenter;
         private AppServices context;
+        private IAppStorage storage;
         private FractalGestureInput gestureInput;
         private UiRouter uiRouter;
         private float lastInteractionTime;
@@ -176,17 +177,25 @@ namespace FractalVisio.Bootstrap
                 FractalCatalog.Find(startupFractalId) ?? FractalCatalog.Default,
                 BuildQuality());
             presenter ??= new FractalPresenter(targetImage, session);
+            storage ??= FileAppStorage.CreateDefault();
             context ??= new AppServices(
                 session,
                 presenter,
                 presenter,
                 FractalCatalog.All,
+                new PaletteCatalog(storage),
+                storage,
                 transform);
 
             if (modules.Count == 0)
             {
-                // Adding a module is one line here plus its file. Order is the tick order.
+                // Adding a module is one line here plus its file. Order is the initialisation and
+                // tick order: the state store restores the session before anything reads it, and
+                // the UI comes after every module whose service its screens offer.
+                modules.Add(new StateStoreModule());
                 modules.Add(new HudModule(scaleValueText, computeBackendText, hudFontSize));
+                modules.Add(new BookmarksModule());
+                modules.Add(new ScreenshotModule());
 
                 uiRouter = new UiRouter();
                 modules.Add(uiRouter);
