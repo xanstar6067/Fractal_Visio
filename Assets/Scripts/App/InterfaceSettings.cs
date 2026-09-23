@@ -47,12 +47,26 @@ namespace FractalVisio.App
         /// </summary>
         public bool ShowDebugInfo;
 
+        /// <summary>Saved image dimensions. Zero in both fields uses the rendered image size.</summary>
+        public int ScreenshotWidth;
+        public int ScreenshotHeight;
+
         public InterfaceSettings Sanitized()
         {
             var result = this;
             result.Scale = Mathf.Clamp(result.Scale <= 0f ? 1f : result.Scale, 0.6f, 2.5f);
             result.InertiaSeconds = Mathf.Clamp(result.InertiaSeconds, 0f, 60f);
             result.Language = result.Language?.Trim() ?? string.Empty;
+            if (result.ScreenshotWidth < 16 || result.ScreenshotHeight < 16)
+            {
+                result.ScreenshotWidth = 0;
+                result.ScreenshotHeight = 0;
+            }
+            else
+            {
+                result.ScreenshotWidth = Mathf.Clamp(result.ScreenshotWidth, 16, 8192);
+                result.ScreenshotHeight = Mathf.Clamp(result.ScreenshotHeight, 16, 8192);
+            }
             return result;
         }
 
@@ -60,6 +74,8 @@ namespace FractalVisio.App
             Mathf.Approximately(Scale, other.Scale) &&
             Mathf.Approximately(InertiaSeconds, other.InertiaSeconds) &&
             string.Equals(Language ?? string.Empty, other.Language ?? string.Empty, StringComparison.Ordinal) &&
-            ShowDebugInfo == other.ShowDebugInfo;
+            ShowDebugInfo == other.ShowDebugInfo &&
+            ScreenshotWidth == other.ScreenshotWidth &&
+            ScreenshotHeight == other.ScreenshotHeight;
     }
 }

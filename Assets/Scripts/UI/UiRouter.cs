@@ -501,8 +501,12 @@ namespace FractalVisio.UI
 
         private void OnScreenshotStateChanged(ScreenshotState state)
         {
-            ShowToast(screenshots.LastMessage, state == ScreenshotState.WaitingForRender ? 30f : ToastSeconds);
+            ShowToast(screenshots.LastMessage, IsScreenshotBusy(state) ? 3600f : ToastSeconds);
         }
+
+        private static bool IsScreenshotBusy(ScreenshotState state) =>
+            state == ScreenshotState.WaitingForRender || state == ScreenshotState.ReadingPixels ||
+            state == ScreenshotState.Encoding || state == ScreenshotState.AddingToGallery;
 
         private void BuildToast()
         {
@@ -546,6 +550,26 @@ namespace FractalVisio.UI
 
         private void TickToast(Texture backdrop)
         {
+            if (screenshots != null && IsScreenshotBusy(screenshots.State))
+            {
+                if (toast != null && !toast.Root.gameObject.activeSelf)
+                {
+                    ShowToast(screenshots.LastMessage, 3600f);
+                }
+
+                if (screenshots.State == ScreenshotState.WaitingForRender && toastText != null)
+                {
+                    toastText.text = services.Strings.Format("screenshot.rendering_progress",
+                        Mathf.RoundToInt(screenshots.RenderProgress * 100f),
+                        Mathf.FloorToInt(screenshots.PhaseSeconds));
+                }
+                else if (toastText != null)
+                {
+                    toastText.text = services.Strings.Format("screenshot.stage_progress",
+                        screenshots.LastMessage, Mathf.FloorToInt(screenshots.PhaseSeconds));
+                }
+            }
+
             if (toast == null || !toast.Root.gameObject.activeSelf)
             {
                 return;

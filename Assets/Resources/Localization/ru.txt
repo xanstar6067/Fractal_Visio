@@ -20,6 +20,10 @@ settings.coloring.smooth = Плавная
 settings.coloring.smooth_log = Плавная лог.
 settings.resolution = РАЗРЕШЕНИЕ
 settings.resolution.auto = Авто
+settings.screenshot_resolution = РАЗРЕШЕНИЕ СНИМКА
+settings.screenshot_native = Как на экране
+settings.screenshot_apply = Применить свой размер
+settings.screenshot_invalid = Неверный размер (до 16 Мп)
 settings.inertia = ИНЕРЦИЯ
 settings.inertia.off = Выкл
 settings.inertia.short = Короткая
@@ -81,8 +85,14 @@ palette_editor.custom_name = Своя {0}
 
 # Сохранение изображения
 screenshot.rendering = Отрисовка…
+screenshot.rendering_progress = Отрисовка: {0}% · {1} с
+screenshot.stage_progress = {0} · {1} с
+screenshot.reading = Чтение изображения…
+screenshot.encoding = Создание PNG…
+screenshot.gallery = Добавление в галерею…
 screenshot.nothing_to_save = Пока нечего сохранять
 screenshot.failed = Не удалось сохранить изображение
+screenshot.size_unsupported = Размер снимка не поддерживается
 screenshot.saved_to_gallery = Сохранено в {0}
 screenshot.saved_to_file = Сохранено: {0}
 

@@ -25,6 +25,10 @@ settings.coloring.smooth = Smooth
 settings.coloring.smooth_log = Smooth log
 settings.resolution = RESOLUTION
 settings.resolution.auto = Auto
+settings.screenshot_resolution = SAVED IMAGE RESOLUTION
+settings.screenshot_native = Screen size
+settings.screenshot_apply = Apply custom size
+settings.screenshot_invalid = Invalid size (up to 16 MP)
 settings.inertia = INERTIA
 settings.inertia.off = Off
 settings.inertia.short = Short
@@ -88,8 +92,14 @@ palette_editor.custom_name = Custom {0}
 
 # Save image
 screenshot.rendering = Rendering…
+screenshot.rendering_progress = Rendering: {0}% · {1}s
+screenshot.stage_progress = {0} · {1}s
+screenshot.reading = Reading image…
+screenshot.encoding = Creating PNG…
+screenshot.gallery = Adding to gallery…
 screenshot.nothing_to_save = Nothing to save yet
 screenshot.failed = Could not save the image
+screenshot.size_unsupported = Image size is not supported
 # {0} is the gallery folder
 screenshot.saved_to_gallery = Saved to {0}
 # {0} is the file path

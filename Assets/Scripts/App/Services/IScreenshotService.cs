@@ -9,6 +9,10 @@ namespace FractalVisio.App
         /// <summary>Waiting for the render to finish, so the saved image is the sharp one.</summary>
         WaitingForRender,
 
+        ReadingPixels,
+        Encoding,
+        AddingToGallery,
+
         Saved,
         Failed
     }
@@ -20,6 +24,12 @@ namespace FractalVisio.App
 
         /// <summary>Where the last image went, or why it did not, for a confirmation message.</summary>
         string LastMessage { get; }
+
+        /// <summary>Current render completion, meaningful while waiting for a sharp frame.</summary>
+        float RenderProgress { get; }
+
+        /// <summary>Seconds spent in the current capture or save stage.</summary>
+        float PhaseSeconds { get; }
 
         /// <summary>Raised when <see cref="State"/> changes.</summary>
         event Action<ScreenshotState> StateChanged;

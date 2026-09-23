@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 using FractalVisio.App;
 using FractalVisio.Core;
 
@@ -32,12 +33,22 @@ namespace FractalVisio.Modules
         private float requestedAt;
         private int idleFrames;
         private Task<EncodedImage> encoding;
+        private AsyncGPUReadbackRequest readbackRequest;
+        private RenderTexture readbackTarget;
+        private int captureWidth;
+        private int captureHeight;
+        private float renderProgress;
+        private float phaseStartedAt;
 
         public string Id => "screenshot";
 
         public ScreenshotState State { get; private set; }
 
         public string LastMessage { get; private set; } = string.Empty;
+
+        public float RenderProgress => renderProgress;
+
+        public float PhaseSeconds => Time.unscaledTime - phaseStartedAt;
 
         public event Action<ScreenshotState> StateChanged;
 
@@ -49,13 +60,16 @@ namespace FractalVisio.Modules
 
         public void Request()
         {
-            if (services == null || State == ScreenshotState.WaitingForRender || encoding != null)
+            if (services == null || State == ScreenshotState.WaitingForRender ||
+                State == ScreenshotState.ReadingPixels || State == ScreenshotState.Encoding ||
+                State == ScreenshotState.AddingToGallery || encoding != null)
             {
                 return;
             }
 
             requestedAt = Time.unscaledTime;
             idleFrames = 0;
+            renderProgress = 0f;
             SetState(ScreenshotState.WaitingForRender, services.Strings.Get("screenshot.rendering"));
         }
 
@@ -76,12 +90,23 @@ namespace FractalVisio.Modules
                 return;
             }
 
+            if (State == ScreenshotState.ReadingPixels)
+            {
+                if (readbackRequest.done)
+                {
+                    FinishReadback();
+                }
+
+                return;
+            }
+
             if (State != ScreenshotState.WaitingForRender)
             {
                 return;
             }
 
             var status = services.Render.Status;
+            renderProgress = status.IsBusy ? Mathf.Clamp01(status.Progress) : 1f;
             idleFrames = status.IsBusy || status.Interacting ? 0 : idleFrames + 1;
             if (idleFrames < IdleFramesRequired && Time.unscaledTime - requestedAt < RenderTimeoutSeconds)
             {
@@ -93,11 +118,19 @@ namespace FractalVisio.Modules
 
         public void Shutdown()
         {
+            if (readbackTarget != null)
+            {
+                readbackRequest.WaitForCompletion();
+                RenderTexture.ReleaseTemporary(readbackTarget);
+                readbackTarget = null;
+            }
+
             services = null;
         }
 
         private void Capture()
         {
+            Debug.Log($"Screenshot waited {Time.unscaledTime - requestedAt:F2}s for the render.");
             var source = services.Backdrop?.Texture;
             if (source == null)
             {
@@ -106,37 +139,116 @@ namespace FractalVisio.Modules
             }
 
             var uv = services.Backdrop.UvRect;
-            var width = Mathf.Clamp(Mathf.RoundToInt(source.width * uv.width), 16, 8192);
-            var height = Mathf.Clamp(Mathf.RoundToInt(source.height * uv.height), 16, 8192);
+            var originalWidth = Mathf.Clamp(Mathf.RoundToInt(source.width * uv.width), 16, 8192);
+            var originalHeight = Mathf.Clamp(Mathf.RoundToInt(source.height * uv.height), 16, 8192);
+            var settings = services.Session.Interface;
+            var width = settings.ScreenshotWidth > 0 ? settings.ScreenshotWidth : originalWidth;
+            var height = settings.ScreenshotHeight > 0 ? settings.ScreenshotHeight : originalHeight;
+            Debug.Log($"Screenshot source {originalWidth}x{originalHeight}, output {width}x{height}.");
+            if (width > SystemInfo.maxTextureSize || height > SystemInfo.maxTextureSize ||
+                (long)width * height > 16000000)
+            {
+                SetState(ScreenshotState.Failed, services.Strings.Get("screenshot.size_unsupported"));
+                return;
+            }
+
+            // A requested aspect may differ from the screen. Crop centrally instead of stretching
+            // circles into ovals, and keep the selected output dimensions exact.
+            var sourceAspect = originalWidth / (float)originalHeight;
+            var targetAspect = width / (float)height;
+            if (targetAspect > sourceAspect)
+            {
+                var croppedHeight = uv.height * sourceAspect / targetAspect;
+                uv.y += (uv.height - croppedHeight) * 0.5f;
+                uv.height = croppedHeight;
+            }
+            else if (targetAspect < sourceAspect)
+            {
+                var croppedWidth = uv.width * targetAspect / sourceAspect;
+                uv.x += (uv.width - croppedWidth) * 0.5f;
+                uv.width = croppedWidth;
+            }
 
             var target = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
-            var previous = RenderTexture.active;
-            byte[] pixels;
             try
             {
                 Graphics.Blit(source, target, uv.size, uv.position);
-                RenderTexture.active = target;
+                captureWidth = width;
+                captureHeight = height;
+                if (SystemInfo.supportsAsyncGPUReadback)
+                {
+                    readbackRequest = AsyncGPUReadback.Request(target, 0, TextureFormat.RGBA32);
+                    readbackTarget = target;
+                    SetState(ScreenshotState.ReadingPixels, services.Strings.Get("screenshot.reading"));
+                    return;
+                }
 
-                var readback = new Texture2D(width, height, TextureFormat.RGBA32, false);
-                readback.ReadPixels(new Rect(0, 0, width, height), 0, 0, false);
-                readback.Apply(false, false);
-                pixels = readback.GetRawTextureData();
-                UnityEngine.Object.Destroy(readback);
+                // Old graphics drivers need a synchronous readback.
+                var previous = RenderTexture.active;
+                try
+                {
+                    RenderTexture.active = target;
+                    var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+                    texture.ReadPixels(new Rect(0, 0, width, height), 0, 0, false);
+                    texture.Apply(false, false);
+                    var pixels = texture.GetRawTextureData().ToArray();
+                    UnityEngine.Object.Destroy(texture);
+                    StartEncoding(pixels, width, height);
+                }
+                finally
+                {
+                    RenderTexture.active = previous;
+                }
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("Capturing the image failed: " + exception.Message);
+                SetState(ScreenshotState.Failed, services.Strings.Get("screenshot.failed"));
             }
             finally
             {
-                RenderTexture.active = previous;
+                if (readbackTarget != target)
+                {
+                    RenderTexture.ReleaseTemporary(target);
+                }
+            }
+        }
+
+        private void FinishReadback()
+        {
+            Debug.Log($"Screenshot GPU readback took {PhaseSeconds:F2}s.");
+            var target = readbackTarget;
+            readbackTarget = null;
+            try
+            {
+                if (readbackRequest.hasError)
+                {
+                    SetState(ScreenshotState.Failed, services.Strings.Get("screenshot.failed"));
+                    return;
+                }
+
+                StartEncoding(readbackRequest.GetData<byte>().ToArray(), captureWidth, captureHeight);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogWarning("Reading image pixels failed: " + exception.Message);
+                SetState(ScreenshotState.Failed, services.Strings.Get("screenshot.failed"));
+            }
+            finally
+            {
                 RenderTexture.ReleaseTemporary(target);
             }
+        }
 
-            var fileName = "FractalVisio_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".png";
+        private void StartEncoding(byte[] pixels, int width, int height)
+        {
+            var fileName = "FractalVisio_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".png";
             var directory = services.Storage?.ExportDirectory ?? Application.persistentDataPath;
             var format = QualitySettings.activeColorSpace == ColorSpace.Linear
                 ? GraphicsFormat.R8G8B8A8_SRGB
                 : GraphicsFormat.R8G8B8A8_UNorm;
 
-            // PNG encoding of a couple of megapixels takes a noticeable fraction of a second; on the
-            // main thread that is a visible freeze right after the user tapped the button.
+            SetState(ScreenshotState.Encoding, services.Strings.Get("screenshot.encoding"));
             encoding = Task.Run(() =>
             {
                 var png = ImageConversion.EncodeArrayToPNG(pixels, format, (uint)width, (uint)height);
@@ -149,6 +261,7 @@ namespace FractalVisio.Modules
 
         private void FinishEncoding()
         {
+            Debug.Log($"Screenshot PNG encoding and file write took {PhaseSeconds:F2}s.");
             var task = encoding;
             encoding = null;
 
@@ -161,9 +274,17 @@ namespace FractalVisio.Modules
             }
 
             var image = task.Result;
+            if (Application.platform == RuntimePlatform.Android)
+            {
+                SetState(ScreenshotState.AddingToGallery, services.Strings.Get("screenshot.gallery"));
+            }
             var message = TryAddToGallery(image)
                 ? services.Strings.Format("screenshot.saved_to_gallery", GalleryFolder)
                 : services.Strings.Format("screenshot.saved_to_file", image.Path);
+            if (Application.platform == RuntimePlatform.Android)
+            {
+                Debug.Log($"Screenshot gallery write took {PhaseSeconds:F2}s.");
+            }
             SetState(ScreenshotState.Saved, message);
         }
 
@@ -222,6 +343,7 @@ namespace FractalVisio.Modules
         private void SetState(ScreenshotState state, string message)
         {
             State = state;
+            phaseStartedAt = Time.unscaledTime;
             LastMessage = message ?? string.Empty;
             StateChanged?.Invoke(state);
         }

@@ -91,6 +91,8 @@ namespace FractalVisio.Modules
                 interfaceSettings.InertiaSeconds = settings.inertiaSeconds;
                 interfaceSettings.Language = settings.language;
                 interfaceSettings.ShowDebugInfo = settings.showDebugInfo;
+                interfaceSettings.ScreenshotWidth = settings.screenshotWidth;
+                interfaceSettings.ScreenshotHeight = settings.screenshotHeight;
                 services.Session.SetInterface(interfaceSettings);
             }
 
@@ -119,7 +121,9 @@ namespace FractalVisio.Modules
                 interfaceScale = session.Interface.Scale,
                 inertiaSeconds = session.Interface.InertiaSeconds,
                 language = session.Interface.Language,
-                showDebugInfo = session.Interface.ShowDebugInfo
+                showDebugInfo = session.Interface.ShowDebugInfo,
+                screenshotWidth = session.Interface.ScreenshotWidth,
+                screenshotHeight = session.Interface.ScreenshotHeight
             }));
         }
 
@@ -138,6 +142,8 @@ namespace FractalVisio.Modules
 
             /// <summary>The debug readout. Files from before it could be hidden read as hidden - the new default.</summary>
             public bool showDebugInfo;
+            public int screenshotWidth;
+            public int screenshotHeight;
         }
     }
 }
