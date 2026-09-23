@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace FractalVisio.App
@@ -24,7 +25,7 @@ namespace FractalVisio.App
         /// about 0.3 (see AppBootstrap.EnsureUi). With that fixed the density figure stands on its
         /// own and this is a taste multiplier on top of it.
         /// </summary>
-        public static InterfaceSettings Default => new InterfaceSettings { Scale = 1f, InertiaSeconds = 5f }.Sanitized();
+        public static InterfaceSettings Default => new InterfaceSettings { Scale = 1f, InertiaSeconds = 5f, Language = string.Empty }.Sanitized();
 
         /// <summary>
         /// How long a flicked view keeps coasting before it stops: the time for its speed to fall to
@@ -32,15 +33,25 @@ namespace FractalVisio.App
         /// </summary>
         public float InertiaSeconds;
 
+        /// <summary>
+        /// Locale code the user picked ("en", "ru"), or empty to follow the device language. A code
+        /// with no locale file - one removed in an update - reads as the fallback, not as an error;
+        /// see <c>Localizer.Resolve</c>.
+        /// </summary>
+        public string Language;
+
         public InterfaceSettings Sanitized()
         {
             var result = this;
             result.Scale = Mathf.Clamp(result.Scale <= 0f ? 1f : result.Scale, 0.6f, 2.5f);
             result.InertiaSeconds = Mathf.Clamp(result.InertiaSeconds, 0f, 60f);
+            result.Language = result.Language?.Trim() ?? string.Empty;
             return result;
         }
 
         public bool Equals(in InterfaceSettings other) =>
-            Mathf.Approximately(Scale, other.Scale) && Mathf.Approximately(InertiaSeconds, other.InertiaSeconds);
+            Mathf.Approximately(Scale, other.Scale) &&
+            Mathf.Approximately(InertiaSeconds, other.InertiaSeconds) &&
+            string.Equals(Language ?? string.Empty, other.Language ?? string.Empty, StringComparison.Ordinal);
     }
 }

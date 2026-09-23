@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using FractalVisio.App;
+using FractalVisio.Core;
 
 namespace FractalVisio.Modules
 {
@@ -55,7 +56,7 @@ namespace FractalVisio.Modules
 
             requestedAt = Time.unscaledTime;
             idleFrames = 0;
-            SetState(ScreenshotState.WaitingForRender, "Rendering…");
+            SetState(ScreenshotState.WaitingForRender, services.Strings.Get("screenshot.rendering"));
         }
 
         public void Tick()
@@ -100,7 +101,7 @@ namespace FractalVisio.Modules
             var source = services.Backdrop?.Texture;
             if (source == null)
             {
-                SetState(ScreenshotState.Failed, "Nothing to save yet");
+                SetState(ScreenshotState.Failed, services.Strings.Get("screenshot.nothing_to_save"));
                 return;
             }
 
@@ -155,14 +156,14 @@ namespace FractalVisio.Modules
             {
                 var reason = task.Exception?.GetBaseException().Message ?? "cancelled";
                 Debug.LogWarning("Saving the image failed: " + reason);
-                SetState(ScreenshotState.Failed, "Could not save the image");
+                SetState(ScreenshotState.Failed, services.Strings.Get("screenshot.failed"));
                 return;
             }
 
             var image = task.Result;
             var message = TryAddToGallery(image)
-                ? "Saved to " + GalleryFolder
-                : "Saved: " + image.Path;
+                ? services.Strings.Format("screenshot.saved_to_gallery", GalleryFolder)
+                : services.Strings.Format("screenshot.saved_to_file", image.Path);
             SetState(ScreenshotState.Saved, message);
         }
 

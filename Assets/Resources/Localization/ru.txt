@@ -1,0 +1,70 @@
+# Русский. Ключи - те же, что в en.txt; перевод - правая часть. Чего здесь нет, показывается
+# по-английски. {0} подставляет код - в переводе его нужно сохранить.
+
+language.name = Русский
+
+# Общее
+common.off = Выкл
+common.on = Вкл
+common.cancel = Отмена
+common.save = Сохранить
+
+# Панель настроек. Подписи разделов - заглавными, как в оригинале.
+settings.title = Настройки
+settings.fractal = ФРАКТАЛ
+settings.parameters = ПАРАМЕТРЫ
+settings.palette = ПАЛИТРА
+settings.palette.edit = Изменить палитру
+settings.coloring = РАСКРАСКА
+settings.coloring.bands = Полосы
+settings.coloring.smooth = Плавная
+settings.coloring.smooth_log = Плавная лог.
+settings.resolution = РАЗРЕШЕНИЕ
+settings.resolution.auto = Авто
+settings.inertia = ИНЕРЦИЯ
+settings.inertia.off = Выкл
+settings.inertia.short = Короткая
+settings.inertia.medium = Средняя
+settings.inertia.long = Долгая
+settings.interface_size = РАЗМЕР ИНТЕРФЕЙСА
+settings.language = ЯЗЫК
+settings.language.system = Как в системе
+
+# Закладки
+bookmarks.title = Закладки
+bookmarks.unavailable = Закладки недоступны
+bookmarks.save_current = Сохранить этот вид
+bookmarks.empty = Пока ничего не сохранено
+bookmarks.saved = СОХРАНЁННЫЕ
+
+# Редактор палитры
+palette_editor.title = Палитра
+palette_editor.hue = Оттенок
+palette_editor.saturation = Насыщенность
+palette_editor.brightness = Яркость
+palette_editor.add_colour = Добавить цвет
+palette_editor.remove_colour = Удалить
+palette_editor.coloring = РАСКРАСКА
+palette_editor.cycle_length = Длина цикла
+palette_editor.offset = Сдвиг
+palette_editor.delete = Удалить палитру
+palette_editor.custom_name = Своя {0}
+
+# Сохранение изображения
+screenshot.rendering = Отрисовка…
+screenshot.nothing_to_save = Пока нечего сохранять
+screenshot.failed = Не удалось сохранить изображение
+screenshot.saved_to_gallery = Сохранено в {0}
+screenshot.saved_to_file = Сохранено: {0}
+
+# Фракталы
+fractal.mandelbrot = Мандельброт
+fractal.burning-ship = Горящий корабль
+fractal.burning-ship.bailout = Радиус выхода
+
+# Встроенные палитры
+palette.aurora = Сияние
+palette.ember = Угли
+palette.ice = Лёд
+palette.mono = Моно
+palette.spectrum = Спектр

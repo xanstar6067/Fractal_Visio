@@ -50,7 +50,7 @@ namespace FractalVisio.Modules
             var bookmark = new Bookmark
             {
                 id = "bm-" + DateTime.UtcNow.Ticks.ToString("x", CultureInfo.InvariantCulture),
-                name = DescribeCurrent(session),
+                name = DescribeCurrent(session, services.Strings),
                 createdTicks = DateTime.UtcNow.Ticks,
                 state = session.Capture()
             };
@@ -75,8 +75,11 @@ namespace FractalVisio.Modules
             }
         }
 
-        /// <summary>"Mandelbrot  x2.4e+09": what it is and how deep, which is what tells two apart.</summary>
-        private static string DescribeCurrent(FractalSession session)
+        /// <summary>
+        /// "Mandelbrot  x2.4e+09": what it is and how deep, which is what tells two apart. The name
+        /// is stored, so it stays in the language it was saved in - it is the user's label now.
+        /// </summary>
+        private static string DescribeCurrent(FractalSession session, IStringCatalog strings)
         {
             var reference = session.Definition.DefaultView.scale.AsDouble;
             var scale = session.View.scale.AsDouble;
@@ -84,7 +87,7 @@ namespace FractalVisio.Modules
             var depth = zoom < 1000d
                 ? zoom.ToString("0.#", CultureInfo.InvariantCulture)
                 : zoom.ToString("0.#e+00", CultureInfo.InvariantCulture);
-            return session.Definition.DisplayName + "  x" + depth;
+            return strings.FractalName(session.Definition) + "  x" + depth;
         }
 
         private void Load()

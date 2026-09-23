@@ -21,7 +21,8 @@ namespace FractalVisio.UI
         /// <summary>Render resolution as a fraction of the screen; 0 means the device profile decides.</summary>
         private static readonly float[] ResolutionScales = { 0f, 0.5f, 0.75f, 1f };
 
-        private static readonly string[] ResolutionNames = { "Auto", "50%", "75%", "100%" };
+        /// <summary>Percentages read the same in every language; only "Auto" is a word.</summary>
+        private static readonly string[] ResolutionPercentNames = { "50%", "75%", "100%" };
 
         /// <summary>
         /// Colouring as three presets rather than two switches. They are not independent in
@@ -35,11 +36,12 @@ namespace FractalVisio.UI
             (true, ColoringMode.Logarithmic)
         };
 
-        private static readonly string[] ColoringNames = { "Bands", "Smooth", "Smooth log" };
+        private static readonly string[] ColoringKeys =
+            { "settings.coloring.bands", "settings.coloring.smooth", "settings.coloring.smooth_log" };
 
         // Centred on 1.0 - the density figure the screen reports - with room either side. Sizes
         // rather than adjectives: "Large" means nothing without knowing the base, XS to XXL is a
-        // ladder, and none of it will need translating when stage 13 arrives.
+        // ladder, and none of it needs translating.
         private static readonly float[] InterfaceScales = { 0.8f, 1f, 1.2f, 1.45f, 1.75f, 2.1f };
 
         private static readonly string[] InterfaceNames = { "XS", "S", "M", "L", "XL", "XXL" };
@@ -47,9 +49,10 @@ namespace FractalVisio.UI
         /// <summary>Seconds a flicked view coasts for; 0 is off. The reference app offers the same ladder.</summary>
         private static readonly float[] InertiaLengths = { 0f, 2f, 5f, 10f };
 
-        private static readonly string[] InertiaNames = { "Off", "Short", "Medium", "Long" };
+        private static readonly string[] InertiaKeys =
+            { "settings.inertia.off", "settings.inertia.short", "settings.inertia.medium", "settings.inertia.long" };
 
-        private static readonly string[] BoolNames = { "Off", "On" };
+        private static readonly string[] BoolKeys = { "common.off", "common.on" };
 
         /// <summary>Most columns to split into. Past three the rows get too narrow to read.</summary>
         private const int MaximumColumns = 3;
@@ -64,6 +67,7 @@ namespace FractalVisio.UI
         private SettingsSection resolutionSection;
         private SettingsSection interfaceSection;
         private SettingsSection inertiaSection;
+        private SettingsSection languageSection;
 
         private IFractalDefinition builtFor;
         private int builtPaletteCount;
@@ -86,9 +90,11 @@ namespace FractalVisio.UI
                 fractals.Add(Services.Catalog[i]);
             }
 
+            var strings = Strings;
             var blocks = new List<Block>
             {
-                new OptionsBlock("FRACTAL", Names(fractals, f => f.DisplayName), SelectFractal, s => fractalSection = s),
+                new OptionsBlock(
+                    strings.Get("settings.fractal"), Names(fractals, f => strings.FractalName(f)), SelectFractal, s => fractalSection = s),
             };
 
             if (session.Definition.Parameters.Count > 0)
@@ -97,12 +103,18 @@ namespace FractalVisio.UI
             }
 
             blocks.Add(new OptionsBlock(
-                "PALETTE", Names(Services.Palettes.All, p => p.DisplayName), SelectPalette, s => paletteSection = s,
-                "Edit palette", openPaletteEditor));
-            blocks.Add(new OptionsBlock("COLOURING", ColoringNames, SelectColoring, s => coloringSection = s));
-            blocks.Add(new OptionsBlock("RESOLUTION", ResolutionNames, SelectResolution, s => resolutionSection = s));
-            blocks.Add(new OptionsBlock("INERTIA", InertiaNames, SelectInertia, s => inertiaSection = s));
-            blocks.Add(new OptionsBlock("INTERFACE SIZE", InterfaceNames, SelectInterfaceScale, s => interfaceSection = s));
+                strings.Get("settings.palette"), Names(Services.Palettes.All, p => strings.PaletteName(p)), SelectPalette,
+                s => paletteSection = s, strings.Get("settings.palette.edit"), openPaletteEditor));
+            blocks.Add(new OptionsBlock(
+                strings.Get("settings.coloring"), Localize(ColoringKeys), SelectColoring, s => coloringSection = s));
+            blocks.Add(new OptionsBlock(
+                strings.Get("settings.resolution"), ResolutionNames(), SelectResolution, s => resolutionSection = s));
+            blocks.Add(new OptionsBlock(
+                strings.Get("settings.inertia"), Localize(InertiaKeys), SelectInertia, s => inertiaSection = s));
+            blocks.Add(new OptionsBlock(
+                strings.Get("settings.interface_size"), InterfaceNames, SelectInterfaceScale, s => interfaceSection = s));
+            blocks.Add(new OptionsBlock(
+                strings.Get("settings.language"), LanguageNames(), SelectLanguage, s => languageSection = s));
 
             var width = ResolvePanelWidth(MaximumColumns, out var columns);
             var padding = UiTheme.PanelInset(width, UiTheme.PanelPadding, 0.06f);
@@ -135,7 +147,7 @@ namespace FractalVisio.UI
 
             var contentHeight = tallest - sectionGap + padding;
             var content = CreateScrollingPanel(parent, "SettingsPanel", width, contentHeight);
-            AddTitle(content, "Settings", padding, width);
+            AddTitle(content, strings.Get("settings.title"), padding, width);
 
             for (var i = 0; i < columns; i++)
             {
@@ -187,6 +199,31 @@ namespace FractalVisio.UI
             for (var i = 0; i < items.Count; i++)
             {
                 names[i] = name(items[i]);
+            }
+
+            return names;
+        }
+
+        private string[] ResolutionNames()
+        {
+            var names = new string[ResolutionPercentNames.Length + 1];
+            names[0] = Strings.Get("settings.resolution.auto");
+            ResolutionPercentNames.CopyTo(names, 1);
+            return names;
+        }
+
+        /// <summary>
+        /// "Device language" first, then every locale by its own name - "Русский", not "Russian":
+        /// the list has to be readable by someone who cannot read the language it is shown in.
+        /// </summary>
+        private string[] LanguageNames()
+        {
+            var languages = Strings.Languages;
+            var names = new string[languages.Count + 1];
+            names[0] = Strings.Get("settings.language.system");
+            for (var i = 0; i < languages.Count; i++)
+            {
+                names[i + 1] = languages[i].NativeName;
             }
 
             return names;
@@ -254,6 +291,39 @@ namespace FractalVisio.UI
             Services.Session.SetInterface(settings);
         }
 
+        private void SelectLanguage(int index)
+        {
+            var languages = Strings.Languages;
+            if (index < 0 || index > languages.Count)
+            {
+                return;
+            }
+
+            // The router sees the new language and rebuilds every screen, this one included.
+            var settings = Services.Session.Interface;
+            settings.Language = index == 0 ? string.Empty : languages[index - 1].Code;
+            Services.Session.SetInterface(settings);
+        }
+
+        private int LanguageIndex(string code)
+        {
+            if (string.IsNullOrEmpty(code))
+            {
+                return 0;
+            }
+
+            var languages = Strings.Languages;
+            for (var i = 0; i < languages.Count; i++)
+            {
+                if (string.Equals(languages[i].Code, code, StringComparison.OrdinalIgnoreCase))
+                {
+                    return i + 1;
+                }
+            }
+
+            return -1;
+        }
+
         private void RefreshSelection()
         {
             var session = Services.Session;
@@ -264,6 +334,7 @@ namespace FractalVisio.UI
             resolutionSection?.SetSelected(NearestIndex(ResolutionScales, session.Quality.RenderScale));
             interfaceSection?.SetSelected(NearestIndex(InterfaceScales, session.Interface.Scale));
             inertiaSection?.SetSelected(NearestIndex(InertiaLengths, session.Interface.InertiaSeconds));
+            languageSection?.SetSelected(LanguageIndex(session.Interface.Language));
 
             for (var i = 0; i < parameterControls.Count; i++)
             {
@@ -367,11 +438,13 @@ namespace FractalVisio.UI
         private sealed class ParametersBlock : Block
         {
             private readonly SettingsScreen owner;
+            private readonly IFractalDefinition definition;
             private readonly IReadOnlyList<FractalParameterDescriptor> descriptors;
 
             public ParametersBlock(SettingsScreen owner, IFractalDefinition definition)
             {
                 this.owner = owner;
+                this.definition = definition;
                 descriptors = definition.Parameters;
             }
 
@@ -390,19 +463,22 @@ namespace FractalVisio.UI
             public override void Build(RectTransform content, float x, float y, float width)
             {
                 var gap = UiTheme.PanelPx(UiTheme.RowSpacing);
-                var cursor = y - AddCaption(content, "PARAMETERS", x, y, width);
+                var strings = owner.Strings;
+                var cursor = y - AddCaption(content, strings.Get("settings.parameters"), x, y, width);
                 var session = owner.Services.Session;
+                var boolNames = owner.Localize(BoolKeys);
 
                 for (var i = 0; i < descriptors.Count; i++)
                 {
                     cursor -= gap;
                     var descriptor = descriptors[i];
                     var value = session.Parameters.Get(descriptor.Key, descriptor.Default);
+                    var label = strings.ParameterLabel(definition, descriptor);
 
                     if (descriptor.Kind == FractalParameterKind.Bool)
                     {
                         var section = SettingsSection.Create(
-                            content, descriptor.Label, BoolNames,
+                            content, label, boolNames,
                             index => session.SetParameter(descriptor.Key, index),
                             x, cursor, width);
                         owner.parameterControls.Add(new ParameterControl(descriptor.Key, section));
@@ -410,7 +486,7 @@ namespace FractalVisio.UI
                     else
                     {
                         var slider = SliderRow.Create(
-                            content, descriptor.Label, descriptor.Minimum, descriptor.Maximum, value,
+                            content, label, descriptor.Minimum, descriptor.Maximum, value,
                             x, cursor, width,
                             onChanged: null,
                             // Applied on release: every parameter change re-renders the fractal
@@ -428,7 +504,7 @@ namespace FractalVisio.UI
             private static float MeasureControl(in FractalParameterDescriptor descriptor)
             {
                 return descriptor.Kind == FractalParameterKind.Bool
-                    ? SettingsSection.MeasureHeight(BoolNames.Length)
+                    ? SettingsSection.MeasureHeight(BoolKeys.Length)
                     : SliderRow.MeasureHeight();
             }
         }

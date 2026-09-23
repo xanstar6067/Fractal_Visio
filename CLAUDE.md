@@ -194,6 +194,15 @@ any feature that is not a bug fix, and update it when a design decision changes.
   height made every control a third of its size in landscape. `UiTheme.UserScale` (the INTERFACE
   SIZE setting) is the escape hatch for a device that misreports its density. Nothing tappable
   goes below `UiTheme.SegmentHeight` (48 dp).
+- **No user-visible string literals in code** (docs\ARCHITECTURE.md §5.4c). Text is looked up by
+  key through `AppServices.Strings` (`Localizer`, an `IStringCatalog`); screens use `Strings.Get` /
+  `Localize` inside `OnBuild` only - a language change makes `UiRouter` rebuild everything, so a
+  string cached across a rebuild stays in the old language. A new key goes into
+  `Assets\Resources\Localization\en.txt` (the fallback, must hold every key) and into every other
+  locale there. Fractal, parameter and built-in palette names use the conventions
+  `fractal.<id>`, `fractal.<id>.<key>`, `palette.<id>` via `FractalName` / `ParameterLabel` /
+  `PaletteName`, falling back to the object's own name - never add a lookup table for them. Numbers
+  stay invariant-culture in every language. The debug HUD is deliberately not translated.
 - Adding a setting is one `SettingsSection.Create` call plus the two lines that read and write it
   on the session. If a setting needs a new control type, add the widget in `UI/Widgets` - do not
   hand-lay-out rows in `SettingsScreen`.

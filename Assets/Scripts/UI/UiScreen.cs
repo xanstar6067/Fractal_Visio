@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using FractalVisio.App;
@@ -18,6 +19,12 @@ namespace FractalVisio.UI
         private float target;
 
         protected AppServices Services { get; private set; }
+
+        /// <summary>
+        /// Where every word on a screen comes from. Read while building: the router rebuilds all
+        /// screens when the language changes, so nothing here has to watch for it.
+        /// </summary>
+        protected Localizer Strings => Services.Strings;
 
         public GlassPanel Panel { get; protected set; }
 
@@ -129,6 +136,18 @@ namespace FractalVisio.UI
         /// <summary>Called once per frame while visible, after the backdrop is refreshed.</summary>
         protected virtual void OnTick()
         {
+        }
+
+        /// <summary>The strings for <paramref name="keys"/>, in order: an option row's labels.</summary>
+        protected string[] Localize(IReadOnlyList<string> keys)
+        {
+            var result = new string[keys.Count];
+            for (var i = 0; i < result.Length; i++)
+            {
+                result[i] = Strings.Get(keys[i]);
+            }
+
+            return result;
         }
 
         /// <summary>Width of a panel with up to <paramref name="maximumColumns"/> natural columns on this screen.</summary>

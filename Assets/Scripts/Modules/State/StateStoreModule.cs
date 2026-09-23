@@ -89,6 +89,7 @@ namespace FractalVisio.Modules
                 var interfaceSettings = services.Session.Interface;
                 interfaceSettings.Scale = settings.interfaceScale;
                 interfaceSettings.InertiaSeconds = settings.inertiaSeconds;
+                interfaceSettings.Language = settings.language;
                 services.Session.SetInterface(interfaceSettings);
             }
 
@@ -115,7 +116,8 @@ namespace FractalVisio.Modules
             {
                 renderScale = session.Quality.RenderScale,
                 interfaceScale = session.Interface.Scale,
-                inertiaSeconds = session.Interface.InertiaSeconds
+                inertiaSeconds = session.Interface.InertiaSeconds,
+                language = session.Interface.Language
             }));
         }
 
@@ -128,6 +130,9 @@ namespace FractalVisio.Modules
 
             /// <summary>Missing from files written before inertia existed; the initialiser is what they read as.</summary>
             public float inertiaSeconds = 5f;
+
+            /// <summary>Locale code, or empty for the device language - which is also what files from before stage 13 read as.</summary>
+            public string language = string.Empty;
         }
     }
 }

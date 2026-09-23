@@ -1,0 +1,79 @@
+# English - the fallback locale. Every key the code asks for must exist here; any other locale
+# that lacks a key shows this text instead, and development builds list the gaps at start.
+#
+# Format: one "key = value" per line, split at the first "=". Lines starting with # are comments.
+# \n is a line break. {0}, {1} are filled in by the code - keep them in the translation.
+# Adding a language: copy this file to <code>.txt next to it (ru.txt, de.txt) and translate the
+# right-hand sides. It shows up in Settings > LANGUAGE by itself.
+
+language.name = English
+
+# Shared
+common.off = Off
+common.on = On
+common.cancel = Cancel
+common.save = Save
+
+# Settings panel. Section captions are upper case by design.
+settings.title = Settings
+settings.fractal = FRACTAL
+settings.parameters = PARAMETERS
+settings.palette = PALETTE
+settings.palette.edit = Edit palette
+settings.coloring = COLOURING
+settings.coloring.bands = Bands
+settings.coloring.smooth = Smooth
+settings.coloring.smooth_log = Smooth log
+settings.resolution = RESOLUTION
+settings.resolution.auto = Auto
+settings.inertia = INERTIA
+settings.inertia.off = Off
+settings.inertia.short = Short
+settings.inertia.medium = Medium
+settings.inertia.long = Long
+settings.interface_size = INTERFACE SIZE
+settings.language = LANGUAGE
+settings.language.system = Device
+
+# Bookmarks panel
+bookmarks.title = Bookmarks
+bookmarks.unavailable = Bookmarks are not available
+bookmarks.save_current = Save this view
+bookmarks.empty = Nothing saved yet
+bookmarks.saved = SAVED
+
+# Palette editor
+palette_editor.title = Palette
+palette_editor.hue = Hue
+palette_editor.saturation = Saturation
+palette_editor.brightness = Brightness
+palette_editor.add_colour = Add colour
+palette_editor.remove_colour = Remove
+palette_editor.coloring = COLOURING
+palette_editor.cycle_length = Cycle length
+palette_editor.offset = Offset
+palette_editor.delete = Delete palette
+# Name given to a new user palette; {0} is its number.
+palette_editor.custom_name = Custom {0}
+
+# Save image
+screenshot.rendering = Rendering…
+screenshot.nothing_to_save = Nothing to save yet
+screenshot.failed = Could not save the image
+# {0} is the gallery folder
+screenshot.saved_to_gallery = Saved to {0}
+# {0} is the file path
+screenshot.saved_to_file = Saved: {0}
+
+# Fractals: fractal.<id>, and fractal.<id>.<parameter key> for each parameter. Optional - a
+# fractal without an entry shows its own DisplayName and labels.
+fractal.mandelbrot = Mandelbrot
+fractal.burning-ship = Burning Ship
+fractal.burning-ship.bailout = Bailout
+
+# Built-in palettes: palette.<id>. Optional, like fractals. User palettes keep the name they were saved with.
+palette.aurora = Aurora
+palette.ember = Ember
+palette.ice = Ice
+palette.mono = Mono
+palette.spectrum = Spectrum

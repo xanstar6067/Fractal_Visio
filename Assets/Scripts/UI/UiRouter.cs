@@ -42,6 +42,7 @@ namespace FractalVisio.UI
         private int cachedWidth;
         private int cachedHeight;
         private float builtInterfaceScale = 1f;
+        private string builtLanguage;
 
         public string Id => "ui";
 
@@ -84,11 +85,14 @@ namespace FractalVisio.UI
 
             if (Screen.width != cachedWidth ||
                 Screen.height != cachedHeight ||
-                !Mathf.Approximately(services.Session.Interface.Scale, builtInterfaceScale))
+                !Mathf.Approximately(services.Session.Interface.Scale, builtInterfaceScale) ||
+                services.Strings.Language != builtLanguage)
             {
                 // Sizes come from the screen density and the interface setting, and the rounded
                 // corner sprites are generated at a fixed pixel radius - so a rotation, a resize or
-                // a new interface size rebuilds rather than rescales.
+                // a new interface size rebuilds rather than rescales. Text is read from the string
+                // catalog while building, so a new language is a rebuild too: every screen then
+                // picks up the new strings without having to know the language changed.
                 Teardown();
                 Build();
             }
@@ -187,6 +191,7 @@ namespace FractalVisio.UI
             // The interface scale is a session setting; UiTheme is where every size reads it from.
             builtInterfaceScale = services.Session.Interface.Scale;
             UiTheme.UserScale = builtInterfaceScale;
+            builtLanguage = services.Strings.Language;
 
             EnsureEventSystem();
 

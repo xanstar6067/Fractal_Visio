@@ -74,7 +74,7 @@ namespace FractalVisio.UI
                                 padding;
 
             var content = CreateScrollingPanel(parent, "PaletteEditorPanel", width, contentHeight);
-            AddTitle(content, string.IsNullOrEmpty(draftName) ? "Palette" : draftName, padding, width);
+            AddTitle(content, string.IsNullOrEmpty(draftName) ? Strings.Get("palette_editor.title") : draftName, padding, width);
 
             var cursor = -(padding + titleHeight + sectionGap);
 
@@ -89,36 +89,36 @@ namespace FractalVisio.UI
             cursor -= chipHeight + gap;
 
             var stop = stops.Count > 0 ? stops[Mathf.Clamp(selected, 0, stops.Count - 1)] : new DraftStop();
-            hueSlider = SliderRow.Create(content, "Hue", 0d, 1d, stop.Hue, padding, cursor, rowWidth,
+            hueSlider = SliderRow.Create(content, Strings.Get("palette_editor.hue"), 0d, 1d, stop.Hue, padding, cursor, rowWidth,
                 value => EditSelected((s, v) => s.Hue = (float)v, value), null, format: v => Mathf.RoundToInt((float)v * 360f) + "°");
             cursor -= sliderHeight + gap;
-            saturationSlider = SliderRow.Create(content, "Saturation", 0d, 1d, stop.Saturation, padding, cursor, rowWidth,
+            saturationSlider = SliderRow.Create(content, Strings.Get("palette_editor.saturation"), 0d, 1d, stop.Saturation, padding, cursor, rowWidth,
                 value => EditSelected((s, v) => s.Saturation = (float)v, value), null, format: Percent);
             cursor -= sliderHeight + gap;
-            brightnessSlider = SliderRow.Create(content, "Brightness", 0d, 1d, stop.Brightness, padding, cursor, rowWidth,
+            brightnessSlider = SliderRow.Create(content, Strings.Get("palette_editor.brightness"), 0d, 1d, stop.Brightness, padding, cursor, rowWidth,
                 value => EditSelected((s, v) => s.Brightness = (float)v, value), null, format: Percent);
             cursor -= sliderHeight + gap;
 
-            ActionRow.Create(content, "Add colour", padding, cursor, halfWidth, AddStop);
-            ActionRow.Create(content, "Remove", padding + halfWidth + gap, cursor, halfWidth, RemoveStop);
+            ActionRow.Create(content, Strings.Get("palette_editor.add_colour"), padding, cursor, halfWidth, AddStop);
+            ActionRow.Create(content, Strings.Get("palette_editor.remove_colour"), padding + halfWidth + gap, cursor, halfWidth, RemoveStop);
             cursor -= buttonHeight + sectionGap;
 
             var coloring = Services.Session.Coloring;
-            cursor -= AddCaption(content, "COLOURING", padding, cursor, rowWidth) + gap;
-            SliderRow.Create(content, "Cycle length", 4d, 2048d, coloring.CycleLength, padding, cursor, rowWidth,
+            cursor -= AddCaption(content, Strings.Get("palette_editor.coloring"), padding, cursor, rowWidth) + gap;
+            SliderRow.Create(content, Strings.Get("palette_editor.cycle_length"), 4d, 2048d, coloring.CycleLength, padding, cursor, rowWidth,
                 value => EditColoring(c => c.Value.CycleLength = (float)value), null, logarithmic: true, format: v => Mathf.RoundToInt((float)v).ToString());
             cursor -= sliderHeight + gap;
-            SliderRow.Create(content, "Offset", 0d, 1d, coloring.Offset, padding, cursor, rowWidth,
+            SliderRow.Create(content, Strings.Get("palette_editor.offset"), 0d, 1d, coloring.Offset, padding, cursor, rowWidth,
                 value => EditColoring(c => c.Value.Offset = (float)value), null, format: Percent);
             cursor -= sliderHeight + sectionGap;
 
-            ActionRow.Create(content, "Cancel", padding, cursor, halfWidth, Close);
-            ActionRow.Create(content, "Save", padding + halfWidth + gap, cursor, halfWidth, Save, ActionStyle.Accent);
+            ActionRow.Create(content, Strings.Get("common.cancel"), padding, cursor, halfWidth, Close);
+            ActionRow.Create(content, Strings.Get("common.save"), padding + halfWidth + gap, cursor, halfWidth, Save, ActionStyle.Accent);
             cursor -= buttonHeight + gap;
 
             if (editingUserPalette)
             {
-                ActionRow.Create(content, "Delete palette", padding, cursor, rowWidth, DeletePalette, ActionStyle.Danger);
+                ActionRow.Create(content, Strings.Get("palette_editor.delete"), padding, cursor, rowWidth, DeletePalette, ActionStyle.Danger);
             }
 
             RefreshPreview();
@@ -397,7 +397,7 @@ namespace FractalVisio.UI
                 }
             }
 
-            return "Custom " + count;
+            return Strings.Format("palette_editor.custom_name", count);
         }
 
         private static string Percent(double value) => Mathf.RoundToInt((float)value * 100f) + "%";

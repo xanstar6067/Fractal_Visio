@@ -219,6 +219,7 @@ namespace FractalVisio.Bootstrap
                 FractalCatalog.All,
                 new PaletteCatalog(storage),
                 storage,
+                Localizer.LoadFromResources(session),
                 transform);
 
             if (modules.Count == 0)

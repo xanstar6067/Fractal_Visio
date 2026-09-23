@@ -42,25 +42,25 @@ namespace FractalVisio.UI
                                 padding;
 
             var content = CreateScrollingPanel(parent, "BookmarksPanel", width, contentHeight);
-            AddTitle(content, "Bookmarks", padding, width);
+            AddTitle(content, Strings.Get("bookmarks.title"), padding, width);
 
             var cursor = -(padding + titleHeight + UiTheme.PanelPx(UiTheme.SectionSpacing));
             if (bookmarks == null)
             {
-                AddCaption(content, "Bookmarks are not available", padding, cursor, rowWidth);
+                AddCaption(content, Strings.Get("bookmarks.unavailable"), padding, cursor, rowWidth);
                 return;
             }
 
-            ActionRow.Create(content, "Save this view", padding, cursor, rowWidth, () => bookmarks.AddCurrent(), ActionStyle.Accent);
+            ActionRow.Create(content, Strings.Get("bookmarks.save_current"), padding, cursor, rowWidth, () => bookmarks.AddCurrent(), ActionStyle.Accent);
             cursor -= ActionRow.MeasureHeight() + gap;
 
             if (count == 0)
             {
-                AddCaption(content, "Nothing saved yet", padding, cursor - UiTheme.PanelPx(10f), rowWidth);
+                AddCaption(content, Strings.Get("bookmarks.empty"), padding, cursor - UiTheme.PanelPx(10f), rowWidth);
                 return;
             }
 
-            cursor -= AddCaption(content, "SAVED", padding, cursor, rowWidth);
+            cursor -= AddCaption(content, Strings.Get("bookmarks.saved"), padding, cursor, rowWidth);
 
             for (var i = 0; i < count; i++)
             {

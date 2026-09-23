@@ -26,9 +26,11 @@ namespace FractalVisio.App
             IReadOnlyList<IFractalDefinition> catalog,
             PaletteCatalog palettes,
             IAppStorage storage,
+            Localizer strings,
             Transform uiRoot)
         {
             Session = session;
+            Strings = strings ?? new Localizer(session, null);
             Render = render;
             Backdrop = backdrop;
             Catalog = catalog ?? Array.Empty<IFractalDefinition>();
@@ -54,6 +56,12 @@ namespace FractalVisio.App
         public PaletteCatalog Palettes { get; }
 
         public IAppStorage Storage { get; }
+
+        /// <summary>
+        /// Every user-visible string, in the language the session asks for. Screens and modules
+        /// look text up here by key and never hold a literal; see <see cref="Localizer"/>.
+        /// </summary>
+        public Localizer Strings { get; }
 
         /// <summary>Canvas transform modules and screens parent their own UI under.</summary>
         public Transform UiRoot { get; }
