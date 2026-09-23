@@ -90,6 +90,7 @@ namespace FractalVisio.Modules
                 interfaceSettings.Scale = settings.interfaceScale;
                 interfaceSettings.InertiaSeconds = settings.inertiaSeconds;
                 interfaceSettings.Language = settings.language;
+                interfaceSettings.ShowDebugInfo = settings.showDebugInfo;
                 services.Session.SetInterface(interfaceSettings);
             }
 
@@ -117,7 +118,8 @@ namespace FractalVisio.Modules
                 renderScale = session.Quality.RenderScale,
                 interfaceScale = session.Interface.Scale,
                 inertiaSeconds = session.Interface.InertiaSeconds,
-                language = session.Interface.Language
+                language = session.Interface.Language,
+                showDebugInfo = session.Interface.ShowDebugInfo
             }));
         }
 
@@ -133,6 +135,9 @@ namespace FractalVisio.Modules
 
             /// <summary>Locale code, or empty for the device language - which is also what files from before stage 13 read as.</summary>
             public string language = string.Empty;
+
+            /// <summary>The debug readout. Files from before it could be hidden read as hidden - the new default.</summary>
+            public bool showDebugInfo;
         }
     }
 }

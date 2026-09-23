@@ -87,7 +87,7 @@ namespace FractalVisio.Fractals
 
     /// <summary>
     /// Deep zoom by perturbation. The fold w = (|Re z|, |Im z|) is not complex-analytic, so the
-    /// offset is folded component by component (<see cref="FoldedDelta"/>) and then squared as
+    /// offset is folded component by component (<see cref="Fold.Delta"/>) and then squared as
     /// usual - ported from the WPF engine's <c>DeepZoomPixelReflected</c>. No BLA: its linear part
     /// here is a real 2x2 map rather than a complex number, and the WPF engine needed a separate
     /// table for it. Rebasing alone already takes this to fp64 cost per iteration.
@@ -158,8 +158,8 @@ namespace FractalVisio.Fractals
                 // Folded reference W and folded offset: fold(Z + d) - fold(Z).
                 var wr = System.Math.Abs(zr);
                 var wi = System.Math.Abs(zi);
-                var wdx = FoldedDelta(zr, dx);
-                var wdy = FoldedDelta(zi, dy);
+                var wdx = Fold.Delta(zr, dx);
+                var wdy = Fold.Delta(zi, dy);
 
                 // d <- 2 W d_w + d_w^2 + dc
                 dx = 2d * (wr * wdx - wi * wdy) + wdx * wdx - wdy * wdy + deltaCx;
@@ -196,26 +196,6 @@ namespace FractalVisio.Fractals
             }
 
             return EscapeMath.Interior;
-        }
-
-        /// <summary>
-        /// |Z + d| - |Z| without catastrophic cancellation. While d has not flipped the sign of the
-        /// component (the usual case deep in) this is exactly +-d; on a flip it is the reflected
-        /// expression, and d is then comparable to Z, so the pixel rebases right after.
-        /// </summary>
-        private static double FoldedDelta(double reference, double delta)
-        {
-            if (reference > 0d)
-            {
-                return delta > -reference ? delta : -(delta + 2d * reference);
-            }
-
-            if (reference < 0d)
-            {
-                return delta < -reference ? -delta : delta + 2d * reference;
-            }
-
-            return System.Math.Abs(delta);
         }
     }
 }

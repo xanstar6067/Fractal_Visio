@@ -160,21 +160,16 @@ namespace FractalVisio.UI
         }
 
         /// <summary>
-        /// The glass panel every screen sits in, anchored bottom-right above the toolbar, and a
-        /// scrolling content rectangle inside it of height <paramref name="contentHeight"/>.
+        /// The glass panel every screen sits in, docked beside the toolbar (see
+        /// <see cref="UiTheme.DockPanel"/>), and a scrolling content rectangle inside it of height
+        /// <paramref name="contentHeight"/>.
         /// </summary>
         protected RectTransform CreateScrollingPanel(Transform parent, string name, float width, float contentHeight)
         {
-            var margin = UiTheme.Px(UiTheme.ScreenMargin);
             var height = Mathf.Min(contentHeight, UiTheme.AvailablePanelHeight);
 
             Panel = GlassPanel.Create(name, parent, UiTheme.PanelRadius, UiTheme.PanelTint, UiTheme.PanelBorder);
-            UiFactory.Anchor(
-                Panel.Root,
-                new Vector2(1f, 0f),
-                new Vector2(1f, 0f),
-                new Vector2(-margin, margin * 2f + UiTheme.Px(UiTheme.ToggleSize)),
-                new Vector2(width, height));
+            UiTheme.DockPanel(Panel.Root, width, height);
 
             return BuildScroll(contentHeight, height);
         }
@@ -216,9 +211,18 @@ namespace FractalVisio.UI
         /// rectangle, which is already inside its rounded mask - so the list is clipped by the same
         /// shape that draws the panel, with no second mask to keep in sync.
         /// </summary>
-        private RectTransform BuildScroll(float contentHeight, float viewportHeight)
+        protected RectTransform BuildScroll(float contentHeight, float viewportHeight)
         {
-            var content = UiFactory.CreateRect("ScrollContent", Panel.Content);
+            return BuildScroll(Panel.Content, contentHeight, viewportHeight);
+        }
+
+        /// <summary>
+        /// A vertical scroll view whose viewport is <paramref name="viewport"/>. For a screen with a
+        /// fixed header above its scrolling part - the gallery - rather than one that scrolls whole.
+        /// </summary>
+        protected static RectTransform BuildScroll(RectTransform viewport, float contentHeight, float viewportHeight)
+        {
+            var content = UiFactory.CreateRect("ScrollContent", viewport);
             content.anchorMin = new Vector2(0f, 1f);
             content.anchorMax = new Vector2(1f, 1f);
             content.pivot = new Vector2(0.5f, 1f);
@@ -231,9 +235,9 @@ namespace FractalVisio.UI
             UiFactory.Stretch(dragArea.rectTransform);
             dragArea.raycastTarget = true;
 
-            var scroll = Panel.Content.gameObject.AddComponent<ScrollRect>();
+            var scroll = viewport.gameObject.AddComponent<ScrollRect>();
             scroll.content = content;
-            scroll.viewport = Panel.Content;
+            scroll.viewport = viewport;
             scroll.horizontal = false;
             scroll.vertical = contentHeight > viewportHeight + 1f;
             scroll.movementType = ScrollRect.MovementType.Elastic;

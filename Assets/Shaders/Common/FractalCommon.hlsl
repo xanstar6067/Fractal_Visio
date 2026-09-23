@@ -93,6 +93,24 @@ float FractalSmoothCount(int iteration, float squaredModulus, float bailout)
     return iteration + 1.0 - log2(ratio);
 }
 
+// The same for a map of degree `power` (z^p + c). Mirrors EscapeMath.Smooth(..., power): the
+// logarithm is to base p, or a cubic map shows a step at every iteration boundary.
+float FractalSmoothCountPower(int iteration, float squaredModulus, float bailout, float power)
+{
+    if (squaredModulus <= 1.0 || bailout <= 1.0 || power <= 1.0)
+    {
+        return iteration + 1.0;
+    }
+
+    float ratio = log(squaredModulus) / log(bailout);
+    if (ratio <= 0.0)
+    {
+        return iteration + 1.0;
+    }
+
+    return iteration + 1.0 - log(ratio) / log(power);
+}
+
 // Escape count onto the palette. `_ColorSmooth` drops the fraction rather than the sampler doing
 // it, so the switch stays a recolour on both backends.
 half4 FractalEscapeColor(float escapeCount)

@@ -17,7 +17,9 @@ namespace FractalVisio.Gestures
             bool resetRequested,
             bool touching = false,
             bool hasFling = false,
-            FlingVelocity fling = default)
+            FlingVelocity fling = default,
+            bool tapped = false,
+            Vector2 tapPosition = default)
         {
             IsInteracting = isInteracting;
             Changed = changed;
@@ -31,6 +33,8 @@ namespace FractalVisio.Gestures
             Touching = touching;
             HasFling = hasFling;
             Fling = fling;
+            Tapped = tapped;
+            TapPosition = tapPosition;
         }
 
         /// <summary>
@@ -64,6 +68,16 @@ namespace FractalVisio.Gestures
         public bool HasFling { get; }
 
         public FlingVelocity Fling { get; }
+
+        /// <summary>
+        /// One finger (or the mouse button) went down and came up this frame without ever engaging
+        /// a drag, and quickly: a tap. The picture has not moved; the interface decides what a tap
+        /// means - close a panel, show or hide the controls.
+        /// </summary>
+        public bool Tapped { get; }
+
+        /// <summary>Screen point of the tap, in the same pixels as the touches.</summary>
+        public Vector2 TapPosition { get; }
 
         public bool HasZoom => ZoomRatio > 0f && Mathf.Abs(ZoomRatio - 1f) > 0.0001f;
         public bool HasRotation => Mathf.Abs(RotationDelta) > 0f;
@@ -101,6 +115,15 @@ namespace FractalVisio.Gestures
 
         /// <summary>How much of the end of a gesture its fling velocity is measured over. The reference app's figure.</summary>
         private const float VelocityWindowSeconds = 0.1f;
+
+        /// <summary>A press held longer than this is not a tap, even if it never moved.</summary>
+        private const float TapMaximumSeconds = 0.3f;
+
+        /// <summary>
+        /// Mouse taps are ignored this long after a touch. A phone also reports every touch as a
+        /// simulated mouse click, and one tap must not count twice.
+        /// </summary>
+        private const float MouseAfterTouchSeconds = 0.5f;
 
         private const int SampleCapacity = 32;
 
@@ -140,6 +163,14 @@ namespace FractalVisio.Gestures
         private float pinchTravel;
         private int previousTouchCount;
 
+        // Tap candidates. A touch stays a candidate only while it is the only finger, has not
+        // engaged a drag and has not been down too long.
+        private bool touchTapCandidate;
+        private float touchTapStart;
+        private bool mouseTapCandidate;
+        private float mouseTapStart;
+        private float lastTouchTime = -10f;
+
         public FractalGestureFrame Current { get; private set; }
 
         /// <summary>Dead zone in device pixels. A mouse does not shake, so it barely gets one.</summary>
@@ -150,6 +181,17 @@ namespace FractalVisio.Gestures
         {
             var touchCount = Input.touchCount;
             var fling = default(FractalGestureFrame);
+
+            if (touchCount > 0)
+            {
+                lastTouchTime = Time.unscaledTime;
+            }
+
+            if (touchCount >= 2)
+            {
+                // A second finger makes it a pinch, whatever happens next.
+                touchTapCandidate = false;
+            }
 
             if (touchCount < 2)
             {
@@ -249,6 +291,22 @@ namespace FractalVisio.Gestures
             {
                 dragTravel = Vector2.zero;
                 dragEngaged = false;
+                touchTapCandidate = true;
+                touchTapStart = Time.unscaledTime;
+            }
+
+            if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+            {
+                // Lifted without ever leaving the dead zone, and quickly: a tap, not a drag that
+                // happened to be short. A cancelled touch (a system gesture took it) is neither.
+                var still = !dragEngaged && (dragTravel + touch.deltaPosition).magnitude < DragSlop;
+                var quick = Time.unscaledTime - touchTapStart <= TapMaximumSeconds;
+                var tapped = touchTapCandidate && touch.phase == TouchPhase.Ended && still && quick;
+                touchTapCandidate = false;
+                if (tapped)
+                {
+                    return Tap(touch.position);
+                }
             }
 
             if (!dragEngaged)
@@ -350,6 +408,21 @@ namespace FractalVisio.Gestures
         {
             var position = (Vector2)Input.mousePosition;
             var pressed = Input.GetMouseButton(0);
+            var now = Time.unscaledTime;
+
+            // A click is a tap under the same rules as a finger. Decided before the release below
+            // clears the drag state it depends on.
+            var tapped = false;
+            if (pressed && !mouseWasPressed)
+            {
+                mouseTapCandidate = now - lastTouchTime > MouseAfterTouchSeconds;
+                mouseTapStart = now;
+            }
+            else if (!pressed && mouseWasPressed)
+            {
+                tapped = mouseTapCandidate && !dragEngaged && now - mouseTapStart <= TapMaximumSeconds;
+                mouseTapCandidate = false;
+            }
 
             if (!pressed)
             {
@@ -432,11 +505,17 @@ namespace FractalVisio.Gestures
                 keyRotate,
                 position,
                 reset,
-                touching: pressed);
+                touching: pressed,
+                tapped: tapped,
+                tapPosition: position);
         }
 
         private static FractalGestureFrame Resting() =>
             new(false, false, Vector2.zero, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false, touching: true);
+
+        private static FractalGestureFrame Tap(Vector2 position) =>
+            new(false, false, Vector2.zero, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false,
+                tapped: true, tapPosition: position);
 
         private void Engage(GestureKind kind, Vector2 pivot)
         {

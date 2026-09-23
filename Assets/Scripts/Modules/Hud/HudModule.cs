@@ -11,6 +11,9 @@ namespace FractalVisio.Modules
     /// The debug readout: view coordinates on top, render engine and progress underneath. First
     /// module, and the shape every later one follows - it reads the session and the render status
     /// through the context, and owns nothing but its own UI objects.
+    ///
+    /// Hidden unless <see cref="InterfaceSettings.ShowDebugInfo"/> is on (Settings > DEBUG INFO):
+    /// it is a diagnostic for device tests, not something a viewer needs over the picture.
     /// </summary>
     public sealed class HudModule : IAppModule
     {
@@ -18,6 +21,12 @@ namespace FractalVisio.Modules
 
         /// <summary>Readout type size in dp, before the inspector's percentage.</summary>
         private const float FontSizeDp = 12f;
+
+        /// <summary>
+        /// Top of the readout below the screen's safe area, in dp: clear of the explorer's
+        /// gallery button in the top-left corner, which is 54 dp tall at an 18 dp margin.
+        /// </summary>
+        private const float TopOffsetDp = 84f;
 
         private readonly float fontPercent;
 
@@ -27,6 +36,8 @@ namespace FractalVisio.Modules
         private float nextUpdateTime;
         private float smoothedFrameSeconds = 1f / 60f;
         private float worstFrameSeconds;
+        private bool shown = true;
+        private Rect placedSafeArea;
 
         /// <param name="fontPercent">
         /// Inspector size, as a percentage of the density-derived default. It used to be a raw
@@ -62,7 +73,9 @@ namespace FractalVisio.Modules
 
             Configure(scaleValueText, ScalePosition);
             Configure(computeBackendText, BackendPosition);
+            placedSafeArea = Screen.safeArea;
             nextUpdateTime = 0f;
+            SetShown(context.Session.Interface.ShowDebugInfo);
         }
 
         public void Tick()
@@ -73,9 +86,23 @@ namespace FractalVisio.Modules
             smoothedFrameSeconds += (delta - smoothedFrameSeconds) * 0.1f;
             worstFrameSeconds = Mathf.Max(worstFrameSeconds, delta);
 
-            if (context == null || Time.unscaledTime < nextUpdateTime)
+            if (context == null)
             {
                 return;
+            }
+
+            SetShown(context.Session.Interface.ShowDebugInfo);
+            if (!shown || Time.unscaledTime < nextUpdateTime)
+            {
+                return;
+            }
+
+            if (Screen.safeArea != placedSafeArea)
+            {
+                // Rotated: the cut-out moved, and the readout moves with it.
+                placedSafeArea = Screen.safeArea;
+                Configure(scaleValueText, ScalePosition);
+                Configure(computeBackendText, BackendPosition);
             }
 
             var worstFrameMs = worstFrameSeconds * 1000f;
@@ -89,7 +116,7 @@ namespace FractalVisio.Modules
             if (scaleValueText != null)
             {
                 var scale = view.scale.AsDouble;
-                var reference = context.Session.Definition.DefaultView.scale.AsDouble;
+                var reference = context.Session.DefaultView.scale.AsDouble;
                 var zoom = scale > 0d ? reference / scale : 0d;
                 var rotationDegrees = view.rotation * (180d / Math.PI);
                 rotationDegrees -= Math.Floor(rotationDegrees / 360d) * 360d;
@@ -175,9 +202,35 @@ namespace FractalVisio.Modules
             return canvas != null ? canvas.scaleFactor : 1f;
         }
 
-        private Vector2 ScalePosition => new(ScreenScale.Dp(10f), -ScreenScale.Dp(10f));
+        private void SetShown(bool show)
+        {
+            if (show == shown)
+            {
+                return;
+            }
 
-        private Vector2 BackendPosition => new(ScreenScale.Dp(10f), -ScreenScale.Dp(10f) - 5.6f * FontSize);
+            shown = show;
+            if (scaleValueText != null)
+            {
+                scaleValueText.gameObject.SetActive(show);
+            }
+
+            if (computeBackendText != null)
+            {
+                computeBackendText.gameObject.SetActive(show);
+            }
+
+            // Coming back: fill in at once rather than showing whatever the texts held when hidden.
+            nextUpdateTime = 0f;
+        }
+
+        private static float SafeLeft => Screen.safeArea.xMin;
+
+        private static float SafeTop => Screen.height - Screen.safeArea.yMax;
+
+        private Vector2 ScalePosition => new(SafeLeft + ScreenScale.Dp(10f), -(SafeTop + ScreenScale.Dp(TopOffsetDp)));
+
+        private Vector2 BackendPosition => new(SafeLeft + ScreenScale.Dp(10f), -(SafeTop + ScreenScale.Dp(TopOffsetDp)) - 5.6f * FontSize);
 
         private Text CreateText(string objectName, Vector2 anchoredPosition)
         {

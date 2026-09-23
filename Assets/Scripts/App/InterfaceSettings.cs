@@ -40,6 +40,13 @@ namespace FractalVisio.App
         /// </summary>
         public string Language;
 
+        /// <summary>
+        /// Show the debug readout (coordinates, engine, frame pacing, screen metrics). Off by
+        /// default: it is a diagnostic for device tests, not part of the picture, and it sat under
+        /// the controls in the corner the explorer now uses.
+        /// </summary>
+        public bool ShowDebugInfo;
+
         public InterfaceSettings Sanitized()
         {
             var result = this;
@@ -52,6 +59,7 @@ namespace FractalVisio.App
         public bool Equals(in InterfaceSettings other) =>
             Mathf.Approximately(Scale, other.Scale) &&
             Mathf.Approximately(InertiaSeconds, other.InertiaSeconds) &&
-            string.Equals(Language ?? string.Empty, other.Language ?? string.Empty, StringComparison.Ordinal);
+            string.Equals(Language ?? string.Empty, other.Language ?? string.Empty, StringComparison.Ordinal) &&
+            ShowDebugInfo == other.ShowDebugInfo;
     }
 }

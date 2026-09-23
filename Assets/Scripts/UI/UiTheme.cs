@@ -73,13 +73,114 @@ namespace FractalVisio.UI
         public static float PanelScale =>
             Mathf.Min(Scale, Mathf.Max(MinimumScale, AvailablePanelHeight / MinimumPanelHeight));
 
-        /// <summary>Screen height a panel may occupy: everything but the margins and the toggle.</summary>
-        public static float AvailablePanelHeight =>
-            Mathf.Max(64f, Screen.height - (ScreenMargin * 3f + ToggleSize) * Scale);
+        // Layout. The explorer has a gallery button in the top-left corner and a toolbar along the
+        // bottom - down the right edge in landscape - and a panel opens beside the toolbar: a sheet
+        // above it in portrait, a column left of it in landscape. Everything stays inside the
+        // screen's safe area, clear of cut-outs and rounded corners.
 
-        /// <summary>Width a panel may occupy.</summary>
-        public static float AvailablePanelWidth =>
-            Mathf.Max(64f, Screen.width - Px(ScreenMargin) * 2f);
+        /// <summary>
+        /// Landscape puts the toolbar down the right edge instead of along the bottom: a phone on
+        /// its side has little height, and a bottom bar plus a panel above it would leave none.
+        /// </summary>
+        public static bool ToolbarVertical => Screen.width > Screen.height;
+
+        public static float SafeLeft => Mathf.Max(0f, Screen.safeArea.xMin);
+
+        public static float SafeRight => Mathf.Max(0f, Screen.width - Screen.safeArea.xMax);
+
+        public static float SafeBottom => Mathf.Max(0f, Screen.safeArea.yMin);
+
+        public static float SafeTop => Mathf.Max(0f, Screen.height - Screen.safeArea.yMax);
+
+        /// <summary>Height of the top bar - the gallery button - in device pixels. A full touch target.</summary>
+        public static float TopBarHeight => Px(SegmentHeight);
+
+        /// <summary>
+        /// Toolbar depth across its long side: its height along the bottom, its width down the
+        /// side. Only the length along the bar gives way when space runs out; this does not.
+        /// </summary>
+        public static float ToolbarThickness =>
+            (ToolbarVertical ? Px(ToolbarItemWidth) : Px(ToolbarItemHeight)) + Px(ToolbarPadding) * 2f;
+
+        /// <summary>
+        /// Size of one toolbar button for <paramref name="count"/> buttons: full size when they fit,
+        /// shorter along the bar when they do not - a large interface scale on a narrow phone must
+        /// squeeze the bar, not push buttons off the screen.
+        /// </summary>
+        public static Vector2 ToolbarItemSize(int count)
+        {
+            var width = Px(ToolbarItemWidth);
+            var height = Px(ToolbarItemHeight);
+            var margin = Px(ScreenMargin);
+            var padding = Px(ToolbarPadding);
+            count = Mathf.Max(1, count);
+
+            if (ToolbarVertical)
+            {
+                var room = Screen.height - SafeTop - SafeBottom - margin * 3f - TopBarHeight - padding * 2f;
+                height = Mathf.Min(height, Mathf.Max(1f, room) / count);
+            }
+            else
+            {
+                var room = Screen.width - SafeLeft - SafeRight - margin * 2f - padding * 2f;
+                width = Mathf.Min(width, Mathf.Max(1f, room) / count);
+            }
+
+            return new Vector2(width, height);
+        }
+
+        /// <summary>
+        /// Put a panel of the given size beside the toolbar: centred above it in portrait, left of
+        /// it in the bottom-right corner in landscape. Both leave the top bar uncovered.
+        /// </summary>
+        public static void DockPanel(RectTransform panel, float width, float height)
+        {
+            var margin = Px(ScreenMargin);
+            if (ToolbarVertical)
+            {
+                UiFactory.Anchor(
+                    panel,
+                    new Vector2(1f, 0f),
+                    new Vector2(1f, 0f),
+                    new Vector2(-(SafeRight + margin * 2f + ToolbarThickness), SafeBottom + margin),
+                    new Vector2(width, height));
+                return;
+            }
+
+            UiFactory.Anchor(
+                panel,
+                new Vector2(0.5f, 0f),
+                new Vector2(0.5f, 0f),
+                new Vector2((SafeLeft - SafeRight) * 0.5f, SafeBottom + margin * 2f + ToolbarThickness),
+                new Vector2(width, height));
+        }
+
+        /// <summary>
+        /// Screen height a panel may occupy: the safe area less the top bar, the toolbar when it runs
+        /// along the bottom, and the margins between them.
+        /// </summary>
+        public static float AvailablePanelHeight
+        {
+            get
+            {
+                var margin = ScreenMargin * Scale;
+                var usable = Screen.height - SafeTop - SafeBottom;
+                var reserved = TopBarHeight + (ToolbarVertical ? margin * 3f : margin * 4f + ToolbarThickness);
+                return Mathf.Max(64f, usable - reserved);
+            }
+        }
+
+        /// <summary>Width a panel may occupy: the safe area less the margins, and the toolbar when it runs down the side.</summary>
+        public static float AvailablePanelWidth
+        {
+            get
+            {
+                var margin = Px(ScreenMargin);
+                var usable = Screen.width - SafeLeft - SafeRight;
+                var reserved = ToolbarVertical ? margin * 3f + ToolbarThickness : margin * 2f;
+                return Mathf.Max(64f, usable - reserved);
+            }
+        }
 
         /// <summary>Reference pixels (dp) to device pixels, at chrome scale.</summary>
         public static float Px(float referencePixels) => referencePixels * Scale;
@@ -111,6 +212,15 @@ namespace FractalVisio.UI
         public static readonly Color ButtonTint = new(0.035f, 0.045f, 0.075f, 0.7f);
         public static readonly Color ButtonBorder = new(1f, 1f, 1f, 0.2f);
 
+        /// <summary>
+        /// The gallery covers the whole screen, so it is darker than a panel: at panel strength a
+        /// bright band of the picture behind came through every card and label at once.
+        /// </summary>
+        public static readonly Color GalleryTint = new(0.03f, 0.035f, 0.06f, 0.84f);
+
+        /// <summary>A gallery card: recessed into the glass, like an option row.</summary>
+        public static readonly Color CardFill = new(0f, 0f, 0f, 0.3f);
+
         /// <summary>Hairline along the inside of the top edge, the way light catches real glass.</summary>
         public static readonly Color Highlight = new(1f, 1f, 1f, 0.1f);
 
@@ -137,11 +247,41 @@ namespace FractalVisio.UI
         public const float SegmentHeight = 54f;
 
         public const float SegmentRadius = 12f;
+
+        /// <summary>
+        /// Reference size of a chrome button. The toolbar buttons are drawn at their own size below;
+        /// this stays as the yardstick the chrome scale is bounded by (<see cref="ShortEdgeCeiling"/>).
+        /// </summary>
         public const float ToggleSize = 66f;
+
         public const float ScreenMargin = 18f;
+
+        /// <summary>One toolbar button: an icon over a one-word label. Wider than a bare icon button, because of the label.</summary>
+        public const float ToolbarItemWidth = 68f;
+        public const float ToolbarItemHeight = 60f;
+        public const float ToolbarPadding = 4f;
+        public const float ToolbarRadius = 22f;
+        public const int ToolbarLabelFontSize = 11;
+
         public const int TitleFontSize = 22;
         public const int LabelFontSize = 14;
         public const int SegmentFontSize = 18;
+
+        // Gallery
+        /// <summary>Narrowest a gallery card may get before the grid drops a column: two columns on a phone held upright.</summary>
+        public const float CardMinimumWidth = 150f;
+        public const int CardMaximumColumns = 6;
+        public const float CardRadius = 16f;
+        public const float CardSpacing = 12f;
+        public const int CardTitleFontSize = 16;
+        public const int CardDetailFontSize = 12;
+        public const float ChipHeight = 48f;
+
+        /// <summary>The favourite star's gold: warm enough to read as "marked" against any palette.</summary>
+        public static readonly Color Favorite = new(1f, 0.8f, 0.3f, 1f);
+
+        /// <summary>Behind text laid over a picture: dark enough to read white on a white band.</summary>
+        public static readonly Color Scrim = new(0f, 0f, 0f, 0.55f);
 
         public static Font Font => Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
     }

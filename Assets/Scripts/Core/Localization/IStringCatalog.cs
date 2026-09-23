@@ -71,6 +71,21 @@ namespace FractalVisio.Core
             return definition == null ? string.Empty : strings.GetOr("fractal." + definition.Id, definition.DisplayName);
         }
 
+        /// <summary>
+        /// <c>fractal.&lt;id&gt;.about</c>: one or two sentences for the gallery and the fractal panel.
+        /// Empty when there is none - a description is optional, like the translated name.
+        /// </summary>
+        public static string FractalDescription(this IStringCatalog strings, IFractalDefinition definition)
+        {
+            return definition == null ? string.Empty : strings.GetOr("fractal." + definition.Id + ".about", string.Empty);
+        }
+
+        /// <summary><c>section.&lt;id&gt;</c>, else the id itself - visible, so a missing name gets noticed.</summary>
+        public static string SectionName(this IStringCatalog strings, string sectionId)
+        {
+            return string.IsNullOrEmpty(sectionId) ? string.Empty : strings.GetOr("section." + sectionId, sectionId);
+        }
+
         /// <summary><c>fractal.&lt;id&gt;.&lt;key&gt;</c>, else the descriptor's own label.</summary>
         public static string ParameterLabel(
             this IStringCatalog strings, IFractalDefinition definition, in FractalParameterDescriptor descriptor)

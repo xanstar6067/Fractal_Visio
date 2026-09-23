@@ -16,7 +16,6 @@ common.save = Save
 
 # Settings panel. Section captions are upper case by design.
 settings.title = Settings
-settings.fractal = FRACTAL
 settings.parameters = PARAMETERS
 settings.palette = PALETTE
 settings.palette.edit = Edit palette
@@ -34,6 +33,37 @@ settings.inertia.long = Long
 settings.interface_size = INTERFACE SIZE
 settings.language = LANGUAGE
 settings.language.system = Device
+settings.debug_info = DEBUG INFO
+
+# Gallery - the main menu
+gallery.title = Fractals
+gallery.continue = CONTINUE
+# {0} is the fractal's name, {1} how far in it is zoomed
+gallery.continue_detail = {0}   ×{1}
+gallery.filter.all = All
+gallery.filter.favorites = Favourites
+gallery.filter.recent = Recent
+gallery.empty.favorites = Tap the star on a fractal to keep it here
+gallery.empty.recent = Fractals you open will appear here
+gallery.exit_hint = Press back again to leave
+
+# Gallery sections: section.<id>, the ids in FractalCatalog.Sections
+section.mandelbrot-family = Mandelbrot family
+section.julia-family = Julia family
+
+# Explorer toolbar: one short word under each icon
+toolbar.fractal = Fractal
+toolbar.colour = Colour
+toolbar.bookmarks = Bookmarks
+toolbar.snapshot = Image
+toolbar.settings = Settings
+
+# Fractal panel
+fractal_panel.reset_view = Reset view
+fractal_panel.all_fractals = All fractals
+
+# Colour panel
+colour.title = Colour
 
 # Bookmarks panel
 bookmarks.title = Bookmarks
@@ -65,11 +95,21 @@ screenshot.saved_to_gallery = Saved to {0}
 # {0} is the file path
 screenshot.saved_to_file = Saved: {0}
 
-# Fractals: fractal.<id>, and fractal.<id>.<parameter key> for each parameter. Optional - a
-# fractal without an entry shows its own DisplayName and labels.
+# Fractals: fractal.<id>, fractal.<id>.about for the gallery card and the fractal panel, and
+# fractal.<id>.<parameter key> for each parameter. Optional - a fractal without an entry shows
+# its own DisplayName and labels, and no description.
 fractal.mandelbrot = Mandelbrot
+fractal.mandelbrot.about = The classic set z = z² + c. Zoom in as far as you like: the edge never runs out of detail.
 fractal.burning-ship = Burning Ship
+fractal.burning-ship.about = The Mandelbrot iteration with both parts made positive before squaring: a ship with burning masts.
 fractal.burning-ship.bailout = Bailout
+fractal.tricorn = Tricorn
+fractal.tricorn.about = The Mandelbrot iteration with the conjugate, z = conj(z)² + c: three-fold symmetry and bent, tangled filaments.
+fractal.celtic = Celtic Mandelbrot
+fractal.celtic.about = The real part of z² is taken as its absolute value, and the Mandelbrot's bulbs twist into knotwork.
+fractal.multibrot = Multibrot
+fractal.multibrot.about = z = z^p + c for a whole power from 3 to 8: p - 1 bulbs around the centre.
+fractal.multibrot.power = Power
 
 # Built-in palettes: palette.<id>. Optional, like fractals. User palettes keep the name they were saved with.
 palette.aurora = Aurora

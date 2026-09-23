@@ -4,7 +4,7 @@ These instructions are specific to this Windows PC and this Unity project.
 
 ## Machines and fixed paths
 
-Two machines share this project and Unity is installed differently on each. Identify the
+Three machines share this project and Unity is installed differently on each. Identify the
 machine first, then use only that group. Never mix paths between groups, and never delete
 or "fix" the other machine's entries just because they do not resolve here.
 
@@ -26,7 +26,19 @@ Identify by `$env:COMPUTERNAME`, or by which project root exists.
 - Unity CLI: `C:\Users\pro\AppData\Local\Unity\bin\unity.exe`
 - Editor version: `6000.5.10f1`
 
-### Rules for both
+### Notebook - `DESKTOP-GB2JDQQ`, user `Aizen_notebook2`
+
+- Project root: `D:\git\UnityFractalVisio`
+- Unity Editor: `C:\Program Files\Unity\Hub\Editor\6000.6.2f1\Editor\Unity.exe` (Hub install)
+- Unity Hub: `C:\Program Files\Unity Hub\Unity Hub.exe`
+- Unity CLI: `C:\Users\Aizen_notebook2\AppData\Local\Unity\bin\unity.exe` (1.0.0-beta.8)
+- Editor version: `6000.6.2f1` (matches `ProjectVersion.txt` as of 2026-09-23)
+- The editor is not elevated here. This CLI needs `com.unity.pipeline` 0.6.0+ for
+  `unity command <name>`; with the project's 0.5.0-exp.1, use the MCP bridge
+  `unity mcp --project-path D:\git\UnityFractalVisio` (stdio JSON-RPC, `tools/call`) instead.
+  CLAUDE.md has the details.
+
+### Rules for all
 
 - Always invoke Unity CLI by its absolute path. Do not assume `unity` is on `PATH` and do not reinstall it merely because `unity` is not found.
 - The project root is also the current working directory; prefer it over the hard-coded root when passing `--project-path`.

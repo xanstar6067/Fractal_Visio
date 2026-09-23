@@ -81,7 +81,7 @@ namespace FractalVisio.Modules
         /// </summary>
         private static string DescribeCurrent(FractalSession session, IStringCatalog strings)
         {
-            var reference = session.Definition.DefaultView.scale.AsDouble;
+            var reference = session.DefaultView.scale.AsDouble;
             var scale = session.View.scale.AsDouble;
             var zoom = scale > 0d ? reference / scale : 1d;
             var depth = zoom < 1000d

@@ -61,6 +61,12 @@ namespace FractalVisio.Bootstrap
         private readonly ViewInertia inertia = new();
         private ViewState inertiaView;
 
+        /// <summary>
+        /// The press now down started on a control. Its release must not also count as a tap on the
+        /// picture: by the frame the finger lifts, the touch no longer reports as over the control.
+        /// </summary>
+        private bool pressStartedOnUi;
+
         /// <summary>The one place anything outside may read or change what is on screen.</summary>
         public FractalSession Session
         {
@@ -89,7 +95,12 @@ namespace FractalVisio.Bootstrap
                 return;
             }
 
-            var gesture = gestureInput != null ? gestureInput.Current : default;
+            // Only framing of default views and the zoom-out limit read this; a rotation must not
+            // move a view the user made.
+            session.SetDisplayAspect(presenter.DisplayViewport.Aspect);
+
+            var rawGesture = gestureInput != null ? gestureInput.Current : default;
+            var gesture = rawGesture;
 
             // A drag that starts on a panel belongs to the panel. Without this the fractal pans
             // under the interface at the same time.
@@ -97,6 +108,19 @@ namespace FractalVisio.Bootstrap
             if (pointerOverUi)
             {
                 gesture = default;
+                pressStartedOnUi = true;
+            }
+
+            // A tap on the picture itself - not on a control, not the end of a press that began on
+            // one - is the interface's: it closes a panel or shows and hides the controls.
+            if (rawGesture.Tapped && uiRouter != null && !pressStartedOnUi && !uiRouter.IsOverUi(rawGesture.TapPosition))
+            {
+                uiRouter.HandleBackgroundTap();
+            }
+
+            if (!rawGesture.Touching)
+            {
+                pressStartedOnUi = false;
             }
 
             // Catching the picture with a finger stops the coast; so does anything else moving the
@@ -120,7 +144,7 @@ namespace FractalVisio.Bootstrap
                     session.Interface.InertiaSeconds,
                     pinchZoomSpeed,
                     quality.MinimumScale,
-                    quality.MaximumScale);
+                    session.MaximumScale);
             }
             else if (gesture.Changed)
             {
@@ -209,7 +233,8 @@ namespace FractalVisio.Bootstrap
 
             session ??= new FractalSession(
                 FractalCatalog.Find(startupFractalId) ?? FractalCatalog.Default,
-                BuildQuality());
+                BuildQuality(),
+                Screen.width / (double)Mathf.Max(1, Screen.height));
             presenter ??= new FractalPresenter(targetImage, session);
             storage ??= FileAppStorage.CreateDefault();
             context ??= new AppServices(
@@ -217,6 +242,7 @@ namespace FractalVisio.Bootstrap
                 presenter,
                 presenter,
                 FractalCatalog.All,
+                FractalCatalog.Gallery,
                 new PaletteCatalog(storage),
                 storage,
                 Localizer.LoadFromResources(session),
@@ -231,6 +257,8 @@ namespace FractalVisio.Bootstrap
                 modules.Add(new HudModule(scaleValueText, computeBackendText, hudFontSize));
                 modules.Add(new BookmarksModule());
                 modules.Add(new ScreenshotModule());
+                modules.Add(new GalleryPreferencesModule());
+                modules.Add(new ThumbnailModule());
 
                 uiRouter = new UiRouter();
                 modules.Add(uiRouter);
@@ -290,7 +318,7 @@ namespace FractalVisio.Bootstrap
                     pinchZoomSpeed,
                     gesture.RotationDelta,
                     quality.MinimumScale,
-                    quality.MaximumScale);
+                    session.MaximumScale);
             }
             else if (gesture.PanDelta.sqrMagnitude > 0.01f)
             {

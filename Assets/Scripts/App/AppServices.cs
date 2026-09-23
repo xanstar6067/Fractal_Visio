@@ -24,6 +24,7 @@ namespace FractalVisio.App
             IRenderStatusSource render,
             IBackdropSource backdrop,
             IReadOnlyList<IFractalDefinition> catalog,
+            IReadOnlyList<CatalogEntry> gallery,
             PaletteCatalog palettes,
             IAppStorage storage,
             Localizer strings,
@@ -34,6 +35,7 @@ namespace FractalVisio.App
             Render = render;
             Backdrop = backdrop;
             Catalog = catalog ?? Array.Empty<IFractalDefinition>();
+            Gallery = gallery ?? Array.Empty<CatalogEntry>();
             Palettes = palettes;
             Storage = storage;
             UiRoot = uiRoot;
@@ -51,6 +53,12 @@ namespace FractalVisio.App
         /// without referencing the Fractals assembly.
         /// </summary>
         public IReadOnlyList<IFractalDefinition> Catalog { get; }
+
+        /// <summary>
+        /// The same fractals as <see cref="Catalog"/>, as the gallery shows them: each with its
+        /// section and preview framing, in display order.
+        /// </summary>
+        public IReadOnlyList<CatalogEntry> Gallery { get; }
 
         /// <summary>Built-in and user palettes.</summary>
         public PaletteCatalog Palettes { get; }

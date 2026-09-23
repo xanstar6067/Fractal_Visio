@@ -11,7 +11,6 @@ common.save = Сохранить
 
 # Панель настроек. Подписи разделов - заглавными, как в оригинале.
 settings.title = Настройки
-settings.fractal = ФРАКТАЛ
 settings.parameters = ПАРАМЕТРЫ
 settings.palette = ПАЛИТРА
 settings.palette.edit = Изменить палитру
@@ -29,6 +28,36 @@ settings.inertia.long = Долгая
 settings.interface_size = РАЗМЕР ИНТЕРФЕЙСА
 settings.language = ЯЗЫК
 settings.language.system = Как в системе
+settings.debug_info = ОТЛАДОЧНАЯ ИНФОРМАЦИЯ
+
+# Галерея - главное меню
+gallery.title = Фракталы
+gallery.continue = ПРОДОЛЖИТЬ
+gallery.continue_detail = {0}   ×{1}
+gallery.filter.all = Все
+gallery.filter.favorites = Избранное
+gallery.filter.recent = Недавние
+gallery.empty.favorites = Отметьте фрактал звёздочкой - он появится здесь
+gallery.empty.recent = Здесь появятся фракталы, которые вы открывали
+gallery.exit_hint = Нажмите «Назад» ещё раз, чтобы выйти
+
+# Разделы галереи
+section.mandelbrot-family = Семейство Мандельброта
+section.julia-family = Семейство Жюлиа
+
+# Панель инструментов: одно короткое слово под значком
+toolbar.fractal = Фрактал
+toolbar.colour = Цвет
+toolbar.bookmarks = Закладки
+toolbar.snapshot = Снимок
+toolbar.settings = Настройки
+
+# Панель «Фрактал»
+fractal_panel.reset_view = Сбросить вид
+fractal_panel.all_fractals = Все фракталы
+
+# Панель «Цвет»
+colour.title = Цвет
 
 # Закладки
 bookmarks.title = Закладки
@@ -59,8 +88,17 @@ screenshot.saved_to_file = Сохранено: {0}
 
 # Фракталы
 fractal.mandelbrot = Мандельброт
+fractal.mandelbrot.about = Классическое множество z = z² + c. Приближайте сколько угодно: деталей на границе меньше не становится.
 fractal.burning-ship = Горящий корабль
+fractal.burning-ship.about = Мандельброт, где обе части числа перед возведением в квадрат берутся по модулю: корабль с горящими мачтами.
 fractal.burning-ship.bailout = Радиус выхода
+fractal.tricorn = Трикорн
+fractal.tricorn.about = Итерация Мандельброта с сопряжением, z = conj(z)² + c: тройная симметрия и изогнутые, спутанные нити.
+fractal.celtic = Кельтский Мандельброт
+fractal.celtic.about = Вещественная часть z² берётся по модулю, и луковицы Мандельброта заплетаются в кельтский узор.
+fractal.multibrot = Мультиброт
+fractal.multibrot.about = z = z^p + c с целой степенью от 3 до 8: вокруг центра p - 1 луковиц.
+fractal.multibrot.power = Степень
 
 # Встроенные палитры
 palette.aurora = Сияние

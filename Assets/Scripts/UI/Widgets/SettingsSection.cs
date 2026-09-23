@@ -41,6 +41,10 @@ namespace FractalVisio.UI
         /// Build the section into <paramref name="parent"/> with its top-left corner at
         /// (<paramref name="x"/>, <paramref name="y"/>), measured downwards from the parent's top.
         /// </summary>
+        /// <param name="swatches">
+        /// Optional picture per option, drawn as a strip between the name and the marker: a palette
+        /// row shows the palette. Missing or null entries leave that row plain.
+        /// </param>
         public static SettingsSection Create(
             RectTransform parent,
             string label,
@@ -48,7 +52,8 @@ namespace FractalVisio.UI
             Action<int> onSelect,
             float x,
             float y,
-            float width)
+            float width,
+            IReadOnlyList<Texture> swatches = null)
         {
             var labelHeight = UiTheme.PanelPx(20f);
             var rowHeight = UiTheme.PanelPx(UiTheme.SegmentHeight);
@@ -81,12 +86,27 @@ namespace FractalVisio.UI
                 var markerGutter = UiTheme.PanelInset(width, 40f, 0.16f);
                 var markerSize = UiTheme.PanelInset(width, 10f, 0.05f);
 
+                var swatch = swatches != null && i < swatches.Count ? swatches[i] : null;
+                var swatchWidth = swatch != null ? width * 0.36f : 0f;
+
                 var name = UiFactory.CreateText(
                     "Name", background.transform, options[i], UiTheme.SegmentFontSize, UiTheme.Text,
                     TextAnchor.MiddleLeft, fitToRect: true, panelScale: true);
                 UiFactory.Stretch(name.rectTransform);
                 name.rectTransform.offsetMin = new Vector2(textInset, 0f);
-                name.rectTransform.offsetMax = new Vector2(-markerGutter, 0f);
+                name.rectTransform.offsetMax = new Vector2(-(markerGutter + swatchWidth), 0f);
+
+                if (swatch != null)
+                {
+                    var strip = UiFactory.CreateRawImage("Swatch", background.transform);
+                    strip.texture = swatch;
+                    UiFactory.Anchor(
+                        strip.rectTransform,
+                        new Vector2(1f, 0.5f),
+                        new Vector2(1f, 0.5f),
+                        new Vector2(-markerGutter, 0f),
+                        new Vector2(swatchWidth - textInset, rowHeight * 0.34f));
+                }
 
                 // A dot rather than a tick: no glyph to depend on, and it reads at a glance.
                 var marker = UiFactory.CreateImage(

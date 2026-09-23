@@ -24,6 +24,24 @@ namespace FractalVisio.UI
         /// <summary>Camera icon: body with a lens cut out of it.</summary>
         public static Sprite Camera(int size) => BuildIcon(2, size, CameraCoverage);
 
+        /// <summary>The star as an outline: "not a favourite yet".</summary>
+        public static Sprite StarOutline(int size) => BuildIcon(3, size, StarOutlineCoverage);
+
+        /// <summary>Four rounded squares: the gallery.</summary>
+        public static Sprite Grid(int size) => BuildIcon(4, size, GridCoverage);
+
+        /// <summary>Three slider tracks with their knobs: the fractal's parameters.</summary>
+        public static Sprite Sliders(int size) => BuildIcon(5, size, SlidersCoverage);
+
+        /// <summary>A painter's palette with its paint wells: colour.</summary>
+        public static Sprite Palette(int size) => BuildIcon(6, size, PaletteCoverage);
+
+        /// <summary>A cog wheel: settings.</summary>
+        public static Sprite Gear(int size) => BuildIcon(7, size, GearCoverage);
+
+        /// <summary>A right-pointing chevron: "go on".</summary>
+        public static Sprite Chevron(int size) => BuildIcon(8, size, ChevronCoverage);
+
         private static bool StarCoverage(float x, float y)
         {
             // Point in a 10-vertex star polygon centred on (0.5, 0.52), by the even-odd rule.
@@ -62,6 +80,117 @@ namespace FractalVisio.UI
             var lensRing = distance > 0.19f;
             var lensDot = distance < 0.1f;
             return (body && (lensRing || lensDot)) || hump;
+        }
+
+        private static bool StarOutlineCoverage(float x, float y)
+        {
+            // The star minus itself shrunk about its centre: a ring of roughly even width.
+            const float shrink = 0.66f;
+            return StarCoverage(x, y) &&
+                   !StarCoverage(0.5f + (x - 0.5f) / shrink, 0.47f + (y - 0.47f) / shrink);
+        }
+
+        private static bool GridCoverage(float x, float y)
+        {
+            const float half = 0.16f;
+            const float radius = 0.06f;
+            return RoundedBox(x - 0.29f, y - 0.29f, half, half, radius) ||
+                   RoundedBox(x - 0.71f, y - 0.29f, half, half, radius) ||
+                   RoundedBox(x - 0.29f, y - 0.71f, half, half, radius) ||
+                   RoundedBox(x - 0.71f, y - 0.71f, half, half, radius);
+        }
+
+        // Three slider tracks, each with its knob at a different place along it.
+        private static readonly float[] SliderTracks = { 0.25f, 0.5f, 0.75f };
+        private static readonly float[] SliderKnobs = { 0.64f, 0.34f, 0.56f };
+
+        private static bool SlidersCoverage(float x, float y)
+        {
+            for (var i = 0; i < SliderTracks.Length; i++)
+            {
+                if (RoundedBox(x - 0.5f, y - SliderTracks[i], 0.38f, 0.035f, 0.035f))
+                {
+                    return true;
+                }
+
+                var dx = x - SliderKnobs[i];
+                var dy = y - SliderTracks[i];
+                if (dx * dx + dy * dy < 0.095f * 0.095f)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool PaletteCoverage(float x, float y)
+        {
+            var dx = x - 0.5f;
+            var dy = y - 0.5f;
+            if (dx * dx + dy * dy > 0.45f * 0.45f)
+            {
+                return false;
+            }
+
+            // The thumb hole: a bite out of the lower right, as on a real palette.
+            if (Within(x, y, 0.68f, 0.3f, 0.12f))
+            {
+                return false;
+            }
+
+            // Paint wells in an arc across the upper half.
+            return !(Within(x, y, 0.3f, 0.52f, 0.075f) ||
+                     Within(x, y, 0.38f, 0.73f, 0.075f) ||
+                     Within(x, y, 0.6f, 0.76f, 0.075f) ||
+                     Within(x, y, 0.75f, 0.58f, 0.075f));
+        }
+
+        private static bool GearCoverage(float x, float y)
+        {
+            var dx = x - 0.5f;
+            var dy = y - 0.5f;
+            var radius = Mathf.Sqrt(dx * dx + dy * dy);
+            if (radius < 0.14f || radius > 0.47f)
+            {
+                return false;
+            }
+
+            if (radius <= 0.33f)
+            {
+                return true;
+            }
+
+            // Eight teeth: the middle part of each of eight equal sectors, narrowing to the tip.
+            const int teeth = 8;
+            var sector = Mathf.Atan2(dy, dx) / (2f * Mathf.PI) * teeth;
+            var phase = sector - Mathf.Floor(sector);
+            var halfWidth = Mathf.Lerp(0.27f, 0.2f, (radius - 0.33f) / 0.14f);
+            return Mathf.Abs(phase - 0.5f) < halfWidth;
+        }
+
+        private static bool ChevronCoverage(float x, float y)
+        {
+            const float thickness = 0.075f;
+            return SegmentDistance(x, y, 0.38f, 0.18f, 0.66f, 0.5f) < thickness ||
+                   SegmentDistance(x, y, 0.66f, 0.5f, 0.38f, 0.82f) < thickness;
+        }
+
+        private static bool Within(float x, float y, float centerX, float centerY, float radius)
+        {
+            var dx = x - centerX;
+            var dy = y - centerY;
+            return dx * dx + dy * dy < radius * radius;
+        }
+
+        private static float SegmentDistance(float x, float y, float ax, float ay, float bx, float by)
+        {
+            var abx = bx - ax;
+            var aby = by - ay;
+            var t = Mathf.Clamp01(((x - ax) * abx + (y - ay) * aby) / (abx * abx + aby * aby));
+            var px = ax + abx * t - x;
+            var py = ay + aby * t - y;
+            return Mathf.Sqrt(px * px + py * py);
         }
 
         private static bool RoundedBox(float x, float y, float halfWidth, float halfHeight, float radius)

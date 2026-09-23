@@ -69,5 +69,31 @@ namespace FractalVisio.Core
 
             return (float)(iteration + 1 - System.Math.Log(ratio, 2d));
         }
+
+        /// <summary>
+        /// Same for a map of degree <paramref name="power"/> (z^p + c): the count grows by one each
+        /// time log|z| is multiplied by p, so the logarithm is taken to base p. Using base 2 for a
+        /// cubic map leaves a visible step at every iteration boundary.
+        /// </summary>
+        public static float Smooth(int iteration, double squaredModulus, double bailout, double power)
+        {
+            if (!(power > 1d) || power == 2d)
+            {
+                return Smooth(iteration, squaredModulus, bailout);
+            }
+
+            if (!(squaredModulus > 1d) || !(bailout > 1d) || double.IsInfinity(squaredModulus))
+            {
+                return iteration + 1;
+            }
+
+            var ratio = System.Math.Log(squaredModulus) / System.Math.Log(bailout);
+            if (!(ratio > 0d))
+            {
+                return iteration + 1;
+            }
+
+            return (float)(iteration + 1 - System.Math.Log(ratio) / System.Math.Log(power));
+        }
     }
 }

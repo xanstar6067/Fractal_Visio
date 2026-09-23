@@ -85,16 +85,19 @@ namespace FractalVisio.App
         private PaletteData palette;
         private ColoringSettings coloring;
         private InterfaceSettings interfaceSettings;
+        private double displayAspect = 1d;
 
-        public FractalSession(IFractalDefinition definition, in RenderQuality quality)
+        /// <param name="displayAspect">Width over height of the screen, for framing the default view; see <see cref="SetDisplayAspect"/>.</param>
+        public FractalSession(IFractalDefinition definition, in RenderQuality quality, double displayAspect = 1d)
         {
             this.definition = definition ?? throw new ArgumentNullException(nameof(definition));
             this.quality = quality.Sanitized();
+            SetDisplayAspect(displayAspect);
             parameters = FractalParameterSet.Defaults(definition.Parameters);
             palette = PaletteLibrary.Default;
             coloring = ColoringSettings.Default;
             interfaceSettings = InterfaceSettings.Default;
-            view = definition.DefaultView;
+            view = DefaultView;
             ApplyBudget(ref view);
         }
 
@@ -114,6 +117,34 @@ namespace FractalVisio.App
 
         public InterfaceSettings Interface => interfaceSettings;
 
+        /// <summary>
+        /// Where the active fractal starts on this screen: its <see cref="IFractalDefinition.DefaultView"/>,
+        /// widened on a screen held upright. Also the reference "x1" of a zoom readout.
+        /// </summary>
+        public ViewState DefaultView => Fitted(definition.DefaultView);
+
+        /// <summary>
+        /// Furthest out a view may go on this screen: <see cref="RenderQuality.MaximumScale"/> as a
+        /// width when the screen is held upright, like the defaults - or the fitted default view
+        /// itself would be clamped, and the first pinch would jump in. Gestures clamp to this too.
+        /// </summary>
+        public double MaximumScale => displayAspect >= 1d ? quality.MaximumScale : quality.MaximumScale / displayAspect;
+
+        /// <summary>
+        /// Width over height of the screen the picture is shown on. A definition's default view is
+        /// framed as a height, for a screen at least as wide as it is tall; on a phone held upright
+        /// the same height leaves the sides of the set cut off. Defaults are therefore widened until
+        /// that height fits across the width instead. Only defaults: a view the user made, saved or
+        /// restored is never refit, and a new aspect changes nothing until the next reset.
+        /// </summary>
+        public void SetDisplayAspect(double aspect)
+        {
+            if (aspect > 0d && !double.IsNaN(aspect) && !double.IsInfinity(aspect))
+            {
+                displayAspect = aspect;
+            }
+        }
+
         /// <summary>Switch fractal: view and parameters return to that fractal's own defaults.</summary>
         public void SetDefinition(IFractalDefinition value)
         {
@@ -124,7 +155,7 @@ namespace FractalVisio.App
 
             definition = value;
             parameters = FractalParameterSet.Defaults(value.Parameters);
-            view = value.DefaultView;
+            view = DefaultView;
             ApplyBudget(ref view);
             Raise(SessionChange.Definition | SessionChange.Parameters | SessionChange.View);
         }
@@ -239,7 +270,20 @@ namespace FractalVisio.App
 
         public void ResetView()
         {
-            SetView(definition.DefaultView);
+            SetView(DefaultView);
+        }
+
+        private ViewState Fitted(ViewState target)
+        {
+            if (displayAspect >= 1d)
+            {
+                return target;
+            }
+
+            // Scale is the height the view spans; dividing by the aspect makes the width span it.
+            // In decimal, like every other change to a view's scale.
+            target.scale = new HighPrecision(target.scale.AsDecimal / (decimal)displayAspect);
+            return target;
         }
 
         /// <summary>The picture as saved state: fractal, view, parameters, palette and colouring.</summary>
@@ -317,7 +361,7 @@ namespace FractalVisio.App
 
             parameters = nextParameters;
 
-            var nextView = target.DefaultView;
+            var nextView = Fitted(target.DefaultView);
             if (StateCodec.TryParseDecimal(state.centerX, out var x) &&
                 StateCodec.TryParseDecimal(state.centerY, out var y) &&
                 StateCodec.TryParseDecimal(state.scale, out var scale) &&
@@ -353,10 +397,16 @@ namespace FractalVisio.App
             return true;
         }
 
+        /// <summary>
+        /// The iteration budget a view of this scale gets. For pictures drawn beside the session -
+        /// gallery previews - so they use the one budget rule instead of inventing another.
+        /// </summary>
+        public int IterationBudget(double scale) => ResolveIterations(scale);
+
         /// <summary>Clamp the scale and derive the iteration budget: the one definition of both.</summary>
         private void Normalize(ref ViewState target)
         {
-            var scale = Math.Clamp(target.scale.AsDouble, quality.MinimumScale, quality.MaximumScale);
+            var scale = Math.Clamp(target.scale.AsDouble, quality.MinimumScale, MaximumScale);
             if (scale != target.scale.AsDouble)
             {
                 target.scale = HighPrecision.FromDouble(scale);

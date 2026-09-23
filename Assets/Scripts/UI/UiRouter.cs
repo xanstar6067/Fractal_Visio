@@ -4,50 +4,71 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using FractalVisio.App;
+using FractalVisio.Core;
 
 namespace FractalVisio.UI
 {
     /// <summary>
-    /// Owns the interface: the toolbar in the bottom-right corner, the panels it opens, the shared
-    /// backdrop blur and the short confirmation messages. Registered as a module, so the bootstrap
-    /// drives it like any other - and registered <b>after</b> the modules whose services its screens
-    /// use, so those services exist by the time the screens are built.
+    /// Owns the interface and the way around it. Two places: the <b>gallery</b> - the main menu,
+    /// open at start - and the <b>explorer</b>, the picture with its chrome (gallery button, toolbar)
+    /// and one panel at a time beside the toolbar. Registered as a module, so the bootstrap drives
+    /// it like any other, and registered <b>after</b> the modules whose services its screens use.
     ///
-    /// One panel is open at a time: they all sit in the same corner above the toolbar.
+    /// Layers, bottom to top: explorer chrome, gallery, panels, toast. The gallery covers the
+    /// chrome; a panel opened from the gallery (settings) sits above it.
+    ///
+    /// Back (Android's button, Escape on a desktop) walks outwards: a panel, then hidden chrome,
+    /// then the gallery; in the gallery a second press within two seconds leaves the app.
     ///
     /// It also answers <see cref="PointerOverUi"/>, which the input layer needs: without it a drag
     /// on a panel would pan the fractal underneath at the same time.
     /// </summary>
     public sealed class UiRouter : IAppModule
     {
+        private const string RootName = "Ui";
         private const float ToastSeconds = 2.6f;
         private const float ToastFadeSeconds = 0.25f;
+        private const float ExitWindowSeconds = 2f;
+
+        /// <summary>Travel before a press on a control becomes a drag, in dp - the touch slop, as in the gesture layer.</summary>
+        private const float DragThresholdDp = 8f;
 
         private readonly List<UiScreen> screens = new();
-        private readonly List<GlassPanel> toolbar = new();
+        private readonly List<UiScreen> panels = new();
 
         private AppServices services;
         private RectTransform root;
         private BackdropBlur blur;
+        private ExplorerChrome chrome;
+        private GalleryScreen gallery;
+        private FractalScreen fractalPanel;
+        private ColorScreen colorPanel;
         private SettingsScreen settings;
         private BookmarksScreen bookmarks;
         private PaletteEditorScreen paletteEditor;
         private IScreenshotService screenshots;
+        private Image panelShield;
 
         private GlassPanel toast;
         private Text toastText;
         private CanvasGroup toastGroup;
         private float toastUntil;
 
+        /// <summary>Chrome hidden by a tap on the picture, to see it whole.</summary>
+        private bool chromeHidden;
+
+        private float exitArmedUntil;
+
         private int cachedWidth;
         private int cachedHeight;
+        private Rect cachedSafeArea;
         private float builtInterfaceScale = 1f;
         private string builtLanguage;
 
         public string Id => "ui";
 
         /// <summary>
-        /// True while a finger or the cursor is over a panel or a toolbar button. Computed on
+        /// True while a finger or the cursor is over a panel, the gallery or the chrome. Computed on
         /// demand rather than cached: the input layer asks before the router ticks, and a
         /// one-frame-stale answer is exactly the frame a tap lands on.
         /// </summary>
@@ -59,13 +80,24 @@ namespace FractalVisio.UI
             blur = new BackdropBlur();
 
             // Screens are created once and survive rebuilds: a rotation or a new interface size
-            // rebuilds their GameObjects, not their state - the palette being edited stays edited.
-            settings = new SettingsScreen(OpenPaletteEditor);
+            // rebuilds their GameObjects, not their state - the palette being edited stays edited,
+            // the gallery keeps its filter.
+            gallery = new GalleryScreen(() => ToggleExclusive(settings));
+            fractalPanel = new FractalScreen(OpenGallery);
+            colorPanel = new ColorScreen(OpenPaletteEditor);
+            settings = new SettingsScreen();
             bookmarks = new BookmarksScreen();
             paletteEditor = new PaletteEditorScreen();
-            screens.Add(settings);
-            screens.Add(bookmarks);
-            screens.Add(paletteEditor);
+
+            // Build order is draw order: the gallery under the panels, so settings opened from the
+            // gallery appear on top of it.
+            screens.Add(gallery);
+            panels.Add(fractalPanel);
+            panels.Add(colorPanel);
+            panels.Add(bookmarks);
+            panels.Add(settings);
+            panels.Add(paletteEditor);
+            screens.AddRange(panels);
 
             screenshots = services.Get<IScreenshotService>();
             if (screenshots != null)
@@ -74,6 +106,9 @@ namespace FractalVisio.UI
             }
 
             Build();
+
+            // The gallery is the main menu: the app opens on it.
+            gallery.OpenImmediately();
         }
 
         public void Tick()
@@ -85,6 +120,7 @@ namespace FractalVisio.UI
 
             if (Screen.width != cachedWidth ||
                 Screen.height != cachedHeight ||
+                Screen.safeArea != cachedSafeArea ||
                 !Mathf.Approximately(services.Session.Interface.Scale, builtInterfaceScale) ||
                 services.Strings.Language != builtLanguage)
             {
@@ -105,14 +141,18 @@ namespace FractalVisio.UI
                 }
             }
 
-            var anyVisible = false;
-            for (var i = 0; i < screens.Count; i++)
+            if (Input.GetKeyDown(KeyCode.Escape))
             {
-                if (screens[i].IsVisible)
-                {
-                    anyVisible = true;
-                    break;
-                }
+                HandleBack();
+            }
+
+            chrome.SetVisible(!gallery.IsOpen && !chromeHidden);
+            panelShield.gameObject.SetActive(gallery.IsOpen && AnyPanelOpen());
+
+            var anyVisible = chrome.IsVisible;
+            for (var i = 0; i < screens.Count && !anyVisible; i++)
+            {
+                anyVisible = screens[i].IsVisible;
             }
 
             if (anyVisible && services.Backdrop != null)
@@ -122,14 +162,10 @@ namespace FractalVisio.UI
 
             var backdrop = blur.Texture;
             var deltaTime = Time.unscaledDeltaTime;
+            chrome.Tick(deltaTime, backdrop);
             for (var i = 0; i < screens.Count; i++)
             {
                 screens[i].Tick(deltaTime, backdrop);
-            }
-
-            for (var i = 0; i < toolbar.Count; i++)
-            {
-                toolbar[i].SetBackdrop(backdrop);
             }
 
             TickToast(backdrop);
@@ -144,19 +180,132 @@ namespace FractalVisio.UI
 
             Teardown();
             screens.Clear();
+            panels.Clear();
             blur?.Dispose();
             blur = null;
             services = null;
         }
 
-        public void ToggleSettings() => ToggleExclusive(settings);
+        public void OpenGallery()
+        {
+            CloseAllPanels();
+            chromeHidden = false;
+            gallery.Open();
+        }
+
+        /// <summary>
+        /// A tap on the picture, outside every control. It closes an open panel - the usual way to
+        /// dismiss a sheet on a touch screen - and with none open it shows or hides the chrome.
+        /// </summary>
+        public void HandleBackgroundTap()
+        {
+            if (gallery.IsOpen)
+            {
+                return;
+            }
+
+            if (AnyPanelOpen())
+            {
+                CloseAllPanels();
+                return;
+            }
+
+            chromeHidden = !chromeHidden;
+        }
+
+        /// <summary>Whether a screen point is on any visible control. For the bootstrap to tell a tap on the picture from a tap on a button.</summary>
+        public bool IsOverUi(Vector2 screenPoint)
+        {
+            if (chrome != null && chrome.ContainsScreenPoint(screenPoint))
+            {
+                return true;
+            }
+
+            for (var i = 0; i < screens.Count; i++)
+            {
+                if (screens[i].ContainsScreenPoint(screenPoint))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void HandleBack()
+        {
+            if (paletteEditor.IsOpen)
+            {
+                // Closing the editor without saving puts the palette back; the colour panel it
+                // came from is where the user expects to land.
+                paletteEditor.Close();
+                colorPanel.Open();
+                return;
+            }
+
+            if (AnyPanelOpen())
+            {
+                CloseAllPanels();
+                return;
+            }
+
+            if (!gallery.IsOpen)
+            {
+                if (chromeHidden)
+                {
+                    chromeHidden = false;
+                    return;
+                }
+
+                OpenGallery();
+                return;
+            }
+
+            if (Application.platform != RuntimePlatform.Android)
+            {
+                // A desktop has no "leave the app" button to honour: back from the menu is back to the picture.
+                gallery.Close();
+                return;
+            }
+
+            if (Time.unscaledTime < exitArmedUntil)
+            {
+                Application.Quit();
+                return;
+            }
+
+            exitArmedUntil = Time.unscaledTime + ExitWindowSeconds;
+            ShowToast(services.Strings.Get("gallery.exit_hint"), ExitWindowSeconds);
+        }
+
+        private bool AnyPanelOpen()
+        {
+            for (var i = 0; i < panels.Count; i++)
+            {
+                if (panels[i].IsOpen)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void CloseAllPanels()
+        {
+            for (var i = 0; i < panels.Count; i++)
+            {
+                panels[i].Close();
+            }
+        }
 
         private void OpenPaletteEditor()
         {
-            settings.Close();
+            colorPanel.Close();
             paletteEditor.Open();
         }
 
+        /// <summary>Open <paramref name="screen"/> as the one panel, or close it if it is the one open.</summary>
         private void ToggleExclusive(UiScreen screen)
         {
             if (screen == null)
@@ -165,11 +314,11 @@ namespace FractalVisio.UI
             }
 
             var opening = !screen.IsOpen;
-            for (var i = 0; i < screens.Count; i++)
+            for (var i = 0; i < panels.Count; i++)
             {
-                if (screens[i] != screen)
+                if (panels[i] != screen)
                 {
-                    screens[i].Close();
+                    panels[i].Close();
                 }
             }
 
@@ -187,6 +336,7 @@ namespace FractalVisio.UI
         {
             cachedWidth = Screen.width;
             cachedHeight = Screen.height;
+            cachedSafeArea = Screen.safeArea;
 
             // The interface scale is a session setting; UiTheme is where every size reads it from.
             builtInterfaceScale = services.Session.Interface.Scale;
@@ -194,23 +344,87 @@ namespace FractalVisio.UI
             builtLanguage = services.Strings.Language;
 
             EnsureEventSystem();
+            RemoveLeftoverRoots();
 
-            root = UiFactory.CreateRect("Ui", services.UiRoot);
+            root = UiFactory.CreateRect(RootName, services.UiRoot);
             UiFactory.Stretch(root);
             root.SetAsLastSibling();
 
-            BuildToolbar();
-            BuildToast();
+            chrome = new ExplorerChrome();
+            chrome.Build(root, services, BuildToolbarItems(), OpenGallery);
 
-            for (var i = 0; i < screens.Count; i++)
+            BuildScreen(gallery);
+            BuildPanelShield();
+            for (var i = 0; i < panels.Count; i++)
             {
-                var wasOpen = screens[i].IsOpen;
-                screens[i].Build(root, services);
-                if (wasOpen)
-                {
-                    screens[i].OpenImmediately();
-                }
+                BuildScreen(panels[i]);
             }
+
+            BuildToast();
+        }
+
+        private void BuildScreen(UiScreen screen)
+        {
+            var wasOpen = screen.IsOpen;
+            screen.Build(root, services);
+            if (wasOpen)
+            {
+                screen.OpenImmediately();
+            }
+        }
+
+        /// <summary>
+        /// Sibling index of a screen's panel under the root: chrome 0, gallery 1, shield 2, then the
+        /// panels in order. A rebuilt panel is appended and has to be put back in its layer.
+        /// </summary>
+        private int LayerIndex(UiScreen screen)
+        {
+            return screen == gallery ? 1 : 3 + Mathf.Max(0, panels.IndexOf(screen));
+        }
+
+        /// <summary>
+        /// Between the gallery and the panels: a dim, full-screen catch for a tap beside a panel
+        /// opened over the gallery. The explorer does not need one - there a tap on the picture
+        /// closes the panel through <see cref="HandleBackgroundTap"/>, and a drag still moves the
+        /// picture - but the gallery is itself interface, and a tap on it would open a fractal.
+        /// </summary>
+        private void BuildPanelShield()
+        {
+            panelShield = UiFactory.CreateImage("PanelShield", root, null, new Color(0f, 0f, 0f, 0.35f));
+            UiFactory.Stretch(panelShield.rectTransform);
+            panelShield.raycastTarget = true;
+
+            var button = panelShield.gameObject.AddComponent<Button>();
+            button.transition = Selectable.Transition.None;
+            button.onClick.AddListener(CloseAllPanels);
+            panelShield.gameObject.SetActive(false);
+        }
+
+        /// <summary>
+        /// The toolbar, in the order of the question the user is asking: what is this, how does it
+        /// look, where have I been, keep it, and the app itself.
+        /// </summary>
+        private List<ExplorerChrome.Item> BuildToolbarItems()
+        {
+            var items = new List<ExplorerChrome.Item>
+            {
+                new("toolbar.fractal", UiSprites.Sliders, () => ToggleExclusive(fractalPanel), () => fractalPanel.IsOpen),
+                new("toolbar.colour", UiSprites.Palette, () => ToggleExclusive(colorPanel),
+                    () => colorPanel.IsOpen || paletteEditor.IsOpen)
+            };
+
+            if (services.Get<IBookmarkService>() != null)
+            {
+                items.Add(new ExplorerChrome.Item("toolbar.bookmarks", UiSprites.Star, () => ToggleExclusive(bookmarks), () => bookmarks.IsOpen));
+            }
+
+            if (screenshots != null)
+            {
+                items.Add(new ExplorerChrome.Item("toolbar.snapshot", UiSprites.Camera, RequestScreenshot));
+            }
+
+            items.Add(new ExplorerChrome.Item("toolbar.settings", UiSprites.Gear, () => ToggleExclusive(settings), () => settings.IsOpen));
+            return items;
         }
 
         private void RebuildScreen(UiScreen screen)
@@ -218,9 +432,39 @@ namespace FractalVisio.UI
             var wasOpen = screen.IsOpen;
             screen.Dispose();
             screen.Build(root, services);
+
+            // Build appends: put it back at its layer, or a rebuilt gallery would cover the panels.
+            if (screen.Panel != null)
+            {
+                screen.Panel.Root.SetSiblingIndex(Mathf.Min(root.childCount - 1, LayerIndex(screen)));
+            }
+
             if (wasOpen)
             {
                 screen.OpenImmediately();
+            }
+        }
+
+        /// <summary>
+        /// Destroy interface roots this router does not own. A script edited during Play mode
+        /// reloads the domain: every module is created again, while the previous interface - plain
+        /// GameObjects - survives, and the old full-screen gallery then covers the new one.
+        /// </summary>
+        private void RemoveLeftoverRoots()
+        {
+            var parent = services.UiRoot;
+            if (parent == null)
+            {
+                return;
+            }
+
+            for (var i = parent.childCount - 1; i >= 0; i--)
+            {
+                var child = parent.GetChild(i);
+                if (child.name == RootName && child != root)
+                {
+                    UnityEngine.Object.Destroy(child.gameObject);
+                }
             }
         }
 
@@ -231,7 +475,9 @@ namespace FractalVisio.UI
                 screens[i].Dispose();
             }
 
-            toolbar.Clear();
+            chrome?.Dispose();
+            chrome = null;
+            panelShield = null;
             toast = null;
             toastText = null;
             toastGroup = null;
@@ -246,36 +492,10 @@ namespace FractalVisio.UI
             UiSprites.Clear();
         }
 
-        private void BuildToolbar()
-        {
-            toolbar.Clear();
-            var slot = 0;
-
-            AddToolbarButton("SettingsToggle", slot++, BuildMenuIcon, ToggleSettings);
-
-            if (services.Get<IBookmarkService>() != null)
-            {
-                AddToolbarButton("BookmarksToggle", slot++,
-                    (parent, size) => AddIcon(parent, UiSprites.Star(Mathf.RoundToInt(size * 0.5f)), size * 0.5f),
-                    () => ToggleExclusive(bookmarks));
-            }
-
-            if (screenshots != null)
-            {
-                AddToolbarButton("SaveImage", slot,
-                    (parent, size) => AddIcon(parent, UiSprites.Camera(Mathf.RoundToInt(size * 0.52f)), size * 0.52f),
-                    RequestScreenshot);
-            }
-        }
-
         private void RequestScreenshot()
         {
             // The panels are not in the image, but closing them lets the viewer see what is being saved.
-            for (var i = 0; i < screens.Count; i++)
-            {
-                screens[i].Close();
-            }
-
+            CloseAllPanels();
             screenshots.Request();
         }
 
@@ -284,89 +504,20 @@ namespace FractalVisio.UI
             ShowToast(screenshots.LastMessage, state == ScreenshotState.WaitingForRender ? 30f : ToastSeconds);
         }
 
-        /// <summary>A round glass button in the toolbar, <paramref name="slot"/> places left of the corner.</summary>
-        private void AddToolbarButton(string name, int slot, Action<RectTransform, float> buildIcon, Action onClick)
-        {
-            var button = GlassPanel.Create(name, root, 14f, UiTheme.ButtonTint, UiTheme.ButtonBorder);
-
-            var size = UiTheme.Px(UiTheme.ToggleSize);
-            var margin = UiTheme.Px(UiTheme.ScreenMargin);
-            var gap = UiTheme.Px(UiTheme.RowSpacing * 1.5f);
-            UiFactory.Anchor(
-                button.Root,
-                new Vector2(1f, 0f),
-                new Vector2(1f, 0f),
-                new Vector2(-margin - slot * (size + gap), margin),
-                new Vector2(size, size));
-
-            buildIcon(button.Content, size);
-
-            // Invisible hit area on top. Its base alpha is low and the normal tint zeroes it, so the
-            // button is transparent at rest and flashes only while pressed.
-            var hit = UiFactory.CreateImage(
-                "Hit",
-                button.Root,
-                UiSprites.Rounded(Mathf.Max(1, Mathf.RoundToInt(UiTheme.Px(14f)))),
-                new Color(1f, 1f, 1f, 0.12f));
-            UiFactory.Stretch(hit.rectTransform);
-            hit.raycastTarget = true;
-
-            var control = hit.gameObject.AddComponent<Button>();
-            control.targetGraphic = hit;
-            control.transition = Selectable.Transition.ColorTint;
-            control.colors = new ColorBlock
-            {
-                normalColor = new Color(1f, 1f, 1f, 0f),
-                highlightedColor = new Color(1f, 1f, 1f, 0.6f),
-                pressedColor = new Color(1f, 1f, 1f, 1.6f),
-                selectedColor = new Color(1f, 1f, 1f, 0f),
-                disabledColor = new Color(1f, 1f, 1f, 0f),
-                colorMultiplier = 1f,
-                fadeDuration = 0.08f
-            };
-            control.onClick.AddListener(() => onClick());
-
-            toolbar.Add(button);
-        }
-
-        private static void BuildMenuIcon(RectTransform parent, float size)
-        {
-            var barWidth = size * 0.44f;
-            var barHeight = Mathf.Max(2f, UiTheme.Px(2.5f));
-            var barGap = UiTheme.Px(7f);
-            var barRadius = Mathf.Max(1, Mathf.RoundToInt(barHeight * 0.5f));
-
-            for (var i = 0; i < 3; i++)
-            {
-                var bar = UiFactory.CreateImage("Bar" + i, parent, UiSprites.Rounded(barRadius), UiTheme.Text);
-                UiFactory.Anchor(
-                    bar.rectTransform,
-                    new Vector2(0.5f, 0.5f),
-                    new Vector2(0.5f, 0.5f),
-                    new Vector2(0f, (1 - i) * barGap),
-                    new Vector2(barWidth, barHeight));
-            }
-        }
-
-        private static void AddIcon(RectTransform parent, Sprite sprite, float size)
-        {
-            var icon = UiFactory.CreateImage("Icon", parent, null, UiTheme.Text);
-            icon.sprite = sprite;
-            icon.type = Image.Type.Simple;
-            UiFactory.Anchor(icon.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(size, size));
-        }
-
         private void BuildToast()
         {
             toast = GlassPanel.Create("Toast", root, 14f, UiTheme.PanelTint, UiTheme.PanelBorder);
             var margin = UiTheme.Px(UiTheme.ScreenMargin);
             var height = UiTheme.Px(44f);
-            var width = Mathf.Min(UiTheme.Px(360f), Screen.width - margin * 2f);
+            var width = Mathf.Min(UiTheme.Px(360f), Screen.width - UiTheme.SafeLeft - UiTheme.SafeRight - margin * 2f);
+
+            // Above the toolbar when it runs along the bottom; at the bottom when it is on the side.
+            var bottom = UiTheme.SafeBottom + margin + (UiTheme.ToolbarVertical ? 0f : UiTheme.ToolbarThickness + margin);
             UiFactory.Anchor(
                 toast.Root,
                 new Vector2(0.5f, 0f),
                 new Vector2(0.5f, 0f),
-                new Vector2(0f, margin * 2f + UiTheme.Px(UiTheme.ToggleSize)),
+                new Vector2((UiTheme.SafeLeft - UiTheme.SafeRight) * 0.5f, bottom),
                 new Vector2(width, height));
 
             toastText = UiFactory.CreateText(
@@ -417,13 +568,18 @@ namespace FractalVisio.UI
                 canvas.gameObject.AddComponent<GraphicRaycaster>();
             }
 
-            if (UnityEngine.Object.FindAnyObjectByType<EventSystem>() != null)
+            var eventSystem = UnityEngine.Object.FindAnyObjectByType<EventSystem>();
+            if (eventSystem == null)
             {
-                return;
+                var go = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
+                go.transform.SetParent(null, false);
+                eventSystem = go.GetComponent<EventSystem>();
             }
 
-            var go = new GameObject("EventSystem", typeof(EventSystem), typeof(StandaloneInputModule));
-            go.transform.SetParent(null, false);
+            // The default is 10 pixels whatever the screen - about 1 dp on a modern phone, so a
+            // finger's wobble during a tap turned it into a drag and the card in the scrolling
+            // gallery never received its click. The same slop the gesture layer uses, in dp.
+            eventSystem.pixelDragThreshold = Mathf.Max(10, Mathf.RoundToInt(ScreenScale.Dp(DragThresholdDp)));
         }
 
         private bool ComputePointerOverUi()
@@ -448,28 +604,6 @@ namespace FractalVisio.UI
             }
 
             return IsOverUi(Input.mousePosition);
-        }
-
-        private bool IsOverUi(Vector2 screenPoint)
-        {
-            for (var i = 0; i < toolbar.Count; i++)
-            {
-                if (toolbar[i].Root != null &&
-                    RectTransformUtility.RectangleContainsScreenPoint(toolbar[i].Root, screenPoint, null))
-                {
-                    return true;
-                }
-            }
-
-            for (var i = 0; i < screens.Count; i++)
-            {
-                if (screens[i].ContainsScreenPoint(screenPoint))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
     }
 }
