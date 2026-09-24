@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using UnityEngine;
 using FractalVisio.App;
@@ -6,15 +7,25 @@ using FractalVisio.App;
 namespace FractalVisio.UI
 {
     /// <summary>
-    /// Saved pictures: save the current one, tap one to go back to it, remove one with its cross.
-    /// A view of <see cref="IBookmarkService"/>; when the list changes the panel is rebuilt, because
-    /// its height is its content.
+    /// Saved pictures: save the current one, tap one to go back to it, and its "more" button for
+    /// the rest - rename, delete (<see cref="BookmarkActionsScreen"/>). Each row shows the
+    /// bookmark's preview; a preview still being taken appears when it is ready. A view of
+    /// <see cref="IBookmarkService"/>; when the list changes the panel is rebuilt, because its
+    /// height is its content.
     /// </summary>
     public sealed class BookmarksScreen : UiScreen
     {
+        private readonly Action<Bookmark> showActions;
+        private readonly List<(Bookmark Bookmark, ActionRow Row)> rows = new();
         private IBookmarkService bookmarks;
         private int builtVersion;
         private int version;
+
+        /// <param name="showActions">Opens the actions of one bookmark.</param>
+        public BookmarksScreen(Action<Bookmark> showActions)
+        {
+            this.showActions = showActions;
+        }
 
         protected override void OnBuild(Transform parent)
         {
@@ -26,6 +37,7 @@ namespace FractalVisio.UI
             }
 
             builtVersion = version;
+            rows.Clear();
 
             var width = ResolvePanelWidth(1, out _);
             var padding = UiTheme.PanelInset(width, UiTheme.PanelPadding, 0.06f);
@@ -66,7 +78,7 @@ namespace FractalVisio.UI
             {
                 cursor -= gap;
                 var item = bookmarks.Items[i];
-                ActionRow.Create(
+                var row = ActionRow.Create(
                     content,
                     item.name,
                     padding,
@@ -74,7 +86,11 @@ namespace FractalVisio.UI
                     rowWidth,
                     () => bookmarks.Open(item),
                     detail: DescribeDate(item.createdTicks),
-                    onTrailing: () => bookmarks.Remove(item.id));
+                    onTrailing: () => showActions?.Invoke(item),
+                    trailingGlyph: TrailingGlyph.More,
+                    leadingImage: true);
+                row.SetLeading(bookmarks.GetPreview(item));
+                rows.Add((item, row));
                 cursor -= ActionRow.MeasureHeight(true);
             }
         }
@@ -84,6 +100,13 @@ namespace FractalVisio.UI
             if (version != builtVersion)
             {
                 NeedsRebuild = true;
+                return;
+            }
+
+            // A preview taken since the build - the bookmark just saved - shows up in its row.
+            for (var i = 0; i < rows.Count; i++)
+            {
+                rows[i].Row.SetLeading(bookmarks.GetPreview(rows[i].Bookmark));
             }
         }
 
@@ -94,6 +117,7 @@ namespace FractalVisio.UI
                 bookmarks.Changed -= OnChanged;
             }
 
+            rows.Clear();
             base.Dispose();
         }
 
@@ -107,7 +131,8 @@ namespace FractalVisio.UI
             }
         }
 
-        private static string DescribeDate(long ticks)
+        /// <summary>"2026-09-24  18:30" in local time, the same in every language.</summary>
+        internal static string DescribeDate(long ticks)
         {
             if (ticks <= 0)
             {

@@ -28,6 +28,12 @@ namespace FractalVisio.UI
         private const string RootName = "Ui";
         private const float ToastSeconds = 2.6f;
         private const float ToastFadeSeconds = 0.25f;
+
+        /// <summary>How long "Undo" stays on offer: long enough to reach for, short enough not to linger.</summary>
+        private const float UndoSeconds = 6f;
+
+        /// <summary>Share of the toast's width its action word takes.</summary>
+        private const float ToastActionFraction = 0.32f;
         private const float ExitWindowSeconds = 2f;
 
         /// <summary>Travel before a press on a control becomes a drag, in dp - the touch slop, as in the gesture layer.</summary>
@@ -46,13 +52,18 @@ namespace FractalVisio.UI
         private ColorScreen colorPanel;
         private SettingsScreen settings;
         private BookmarksScreen bookmarks;
+        private BookmarkActionsScreen bookmarkActions;
         private PaletteEditorScreen paletteEditor;
         private IScreenshotService screenshots;
+        private IBookmarkService bookmarkService;
         private Image panelShield;
 
         private GlassPanel toast;
         private Text toastText;
         private CanvasGroup toastGroup;
+        private GameObject toastActionObject;
+        private Text toastActionText;
+        private Action toastAction;
         private float toastUntil;
 
         /// <summary>Chrome hidden by a tap on the picture, to see it whole.</summary>
@@ -83,12 +94,14 @@ namespace FractalVisio.UI
             // Screens are created once and survive rebuilds: a rotation or a new interface size
             // rebuilds their GameObjects, not their state - the palette being edited stays edited,
             // the gallery keeps its filter.
-            gallery = new GalleryScreen(() => ToggleExclusive(settings));
-            fractalPanel = new FractalScreen(OpenGallery, OpenPlaneMap);
+            bookmarkService = services.Get<IBookmarkService>();
+            gallery = new GalleryScreen(() => ToggleExclusive(settings), bookmark => ShowBookmarkActions(bookmark, false));
+            fractalPanel = new FractalScreen(OpenGallery, () => OpenExclusive(planeMap));
             planeMap = new ParameterMapScreen();
             colorPanel = new ColorScreen(OpenPaletteEditor);
             settings = new SettingsScreen();
-            bookmarks = new BookmarksScreen();
+            bookmarks = new BookmarksScreen(bookmark => ShowBookmarkActions(bookmark, true));
+            bookmarkActions = new BookmarkActionsScreen(OpenBookmark, ShowUndo);
             paletteEditor = new PaletteEditorScreen();
 
             // Build order is draw order: the gallery under the panels, so settings opened from the
@@ -98,6 +111,7 @@ namespace FractalVisio.UI
             panels.Add(planeMap);
             panels.Add(colorPanel);
             panels.Add(bookmarks);
+            panels.Add(bookmarkActions);
             panels.Add(settings);
             panels.Add(paletteEditor);
             screens.AddRange(panels);
@@ -230,6 +244,14 @@ namespace FractalVisio.UI
                 return true;
             }
 
+            // A toast with an action takes touches; a plain one lets them through to the picture.
+            if (toast != null && toastGroup != null && toastGroup.blocksRaycasts &&
+                toast.Root.gameObject.activeInHierarchy &&
+                RectTransformUtility.RectangleContainsScreenPoint(toast.Root, screenPoint, null))
+            {
+                return true;
+            }
+
             for (var i = 0; i < screens.Count; i++)
             {
                 if (screens[i].ContainsScreenPoint(screenPoint))
@@ -314,12 +336,38 @@ namespace FractalVisio.UI
             paletteEditor.Open();
         }
 
-        /// <summary>The C map as the one panel - from the fractal panel, which it replaces.</summary>
-        private void OpenPlaneMap()
+        /// <summary><paramref name="screen"/> as the one panel, left open if it already is - for a panel that replaces the one it was opened from.</summary>
+        private void OpenExclusive(UiScreen screen)
         {
-            if (!planeMap.IsOpen)
+            if (!screen.IsOpen)
             {
-                ToggleExclusive(planeMap);
+                ToggleExclusive(screen);
+            }
+        }
+
+        /// <summary>
+        /// Rename and delete for one bookmark. From the bookmarks panel the sheet replaces it and
+        /// hands it back afterwards; over the gallery the gallery simply stays underneath.
+        /// </summary>
+        private void ShowBookmarkActions(Bookmark bookmark, bool fromPanel)
+        {
+            bookmarkActions.Show(bookmark, fromPanel ? () => OpenExclusive(bookmarks) : null);
+            OpenExclusive(bookmarkActions);
+        }
+
+        /// <summary>Go to a bookmark with nothing in the way: panels and the gallery close.</summary>
+        private void OpenBookmark(Bookmark bookmark)
+        {
+            if (bookmarkService == null || !bookmarkService.Open(bookmark))
+            {
+                return;
+            }
+
+            CloseAllPanels();
+            chromeHidden = false;
+            if (gallery.IsOpen)
+            {
+                gallery.Close();
             }
         }
 
@@ -433,7 +481,9 @@ namespace FractalVisio.UI
 
             if (services.Get<IBookmarkService>() != null)
             {
-                items.Add(new ExplorerChrome.Item("toolbar.bookmarks", UiSprites.Star, () => ToggleExclusive(bookmarks), () => bookmarks.IsOpen));
+                items.Add(new ExplorerChrome.Item(
+                    "toolbar.bookmarks", UiSprites.Star, () => ToggleExclusive(bookmarks),
+                    () => bookmarks.IsOpen || bookmarkActions.IsOpen));
             }
 
             if (screenshots != null)
@@ -499,6 +549,9 @@ namespace FractalVisio.UI
             toast = null;
             toastText = null;
             toastGroup = null;
+            toastActionObject = null;
+            toastActionText = null;
+            toastAction = null;
 
             if (root != null)
             {
@@ -530,8 +583,8 @@ namespace FractalVisio.UI
         {
             toast = GlassPanel.Create("Toast", root, 14f, UiTheme.PanelTint, UiTheme.PanelBorder);
             var margin = UiTheme.Px(UiTheme.ScreenMargin);
-            var height = UiTheme.Px(44f);
-            var width = Mathf.Min(UiTheme.Px(360f), Screen.width - UiTheme.SafeLeft - UiTheme.SafeRight - margin * 2f);
+            var height = UiTheme.Px(UiTheme.SegmentHeight);
+            var width = Mathf.Min(UiTheme.Px(380f), Screen.width - UiTheme.SafeLeft - UiTheme.SafeRight - margin * 2f);
 
             // Above the toolbar when it runs along the bottom; at the bottom when it is on the side.
             var bottom = UiTheme.SafeBottom + margin + (UiTheme.ToolbarVertical ? 0f : UiTheme.ToolbarThickness + margin);
@@ -547,6 +600,37 @@ namespace FractalVisio.UI
                 TextAnchor.MiddleCenter, fitToRect: true);
             UiFactory.Stretch(toastText.rectTransform, UiTheme.Px(10f));
 
+            // The action - Undo, Cancel, Share - is a word at the right end, the whole height of the
+            // toast: a finger-sized target without a button drawn inside a button.
+            var actionWidth = width * ToastActionFraction;
+            var action = UiFactory.CreateImage(
+                "Action", toast.Content, UiSprites.Rounded(UiTheme.PxInt(14f)), new Color(1f, 1f, 1f, 0.12f));
+            action.raycastTarget = true;
+            UiFactory.Anchor(
+                action.rectTransform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f), Vector2.zero,
+                new Vector2(actionWidth, height));
+            toastActionText = UiFactory.CreateText(
+                "Label", action.transform, string.Empty, UiTheme.LabelFontSize + 2, UiTheme.Accent,
+                TextAnchor.MiddleCenter, fitToRect: true);
+            toastActionText.fontStyle = FontStyle.Bold;
+            UiFactory.Stretch(toastActionText.rectTransform, UiTheme.Px(6f));
+            var button = action.gameObject.AddComponent<Button>();
+            button.targetGraphic = action;
+            button.transition = Selectable.Transition.ColorTint;
+            button.colors = new ColorBlock
+            {
+                normalColor = new Color(1f, 1f, 1f, 0f),
+                highlightedColor = new Color(1f, 1f, 1f, 0.6f),
+                pressedColor = new Color(1f, 1f, 1f, 1.6f),
+                selectedColor = new Color(1f, 1f, 1f, 0f),
+                disabledColor = new Color(1f, 1f, 1f, 0f),
+                colorMultiplier = 1f,
+                fadeDuration = 0.08f
+            };
+            button.onClick.AddListener(RunToastAction);
+            toastActionObject = action.gameObject;
+            toastActionObject.SetActive(false);
+
             toastGroup = toast.Root.gameObject.AddComponent<CanvasGroup>();
             toastGroup.blocksRaycasts = false;
             toastGroup.interactable = false;
@@ -554,16 +638,50 @@ namespace FractalVisio.UI
             toast.Root.gameObject.SetActive(false);
         }
 
-        private void ShowToast(string message, float seconds)
+        /// <summary>
+        /// A message along the bottom for <paramref name="seconds"/>. With an action it gets a word at
+        /// its right end that runs it - "Undo" after a delete, "Cancel" while an image renders - and
+        /// then it takes touches, which it otherwise lets through to the picture.
+        /// </summary>
+        private void ShowToast(string message, float seconds, string actionLabel = null, Action action = null)
         {
             if (toast == null || string.IsNullOrEmpty(message))
             {
                 return;
             }
 
+            var hasAction = action != null && !string.IsNullOrEmpty(actionLabel);
+            toastAction = hasAction ? action : null;
+            toastActionObject.SetActive(hasAction);
+            toastActionText.text = hasAction ? actionLabel : string.Empty;
+
+            var padding = UiTheme.Px(10f);
+            var textRect = toastText.rectTransform;
+            textRect.offsetMin = new Vector2(padding, padding * 0.5f);
+            textRect.offsetMax = new Vector2(
+                hasAction ? -toast.Root.sizeDelta.x * ToastActionFraction : -padding, -padding * 0.5f);
+            toastText.alignment = hasAction ? TextAnchor.MiddleLeft : TextAnchor.MiddleCenter;
+
+            toastGroup.blocksRaycasts = hasAction;
+            toastGroup.interactable = hasAction;
             toastText.text = message;
             toastUntil = Time.unscaledTime + seconds;
             toast.Root.gameObject.SetActive(true);
+        }
+
+        /// <summary>"Removed" with an Undo beside it, for a screen that just deleted something.</summary>
+        private void ShowUndo(string message, Action undo)
+        {
+            ShowToast(message, UndoSeconds, services.Strings.Get("common.undo"), undo);
+        }
+
+        private void RunToastAction()
+        {
+            var action = toastAction;
+            toastAction = null;
+            toastUntil = Mathf.Min(toastUntil, Time.unscaledTime + ToastFadeSeconds);
+            toastGroup.blocksRaycasts = false;
+            action?.Invoke();
         }
 
         private void TickToast(Texture backdrop)

@@ -42,6 +42,14 @@ namespace FractalVisio.UI
         /// <summary>A right-pointing chevron: "go on".</summary>
         public static Sprite Chevron(int size) => BuildIcon(8, size, ChevronCoverage);
 
+        /// <summary>Three dots in a row: "more" - the actions of one item.</summary>
+        public static Sprite More(int size) => BuildIcon(9, size, MoreCoverage);
+
+        private static bool MoreCoverage(float x, float y)
+        {
+            return Within(x, y, 0.2f, 0.5f, 0.09f) || Within(x, y, 0.5f, 0.5f, 0.09f) || Within(x, y, 0.8f, 0.5f, 0.09f);
+        }
+
         private static bool StarCoverage(float x, float y)
         {
             // Point in a 10-vertex star polygon centred on (0.5, 0.52), by the even-odd rule.

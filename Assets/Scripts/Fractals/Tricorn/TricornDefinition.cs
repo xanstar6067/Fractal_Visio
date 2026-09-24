@@ -10,10 +10,22 @@ namespace FractalVisio.Fractals
     /// family variants ported from the WPF catalog (block 2 of docs/ROADMAP-WPF.md) - this file,
     /// its samplers, <c>Shaders/Tricorn.shader</c> and a catalog line.
     /// </summary>
-    public sealed class TricornDefinition : IFractalDefinition
+    public sealed class TricornDefinition : IFractalDefinition, IPlacesOfInterest
     {
         private static readonly FractalParameterDescriptor[] NoParameters =
             Array.Empty<FractalParameterDescriptor>();
+
+        // The WPF version's points of interest, less its overview.
+        private static readonly PlaceOfInterest[] PlaceList =
+        {
+            WpfPlace.At("mini-tricorn", 0.8725m, 1.51875m, 27m),
+            WpfPlace.At("northern-branch", 0.71667m, 1.25m, 6m),
+            WpfPlace.At("striped-shore", 0.3m, 0.58333m, 6m),
+            WpfPlace.At("golden-antenna", -1.2m, 0m, 6m),
+            WpfPlace.At("icy-fibres", 0.41m, -0.5525m, 93.75m)
+        };
+
+        public IReadOnlyList<PlaceOfInterest> Places => PlaceList;
 
         public string Id => "tricorn";
 

@@ -19,7 +19,8 @@ namespace FractalVisio.UI
     /// range of four cannot set a C to the third decimal, and do not say that C is a place. And the
     /// fractal a plane is drawn from - the Mandelbrot set - gets a button to the Julia set of the
     /// point in the middle of the screen: the link between the two, as a button rather than a
-    /// gesture nobody would guess.
+    /// gesture nobody would guess. A fractal with places of interest (<see cref="IPlacesOfInterest"/>)
+    /// lists them; choosing one goes there and closes the panel.
     /// </summary>
     public sealed class FractalScreen : BlockScreen
     {
@@ -30,6 +31,7 @@ namespace FractalVisio.UI
         private readonly List<ParameterControl> parameterControls = new();
         private IFractalDefinition builtFor;
         private IParameterPlane plane;
+        private IReadOnlyList<PlaceOfInterest> places;
         private Text constantText;
         private SettingsSection presetSection;
         private double shownReal = double.NaN;
@@ -79,6 +81,20 @@ namespace FractalVisio.UI
                     blocks.Add(new OptionsBlock(
                         Strings.Get("fractal_panel.presets"), names, ApplyPreset, section => presetSection = section));
                 }
+            }
+
+            places = (definition as IPlacesOfInterest)?.Places;
+            if (places != null && places.Count > 0)
+            {
+                var names = new string[places.Count];
+                for (var i = 0; i < names.Length; i++)
+                {
+                    names[i] = Strings.PlaceName(definition, places[i]);
+                }
+
+                // A list of destinations, not a choice that stays made: no row is ever marked.
+                blocks.Add(new OptionsBlock(
+                    Strings.Get("fractal_panel.places"), names, ApplyPlace, section => section.SetSelected(-1)));
             }
 
             var descriptors = OwnParameters(definition);
@@ -151,6 +167,29 @@ namespace FractalVisio.UI
             session.SetDefinition(julia);
             session.SetParameter(target.RealKey, x);
             session.SetParameter(target.ImaginaryKey, y);
+            Close();
+        }
+
+        /// <summary>
+        /// Go to a place: its parameters first - a Multibrot place lives at its own power - then its
+        /// framing, fitted to the screen. The panel closes: the place is in the middle of the screen,
+        /// where the sheet would cover it.
+        /// </summary>
+        private void ApplyPlace(int index)
+        {
+            if (places == null || index < 0 || index >= places.Count)
+            {
+                return;
+            }
+
+            var place = places[index];
+            var session = Services.Session;
+            for (var i = 0; i < place.Parameters.Count; i++)
+            {
+                session.SetParameter(place.Parameters[i].Key, place.Parameters[i].Value);
+            }
+
+            session.SetFramedView(place.Framing);
             Close();
         }
 

@@ -9,7 +9,7 @@ namespace FractalVisio.Fractals
     /// "generalised Mandelbrot" also allows fractional and negative powers; those have no
     /// perturbation kernel there either and stay out of this one.
     /// </summary>
-    public sealed class MultibrotDefinition : IFractalDefinition
+    public sealed class MultibrotDefinition : IFractalDefinition, IPlacesOfInterest
     {
         public const string PowerKey = "power";
         public const int MinimumPower = 3;
@@ -19,6 +19,21 @@ namespace FractalVisio.Fractals
         {
             new(PowerKey, "Power", 3d, MinimumPower, MaximumPower, FractalParameterKind.Int)
         };
+
+        // The WPF version's points of interest, each with the power it lives at; its overviews of
+        // p = 3, 4, 5 are the power slider plus "reset view".
+        private static readonly PlaceOfInterest[] PlaceList =
+        {
+            WpfPlace.At("trefoil-valley", 0.42375m, -0.61425m, 625m, Power(3)),
+            WpfPlace.At("mini-trefoil", 0.277125m, 0.73725m, 625m, Power(3)),
+            WpfPlace.At("fire-spiral", -0.685875m, -0.313125m, 625m, Power(4)),
+            WpfPlace.At("sunset-branches", 0.595875m, 0.672375m, 625m, Power(4)),
+            WpfPlace.At("ice-spiral", 0.19425m, 0.69525m, 625m, Power(5))
+        };
+
+        public IReadOnlyList<PlaceOfInterest> Places => PlaceList;
+
+        private static ParameterValue Power(int power) => new(PowerKey, power);
 
         private static readonly int PowerId = Shader.PropertyToID("_Power");
 

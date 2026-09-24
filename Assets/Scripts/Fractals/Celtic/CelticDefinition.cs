@@ -9,10 +9,21 @@ namespace FractalVisio.Fractals
     /// The Celtic Mandelbrot: the absolute value of the real part of z^2. Ported from the WPF
     /// catalog with its perturbation kernel; see <see cref="CelticPerturbationSampler"/>.
     /// </summary>
-    public sealed class CelticDefinition : IFractalDefinition
+    public sealed class CelticDefinition : IFractalDefinition, IPlacesOfInterest
     {
         private static readonly FractalParameterDescriptor[] NoParameters =
             Array.Empty<FractalParameterDescriptor>();
+
+        // The WPF version's points of interest, less its overview.
+        private static readonly PlaceOfInterest[] PlaceList =
+        {
+            WpfPlace.At("mini-celtic", -1.415m, 0.137m, 150m),
+            WpfPlace.At("antenna-celtic", -1.395m, 0m, 60m),
+            WpfPlace.At("amethyst-celtic", -1.479m, 0m, 150m),
+            WpfPlace.At("misty-antenna", -1.5m, 0m, 6m)
+        };
+
+        public IReadOnlyList<PlaceOfInterest> Places => PlaceList;
 
         public string Id => "celtic";
 

@@ -8,6 +8,7 @@ common.off = Выкл
 common.on = Вкл
 common.cancel = Отмена
 common.save = Сохранить
+common.undo = Отменить
 
 # Панель настроек. Подписи разделов - заглавными, как в оригинале.
 settings.title = Настройки
@@ -41,8 +42,10 @@ gallery.continue_detail = {0}   ×{1}
 gallery.filter.all = Все
 gallery.filter.favorites = Избранное
 gallery.filter.recent = Недавние
+gallery.filter.saved = Сохранённые
 gallery.empty.favorites = Отметьте фрактал звёздочкой - он появится здесь
 gallery.empty.recent = Здесь появятся фракталы, которые вы открывали
+gallery.empty.saved = Здесь появятся виды, сохранённые в «Закладках»
 gallery.exit_hint = Нажмите «Назад» ещё раз, чтобы выйти
 
 # Разделы галереи
@@ -63,6 +66,7 @@ fractal_panel.constant = КОНСТАНТА C
 fractal_panel.pick_on_map = Выбрать C на карте
 fractal_panel.presets = ИЗВЕСТНЫЕ C
 fractal_panel.julia_here = Жюлиа для центра экрана
+fractal_panel.places = ИНТЕРЕСНЫЕ МЕСТА
 
 # Карта C: кнопка в углу экрана и панель, которую она открывает
 plane.button = Карта C
@@ -80,6 +84,11 @@ bookmarks.unavailable = Закладки недоступны
 bookmarks.save_current = Сохранить этот вид
 bookmarks.empty = Пока ничего не сохранено
 bookmarks.saved = СОХРАНЁННЫЕ
+bookmarks.name = НАЗВАНИЕ
+bookmarks.rename = Переименовать
+bookmarks.open = Открыть
+bookmarks.delete = Удалить
+bookmarks.removed = Удалено: {0}
 
 # Редактор палитры
 palette_editor.title = Палитра
@@ -120,6 +129,35 @@ fractal.celtic.about = Вещественная часть z² берётся п
 fractal.multibrot = Мультиброт
 fractal.multibrot.about = z = z^p + c с целой степенью от 3 до 8: вокруг центра p - 1 луковиц.
 fractal.multibrot.power = Степень
+fractal.mandelbrot.place.seahorse-valley = Долина морских коньков
+fractal.mandelbrot.place.minibrot-spike = Шип миниброта
+fractal.mandelbrot.place.vine = Лоза
+fractal.mandelbrot.place.spiral-galaxy = Спиральная галактика
+fractal.mandelbrot.place.elephant-valley = Долина слонов
+fractal.mandelbrot.place.misiurewicz-spiral = Спираль Мисюревича
+fractal.mandelbrot.place.quad-spiral = Четверная спираль
+fractal.mandelbrot.place.period3-minibrot = Миниброт периода 3
+fractal.burning-ship.place.deep-sea-ship = Глубоководный корабль
+fractal.burning-ship.place.ghost-sails = Призрачные паруса
+fractal.burning-ship.place.armada = Армада
+fractal.burning-ship.place.golden-mini-ship = Золотой мини-корабль
+fractal.burning-ship.place.stern-ship = Корабль у кормы
+fractal.burning-ship.place.copper-lace = Медное кружево
+fractal.tricorn.place.mini-tricorn = Мини-трикорн
+fractal.tricorn.place.northern-branch = Северная ветвь
+fractal.tricorn.place.striped-shore = Полосатый берег
+fractal.tricorn.place.golden-antenna = Золотая антенна
+fractal.tricorn.place.icy-fibres = Ледяные волокна
+fractal.celtic.place.mini-celtic = Мини-кельт
+fractal.celtic.place.antenna-celtic = Кельт на антенне
+fractal.celtic.place.amethyst-celtic = Аметистовый кельт
+fractal.celtic.place.misty-antenna = Антенна в тумане
+fractal.multibrot.place.trefoil-valley = Долина трилистника (p = 3)
+fractal.multibrot.place.mini-trefoil = Мини-трилистник (p = 3)
+fractal.multibrot.place.fire-spiral = Огненная спираль (p = 4)
+fractal.multibrot.place.sunset-branches = Закатные ветви (p = 4)
+fractal.multibrot.place.ice-spiral = Ледяная спираль (p = 5)
+fractal.julia.place.spiral-closeup = Спираль крупным планом
 fractal.julia = Жюлиа
 fractal.julia.about = z = z² + C из каждой точки плоскости. C - точка множества Мандельброта: внутри него картинка цельная, снаружи рассыпается в пыль.
 fractal.julia.preset.classic-spiral = Классическая спираль

@@ -95,6 +95,14 @@ namespace FractalVisio.Core
                 : strings.GetOr("fractal." + definition.Id + "." + descriptor.Key, descriptor.Label);
         }
 
+        /// <summary><c>fractal.&lt;id&gt;.place.&lt;place id&gt;</c>, else the place id.</summary>
+        public static string PlaceName(this IStringCatalog strings, IFractalDefinition definition, in PlaceOfInterest place)
+        {
+            return definition == null
+                ? place.Id
+                : strings.GetOr("fractal." + definition.Id + ".place." + place.Id, place.Id);
+        }
+
         /// <summary><c>fractal.&lt;id&gt;.preset.&lt;preset id&gt;</c>, else the preset id.</summary>
         public static string PresetName(this IStringCatalog strings, IFractalDefinition definition, in PlanePreset preset)
         {

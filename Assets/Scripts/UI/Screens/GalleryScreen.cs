@@ -21,6 +21,9 @@ namespace FractalVisio.UI
     ///
     /// At the top of "All" sits a Continue card showing the frame on screen right now: the app
     /// starts here, and the first thing most people want is to go back to where they were.
+    ///
+    /// "Saved" lists the bookmarks as cards of the same shape, each with the preview taken when it
+    /// was saved: tap to go there, "more" for rename and delete (<see cref="BookmarkActionsScreen"/>).
     /// </summary>
     public sealed class GalleryScreen : UiScreen
     {
@@ -29,16 +32,22 @@ namespace FractalVisio.UI
             All,
             Favorites,
             Recent,
+            Saved,
             Section
         }
 
         private readonly Action openSettings;
+        private readonly Action<Bookmark> showBookmarkActions;
         private readonly List<CardView> cards = new();
+        private readonly List<SavedCardView> savedCards = new();
         private readonly List<ChipView> chips = new();
         private readonly List<string> sections = new();
 
         private IGalleryPreferences preferences;
         private IFractalThumbnails thumbnails;
+        private IBookmarkService bookmarks;
+        private int bookmarksVersion;
+        private int shownBookmarksVersion;
 
         // What the user was looking at. Kept on the screen object, which outlives its GameObjects,
         // so a rotation or a language change does not throw them back to "All".
@@ -65,9 +74,11 @@ namespace FractalVisio.UI
         private float cardHeight;
         private float spacing;
 
-        public GalleryScreen(Action openSettings)
+        /// <param name="showBookmarkActions">Opens rename and delete for a saved view.</param>
+        public GalleryScreen(Action openSettings, Action<Bookmark> showBookmarkActions)
         {
             this.openSettings = openSettings;
+            this.showBookmarkActions = showBookmarkActions;
         }
 
         protected override void OnBuild(Transform parent)
@@ -77,11 +88,26 @@ namespace FractalVisio.UI
                 preferences.Changed -= OnPreferencesChanged;
             }
 
+            if (bookmarks != null)
+            {
+                bookmarks.Changed -= OnBookmarksChanged;
+            }
+
             preferences = Services.Get<IGalleryPreferences>();
             thumbnails = Services.Get<IFractalThumbnails>();
+            bookmarks = Services.Get<IBookmarkService>();
             if (preferences != null)
             {
                 preferences.Changed += OnPreferencesChanged;
+            }
+
+            if (bookmarks != null)
+            {
+                bookmarks.Changed += OnBookmarksChanged;
+            }
+            else if (filter == Filter.Saved)
+            {
+                filter = Filter.All;
             }
 
             CollectSections();
@@ -133,11 +159,22 @@ namespace FractalVisio.UI
                 RebuildGrid(true);
             }
 
+            if (filter == Filter.Saved && bookmarksVersion != shownBookmarksVersion)
+            {
+                // A bookmark was added, renamed, removed or brought back.
+                RebuildGrid(true);
+            }
+
             // Previews are asked for every frame the gallery is on screen: that is what keeps them
             // wanted, and what picks up a redraw after a palette change or a new card size.
             for (var i = 0; i < cards.Count; i++)
             {
                 cards[i].RefreshThumbnail(thumbnails);
+            }
+
+            for (var i = 0; i < savedCards.Count; i++)
+            {
+                savedCards[i].RefreshPreview(bookmarks);
             }
 
             RefreshContinueCard();
@@ -150,6 +187,12 @@ namespace FractalVisio.UI
                 preferences.Changed -= OnPreferencesChanged;
             }
 
+            if (bookmarks != null)
+            {
+                bookmarks.Changed -= OnBookmarksChanged;
+            }
+
+            savedCards.Clear();
             cards.Clear();
             chips.Clear();
             gridContent = null;
@@ -163,6 +206,11 @@ namespace FractalVisio.UI
         private void OnPreferencesChanged()
         {
             preferencesVersion++;
+        }
+
+        private void OnBookmarksChanged()
+        {
+            bookmarksVersion++;
         }
 
         private void CollectSections()
@@ -245,6 +293,11 @@ namespace FractalVisio.UI
             {
                 x = AddChip(content, x, height, Filter.Favorites, null, Strings.Get("gallery.filter.favorites")) + gap;
                 x = AddChip(content, x, height, Filter.Recent, null, Strings.Get("gallery.filter.recent")) + gap;
+            }
+
+            if (bookmarks != null)
+            {
+                x = AddChip(content, x, height, Filter.Saved, null, Strings.Get("gallery.filter.saved")) + gap;
             }
 
             for (var i = 0; i < sections.Count; i++)
@@ -373,9 +426,11 @@ namespace FractalVisio.UI
             }
 
             cards.Clear();
+            savedCards.Clear();
             continueFrame = null;
             continueTitle = null;
             shownPreferencesVersion = preferencesVersion;
+            shownBookmarksVersion = bookmarksVersion;
             shownCurrent = Services.Session.Definition;
 
             gridContent = UiFactory.CreateRect("GridContent", gridViewport);
@@ -391,7 +446,12 @@ namespace FractalVisio.UI
             var cursor = -UiTheme.Px(4f);
             var entries = FilteredEntries();
 
-            if (filter == Filter.All)
+            if (filter == Filter.Saved)
+            {
+                var saved = bookmarks != null ? bookmarks.Items : Array.Empty<Bookmark>();
+                cursor = saved.Count == 0 ? AddEmptyState(cursor) : AddSavedCards(saved, cursor);
+            }
+            else if (filter == Filter.All)
             {
                 cursor = AddContinueCard(cursor);
                 for (var s = 0; s < sections.Count; s++)
@@ -487,7 +547,12 @@ namespace FractalVisio.UI
 
         private float AddEmptyState(float cursor)
         {
-            var key = filter == Filter.Favorites ? "gallery.empty.favorites" : "gallery.empty.recent";
+            var key = filter switch
+            {
+                Filter.Favorites => "gallery.empty.favorites",
+                Filter.Saved => "gallery.empty.saved",
+                _ => "gallery.empty.recent"
+            };
             var height = UiTheme.Px(90f);
             var text = UiFactory.CreateText(
                 "Empty", gridContent, Strings.Get(key), UiTheme.SegmentFontSize - 2, UiTheme.TextMuted,
@@ -560,6 +625,91 @@ namespace FractalVisio.UI
             var view = new CardView(entry, preview, star, Mathf.RoundToInt(cardWidth));
             view.RefreshStar(preferences);
             return view;
+        }
+
+        private float AddSavedCards(IReadOnlyList<Bookmark> saved, float cursor)
+        {
+            for (var i = 0; i < saved.Count; i++)
+            {
+                var column = i % columns;
+                var row = i / columns;
+                var x = left + column * (cardWidth + spacing);
+                var y = cursor - row * (cardHeight + spacing);
+                savedCards.Add(BuildSavedCard(saved[i], x, y));
+            }
+
+            var rows = (saved.Count + columns - 1) / columns;
+            return cursor - rows * cardHeight - Mathf.Max(0, rows - 1) * spacing;
+        }
+
+        /// <summary>
+        /// A bookmark as a card: the preview taken when it was saved, its name - which says what it
+        /// is and how deep - and when. The "more" button sits where a fractal card has its star.
+        /// </summary>
+        private SavedCardView BuildSavedCard(Bookmark bookmark, float x, float y)
+        {
+            var radius = UiTheme.PxInt(UiTheme.CardRadius);
+            var padding = UiTheme.Px(10f);
+
+            var card = UiFactory.CreateImage("Saved_" + bookmark.id, gridContent, UiSprites.Rounded(radius), UiTheme.CardFill);
+            card.raycastTarget = true;
+            Place(card.rectTransform, x, y, cardWidth, cardHeight);
+            AttachButton(card, () => OpenSaved(bookmark));
+
+            var clip = UiFactory.CreateImage("PreviewClip", card.transform, UiSprites.Rounded(radius), Color.white);
+            clip.gameObject.AddComponent<Mask>().showMaskGraphic = false;
+            Place(clip.rectTransform, 0f, 0f, cardWidth, cardWidth);
+            var preview = UiFactory.CreateRawImage("Preview", clip.transform);
+            UiFactory.Stretch(preview.rectTransform);
+            preview.enabled = false;
+
+            var name = UiFactory.CreateText(
+                "Name", card.transform, bookmark.name, UiTheme.CardTitleFontSize, UiTheme.Text,
+                TextAnchor.MiddleLeft, fitToRect: true);
+            name.fontStyle = FontStyle.Bold;
+            Place(name.rectTransform, padding, -(cardWidth + UiTheme.Px(6f)), cardWidth - padding * 2f, UiTheme.Px(24f));
+
+            var date = UiFactory.CreateText(
+                "Date", card.transform, BookmarksScreen.DescribeDate(bookmark.createdTicks), UiTheme.CardDetailFontSize,
+                UiTheme.TextMuted, TextAnchor.UpperLeft, fitToRect: true);
+            Place(date.rectTransform, padding, -(cardWidth + UiTheme.Px(30f)), cardWidth - padding * 2f, UiTheme.Px(20f));
+
+            BuildMoreButton(card.transform, () => showBookmarkActions?.Invoke(bookmark));
+
+            var view = new SavedCardView(bookmark, preview);
+            view.RefreshPreview(bookmarks);
+            return view;
+        }
+
+        /// <summary>A 48 dp target in the preview's top-right corner with three dots on a dark disc.</summary>
+        private static void BuildMoreButton(Transform card, Action onClick)
+        {
+            var target = UiTheme.Px(48f);
+            var hit = UiFactory.CreateImage("More", card, null, new Color(0f, 0f, 0f, 0f));
+            hit.raycastTarget = true;
+            UiFactory.Anchor(hit.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f), Vector2.zero, new Vector2(target, target));
+
+            var discSize = UiTheme.Px(32f);
+            var disc = UiFactory.CreateImage(
+                "Disc", hit.transform, UiSprites.Rounded(Mathf.Max(1, Mathf.RoundToInt(discSize * 0.5f))), UiTheme.Scrim);
+            UiFactory.Anchor(disc.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(discSize, discSize));
+
+            var iconSize = Mathf.Round(UiTheme.Px(20f));
+            var icon = UiFactory.CreateImage("Dots", disc.transform, null, UiTheme.Text);
+            icon.sprite = UiSprites.More(Mathf.RoundToInt(iconSize));
+            icon.type = Image.Type.Simple;
+            UiFactory.Anchor(icon.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(iconSize, iconSize));
+
+            AttachButton(disc, onClick, hit);
+        }
+
+        /// <summary>Go to a saved view: the gallery closes onto it, as it does for a fractal.</summary>
+        private void OpenSaved(Bookmark bookmark)
+        {
+            if (bookmarks != null && bookmarks.Open(bookmark))
+            {
+                Close();
+            }
         }
 
         /// <summary>The favourite toggle: a 48 dp target in the preview's top-right corner, with a dark disc so the star reads on any picture.</summary>
@@ -741,6 +891,34 @@ namespace FractalVisio.UI
             public string Section { get; }
             public Image Capsule { get; }
             public Text Label { get; }
+        }
+
+        private sealed class SavedCardView
+        {
+            private readonly Bookmark bookmark;
+            private readonly RawImage preview;
+
+            public SavedCardView(Bookmark bookmark, RawImage preview)
+            {
+                this.bookmark = bookmark;
+                this.preview = preview;
+            }
+
+            /// <summary>Asked every frame: a preview being taken right now appears as soon as it is.</summary>
+            public void RefreshPreview(IBookmarkService bookmarks)
+            {
+                if (bookmarks == null || preview == null)
+                {
+                    return;
+                }
+
+                var texture = bookmarks.GetPreview(bookmark);
+                if (!ReferenceEquals(texture, preview.texture))
+                {
+                    preview.texture = texture;
+                    preview.enabled = texture != null;
+                }
+            }
         }
 
         private sealed class CardView

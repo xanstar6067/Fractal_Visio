@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 using FractalVisio.Core;
 
 namespace FractalVisio.App
@@ -17,20 +18,33 @@ namespace FractalVisio.App
         public FractalStateDto state;
     }
 
-    /// <summary>Bookmarks, newest first. Offered by the bookmarks module.</summary>
+    /// <summary>Bookmarks, newest first, and their previews. Offered by the bookmarks module.</summary>
     public interface IBookmarkService
     {
         IReadOnlyList<Bookmark> Items { get; }
 
-        /// <summary>Raised after any add, remove or rename.</summary>
+        /// <summary>Raised after any add, remove, rename or restore. Not for previews - ask <see cref="GetPreview"/> again.</summary>
         event Action Changed;
 
-        /// <summary>Save the session's current picture. Returns the new bookmark.</summary>
+        /// <summary>Save the session's current picture. Returns the new bookmark; its preview follows once the render has finished.</summary>
         Bookmark AddCurrent();
 
         /// <summary>Put a bookmark's picture back on screen.</summary>
         bool Open(Bookmark bookmark);
 
-        void Remove(string id);
+        /// <summary>Take a bookmark out of the list. Returns the position it had, for <see cref="Restore"/>, or -1.</summary>
+        int Remove(string id);
+
+        /// <summary>Put a removed bookmark back where it was - the "Undo" of a delete.</summary>
+        void Restore(Bookmark bookmark, int index);
+
+        void Rename(string id, string name);
+
+        /// <summary>
+        /// The bookmark's preview: the middle of the picture as it was saved, square. Null while there
+        /// is none - a bookmark saved before previews existed gets one the first time it is opened.
+        /// Cheap to ask every frame.
+        /// </summary>
+        Texture GetPreview(Bookmark bookmark);
     }
 }

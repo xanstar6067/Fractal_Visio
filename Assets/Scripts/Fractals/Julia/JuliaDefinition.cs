@@ -9,7 +9,7 @@ namespace FractalVisio.Fractals
     /// <see cref="IParameterPlane"/> tells the UI they are one point of the Mandelbrot set - which is
     /// how C is chosen: on a map of the Mandelbrot set, not with two sliders.
     /// </summary>
-    public sealed class JuliaDefinition : IFractalDefinition, IParameterPlane
+    public sealed class JuliaDefinition : IFractalDefinition, IParameterPlane, IPlacesOfInterest
     {
         public const string ConstantRealKey = "c_re";
         public const string ConstantImaginaryKey = "c_im";
@@ -40,6 +40,15 @@ namespace FractalVisio.Fractals
             new("siegel-disk", -0.390541d, -0.586788d),
             new("san-marco", -0.75d, 0d)
         };
+
+        // The one WPF point of interest that is a place rather than a C: the default spiral, closer.
+        private static readonly PlaceOfInterest[] PlaceList =
+        {
+            WpfPlace.At("spiral-closeup", 0.3m, 0.1m, 6m,
+                new ParameterValue(ConstantRealKey, -0.8d), new ParameterValue(ConstantImaginaryKey, 0.156d))
+        };
+
+        public IReadOnlyList<PlaceOfInterest> Places => PlaceList;
 
         /// <summary>The shaders' uniform for C. Shared with <see cref="JuliaBurningShipDefinition"/>.</summary>
         internal static readonly int ConstantId = Shader.PropertyToID("_JuliaC");

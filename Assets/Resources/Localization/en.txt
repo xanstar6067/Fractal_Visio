@@ -13,6 +13,7 @@ common.off = Off
 common.on = On
 common.cancel = Cancel
 common.save = Save
+common.undo = Undo
 
 # Settings panel. Section captions are upper case by design.
 settings.title = Settings
@@ -47,8 +48,10 @@ gallery.continue_detail = {0}   ×{1}
 gallery.filter.all = All
 gallery.filter.favorites = Favourites
 gallery.filter.recent = Recent
+gallery.filter.saved = Saved
 gallery.empty.favorites = Tap the star on a fractal to keep it here
 gallery.empty.recent = Fractals you open will appear here
+gallery.empty.saved = Views you save under Bookmarks appear here
 gallery.exit_hint = Press back again to leave
 
 # Gallery sections: section.<id>, the ids in FractalCatalog.Sections
@@ -71,6 +74,8 @@ fractal_panel.pick_on_map = Pick C on the map
 fractal_panel.presets = WELL-KNOWN C
 # On the Mandelbrot set and the Burning Ship: open the Julia set whose C is the middle of the screen
 fractal_panel.julia_here = Julia set of the centre
+# Built-in views of the fractal (the WPF version's points of interest)
+fractal_panel.places = PLACES OF INTEREST
 
 # C map: the explorer's button (a thumbnail and these words) and the panel it opens
 plane.button = C map
@@ -90,6 +95,12 @@ bookmarks.unavailable = Bookmarks are not available
 bookmarks.save_current = Save this view
 bookmarks.empty = Nothing saved yet
 bookmarks.saved = SAVED
+bookmarks.name = NAME
+bookmarks.rename = Rename
+bookmarks.open = Open
+bookmarks.delete = Delete
+# {0} is the bookmark's name
+bookmarks.removed = Deleted: {0}
 
 # Palette editor
 palette_editor.title = Palette
@@ -135,6 +146,36 @@ fractal.celtic.about = The real part of z² is taken as its absolute value, and 
 fractal.multibrot = Multibrot
 fractal.multibrot.about = z = z^p + c for a whole power from 3 to 8: p - 1 bulbs around the centre.
 fractal.multibrot.power = Power
+# fractal.<id>.place.<place id>: places of interest in the fractal panel
+fractal.mandelbrot.place.seahorse-valley = Seahorse valley
+fractal.mandelbrot.place.minibrot-spike = Minibrot on the spike
+fractal.mandelbrot.place.vine = Vine
+fractal.mandelbrot.place.spiral-galaxy = Spiral galaxy
+fractal.mandelbrot.place.elephant-valley = Elephant valley
+fractal.mandelbrot.place.misiurewicz-spiral = Misiurewicz spiral
+fractal.mandelbrot.place.quad-spiral = Quadruple spiral
+fractal.mandelbrot.place.period3-minibrot = Period-3 minibrot
+fractal.burning-ship.place.deep-sea-ship = Deep-sea ship
+fractal.burning-ship.place.ghost-sails = Ghost sails
+fractal.burning-ship.place.armada = Armada
+fractal.burning-ship.place.golden-mini-ship = Golden mini-ship
+fractal.burning-ship.place.stern-ship = Ship by the stern
+fractal.burning-ship.place.copper-lace = Copper lace
+fractal.tricorn.place.mini-tricorn = Mini tricorn
+fractal.tricorn.place.northern-branch = Northern branch
+fractal.tricorn.place.striped-shore = Striped shore
+fractal.tricorn.place.golden-antenna = Golden antenna
+fractal.tricorn.place.icy-fibres = Icy fibres
+fractal.celtic.place.mini-celtic = Mini celtic
+fractal.celtic.place.antenna-celtic = Celtic on the antenna
+fractal.celtic.place.amethyst-celtic = Amethyst celtic
+fractal.celtic.place.misty-antenna = Antenna in the mist
+fractal.multibrot.place.trefoil-valley = Trefoil valley (p = 3)
+fractal.multibrot.place.mini-trefoil = Mini trefoil (p = 3)
+fractal.multibrot.place.fire-spiral = Fire spiral (p = 4)
+fractal.multibrot.place.sunset-branches = Sunset branches (p = 4)
+fractal.multibrot.place.ice-spiral = Ice spiral (p = 5)
+fractal.julia.place.spiral-closeup = Spiral close up
 # fractal.<id>.preset.<preset id>: the well-known points of a fractal with a C map
 fractal.julia = Julia
 fractal.julia.about = z = z² + C from every point of the plane. C is a point of the Mandelbrot set: inside it the picture holds together, outside it falls apart into dust.

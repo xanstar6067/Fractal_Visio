@@ -273,6 +273,16 @@ namespace FractalVisio.App
             SetView(DefaultView);
         }
 
+        /// <summary>
+        /// Show a framing given the way a definition's default view is - a height for a screen at
+        /// least as wide as it is tall - fitted to this screen, as <see cref="DefaultView"/> is. For
+        /// places of interest; a saved view is put back exactly as it was, through <see cref="Apply"/>.
+        /// </summary>
+        public void SetFramedView(in ViewState framing)
+        {
+            SetView(Fitted(framing));
+        }
+
         private ViewState Fitted(ViewState target)
         {
             if (displayAspect >= 1d)

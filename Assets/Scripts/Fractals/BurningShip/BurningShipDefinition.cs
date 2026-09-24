@@ -12,9 +12,22 @@ namespace FractalVisio.Fractals
     /// It also carries a parameter, which Mandelbrot does not, so the descriptor -> parameter set
     /// -> sampler / material path is exercised end to end.
     /// </summary>
-    public sealed class BurningShipDefinition : IFractalDefinition
+    public sealed class BurningShipDefinition : IFractalDefinition, IPlacesOfInterest
     {
         public const string BailoutKey = "bailout";
+
+        // The WPF version's points of interest, less its overview of the whole ship - that is "reset view".
+        private static readonly PlaceOfInterest[] PlaceList =
+        {
+            WpfPlace.At("deep-sea-ship", -1.7623214771385076201641266142m, 0.0200163188745603751465416114m, 40m),
+            WpfPlace.At("ghost-sails", -1.7423683296426555512135816837m, 0.0648050817843091259643027922m, 76m),
+            WpfPlace.At("armada", -1.78m, 0.035m, 25m),
+            WpfPlace.At("golden-mini-ship", -1.8621m, 0.001m, 640m),
+            WpfPlace.At("stern-ship", -1.9405m, 0.0018m, 1000m),
+            WpfPlace.At("copper-lace", -0.5m, 1m, 6m)
+        };
+
+        public IReadOnlyList<PlaceOfInterest> Places => PlaceList;
 
         // Bailout is on the squared modulus. The default is far above the 4 that decides
         // membership: the smooth escape count needs the orbit to be well clear of the set before
