@@ -158,6 +158,15 @@ namespace FractalVisio.Rendering
                 material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
                 material.SetTexture(PaletteId, palette);
             }
+            else
+            {
+                // Only ever seen on a device - the editor finds every shader. The fractal still draws,
+                // on the CPU alone, and its gallery card has no picture; this line in the log is what
+                // says why. Misses are cached, so it is logged once per renderer.
+                Debug.LogWarning(shader == null
+                    ? "Shader '" + shaderName + "' is not in this build: it is missing from Always Included Shaders."
+                    : "Shader '" + shaderName + "' is not supported by this GPU.");
+            }
 
             materials[shaderName] = material;
             return material;

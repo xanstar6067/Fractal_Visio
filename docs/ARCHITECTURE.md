@@ -96,6 +96,8 @@ Assets/
       Screens/      HudScreen.cs  MainMenuScreen.cs  SettingsScreen.cs
                     PaletteScreen.cs  BookmarksScreen.cs
       Widgets/      ParameterSliderWidget.cs  PaletteSwatchWidget.cs
+    Editor/                            FractalVisio.EditorTools.asmdef (только редактор)
+      ShaderInclusion.cs               (все шейдеры Assets/Shaders — в Always Included, см. §6)
   Resources/
     Localization/   en.txt  ru.txt            (локали: ключ = строка, см. 5.4c)
   Shaders/
@@ -615,10 +617,16 @@ public sealed class AppServices
 3. `Assets/Shaders/BurningShip.shader` — `#include "Common/FractalCommon.hlsl"`, только
    функция итерации.
 
-Плюс одна строка в `FractalCatalog` (с разделом галереи, см. 5.7) и шейдер в **Project Settings →
-Graphics → Always Included Shaders**: фрактал находит свой шейдер через `Shader.Find`, а сборка
-для устройства выбрасывает всё, на что никто не ссылается, — в редакторе этого не видно (так было
-с Burning Ship и шейдером размытия до этапа 14). Перевод имени, описания и параметров — по
+Плюс одна строка в `FractalCatalog` (с разделом галереи, см. 5.7). Шейдер кладётся в
+`Assets/Shaders` — и всё: фрактал находит его через `Shader.Find`, а сборка для устройства содержит
+только то, на что есть ссылка или что стоит в **Always Included Shaders**. Список ведёт
+`Editor/ShaderInclusion` (с 2026-09-24): добавляет туда каждый шейдер из папки при его импорте,
+после каждой перезагрузки скриптов и перед каждой сборкой. Вручную список дважды оказывался неполным
+— в редакторе этого не видно, на телефоне пропадают превью и GPU-рендер фрактала: Burning Ship и
+размытие стекла до этапа 14, оба Жюлиа 2026-09-24 в сборке с другого ПК. Файл там после `git pull`
+был правильный, но открытый Unity не перечитывает GraphicsSettings с диска и собрал по старому
+списку из памяти; проверка перед сборкой работает именно с этим списком. Не найденный на
+устройстве шейдер `FractalGpuRenderer` пишет в лог предупреждением. Перевод имени, описания и параметров — по
 желанию, строками `fractal.<id>` / `fractal.<id>.about` / `fractal.<id>.<ключ>` в файлах локалей
 (см. 5.4c); без них показываются `DisplayName` и `Label`. Фрактал, у которого пара параметров —
 точка на плоскости другого (Жюлиа), дополнительно реализует `IParameterPlane` (5.8): карта C,

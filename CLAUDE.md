@@ -76,6 +76,10 @@ Identify by `$env:COMPUTERNAME`, or by which project root exists.
    From an unfocused editor set `Application.runInBackground = true` through `eval` first, or
    Play Mode does not advance frames; `UnityEditor.PlayModeWindow.SetCustomRenderingResolution`
    sets a phone-sized Game view (412x915 is a phone in dp at the editor's density of 1).
+10. Close Unity before a `git pull` that changes `ProjectSettings\*.asset`, or restart it after:
+   the editor keeps the settings it loaded at startup and does not read them back from disk, and
+   may later save the old ones over the pulled file. The shader list is guarded
+   (`ShaderInclusion`); nothing else in ProjectSettings is.
 
 ## Project navigation
 
@@ -140,6 +144,7 @@ any feature that is not a bug fix, and update it when a design decision changes.
 
 - Layering is one-directional and enforced by `.asmdef` files:
   `Core` <- `Rendering` / `Fractals` / `Gestures` <- `App` <- `UI` / `Modules` <- `Bootstrap`.
+  `FractalVisio.EditorTools` (`Assets\Scripts\Editor`) is editor-only and references none of them.
 - The composition root is its own assembly (`FractalVisio.Bootstrap`, one MonoBehaviour on the
   scene). Never move it into `App`: wiring must see `Modules`, and `App` referencing `Modules`
   is the cycle the asmdefs exist to prevent.
@@ -153,9 +158,16 @@ any feature that is not a bug fix, and update it when a design decision changes.
 - Adding a fractal must cost exactly: one sampler struct, one `IFractalDefinition`, one
   `.shader` including `Shaders\Common\FractalCommon.hlsl`, plus a definition asset and a
   catalog entry (with its gallery section) and, optionally, its name and description in the
-  locales - and `IParameterPlane` on the definition if it is a Julia-type set. The shader also goes into Always Included Shaders (`GraphicsSettings`): it is found by
-  `Shader.Find`, which the editor always satisfies and a player build does not - Burning Ship and
-  the glass blur were silently missing on the phone until 2026-09-23. Check a new perturbation
+  locales - and `IParameterPlane` on the definition if it is a Julia-type set. The shader goes
+  under `Assets\Shaders`: every shader is found by `Shader.Find`, which the editor always satisfies
+  and a player build only for shaders in Always Included Shaders (`GraphicsSettings`).
+  `Assets\Scripts\Editor\ShaderInclusion.cs` adds every shader in that folder to the list - when one
+  is imported, after every script reload, and before every build. Do not go back to keeping the
+  list by hand: Burning Ship and the glass blur were missing on the phone until 2026-09-23, and on
+  2026-09-24 both Julia sets were, in a build from another PC - the editor never reads
+  GraphicsSettings back from disk (not even on a script reload), so a pull with Unity open leaves
+  the old list in memory and the build uses that. On a device a missing shader logs a warning
+  from `FractalGpuRenderer`; the fractal then draws on the CPU and has no gallery preview. Check a new perturbation
   sampler against its `*SamplerDD` on grids around boundary points; the DD samplers test z
   before each step, the others after, so give DD one more iteration when comparing. If a change to `CpuProgressiveRenderer`, `FractalPresenter`, `FractalScreen` or
   `GalleryScreen` is needed, the abstraction leaked — fix it there, not with a special case.
