@@ -28,11 +28,11 @@ namespace FractalVisio.Fractals
 
         public string DisplayName => "Burning Ship";
 
-        // Sits lower and further left than the Mandelbrot, and the whole shape fits in a span of 3.
+        // Sits higher and further left than the Mandelbrot, and the whole shape fits in a span of 3.
         public ViewState DefaultView => new()
         {
             x = -0.4m,
-            y = -0.5m,
+            y = 0.5m,
             scale = 3m,
             rotation = 0d,
             iterations = 128

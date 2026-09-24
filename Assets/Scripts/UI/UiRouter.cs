@@ -42,6 +42,7 @@ namespace FractalVisio.UI
         private ExplorerChrome chrome;
         private GalleryScreen gallery;
         private FractalScreen fractalPanel;
+        private ParameterMapScreen planeMap;
         private ColorScreen colorPanel;
         private SettingsScreen settings;
         private BookmarksScreen bookmarks;
@@ -83,7 +84,8 @@ namespace FractalVisio.UI
             // rebuilds their GameObjects, not their state - the palette being edited stays edited,
             // the gallery keeps its filter.
             gallery = new GalleryScreen(() => ToggleExclusive(settings));
-            fractalPanel = new FractalScreen(OpenGallery);
+            fractalPanel = new FractalScreen(OpenGallery, OpenPlaneMap);
+            planeMap = new ParameterMapScreen();
             colorPanel = new ColorScreen(OpenPaletteEditor);
             settings = new SettingsScreen();
             bookmarks = new BookmarksScreen();
@@ -93,6 +95,7 @@ namespace FractalVisio.UI
             // gallery appear on top of it.
             screens.Add(gallery);
             panels.Add(fractalPanel);
+            panels.Add(planeMap);
             panels.Add(colorPanel);
             panels.Add(bookmarks);
             panels.Add(settings);
@@ -144,6 +147,12 @@ namespace FractalVisio.UI
             if (Input.GetKeyDown(KeyCode.Escape))
             {
                 HandleBack();
+            }
+
+            // The C map belongs to a fractal with a plane; another fractal has nothing to pick on.
+            if (planeMap.IsOpen && ParameterMapScreen.FindPlane(services, services.Session.Definition) == null)
+            {
+                planeMap.Close();
             }
 
             chrome.SetVisible(!gallery.IsOpen && !chromeHidden);
@@ -305,6 +314,15 @@ namespace FractalVisio.UI
             paletteEditor.Open();
         }
 
+        /// <summary>The C map as the one panel - from the fractal panel, which it replaces.</summary>
+        private void OpenPlaneMap()
+        {
+            if (!planeMap.IsOpen)
+            {
+                ToggleExclusive(planeMap);
+            }
+        }
+
         /// <summary>Open <paramref name="screen"/> as the one panel, or close it if it is the one open.</summary>
         private void ToggleExclusive(UiScreen screen)
         {
@@ -351,7 +369,7 @@ namespace FractalVisio.UI
             root.SetAsLastSibling();
 
             chrome = new ExplorerChrome();
-            chrome.Build(root, services, BuildToolbarItems(), OpenGallery);
+            chrome.Build(root, services, BuildToolbarItems(), OpenGallery, () => ToggleExclusive(planeMap), () => planeMap.IsOpen);
 
             BuildScreen(gallery);
             BuildPanelShield();

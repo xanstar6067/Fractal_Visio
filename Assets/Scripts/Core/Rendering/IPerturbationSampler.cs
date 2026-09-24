@@ -17,8 +17,11 @@ namespace FractalVisio.Core
     /// Two rules every implementation needs, both from the WPF engine this was ported from:
     /// <list type="bullet">
     /// <item>Rebase (Zhuoran): when <c>|z| &lt; |d|</c>, or the reference ran out, or
-    /// <c>|z|^2 &lt; 1e-6 |Z|^2</c> (Pauldelbrot), set <c>d = z - Z_0</c> and restart the reference
-    /// at index 0. That alone removes glitches without a second reference point.</item>
+    /// <c>|z|^2 &lt; 1e-6 |Z|^2</c> (Pauldelbrot), move the pixel onto an orbit that starts at the
+    /// critical point 0: <c>d = z</c>, index 0. For a Mandelbrot-type set that orbit is the reference
+    /// itself (<c>Z_0 = 0</c>). A Julia set's reference starts at the centre of the view instead, so
+    /// it keeps the orbit of 0 beside it in <see cref="ReferenceOrbit.Secondary"/> and rebases onto
+    /// that. Either way this alone removes glitches without extra reference points.</item>
     /// <item>Always keep at least <c>Z_0</c> and <c>Z_1</c> in the orbit, even when the centre
     /// escapes at once, or a rebased pixel has no reference step to take.</item>
     /// </list>
@@ -48,6 +51,15 @@ namespace FractalVisio.Core
     {
         private double[] re = Array.Empty<double>();
         private double[] im = Array.Empty<double>();
+        private ReferenceOrbit secondary;
+
+        /// <summary>
+        /// A second orbit a sampler may keep beside this one, reused the same way - a Julia set's
+        /// orbit of the critical point, which its pixels rebase onto. Created on first use, from
+        /// <see cref="IPerturbationSampler.BuildReference"/>: that runs before any pixel is sampled,
+        /// so the samplers only ever read it.
+        /// </summary>
+        public ReferenceOrbit Secondary => secondary ??= new ReferenceOrbit();
 
         /// <summary>Real parts of <c>Z_0 .. Z_(Length-1)</c>. May be longer than <see cref="Length"/>.</summary>
         public double[] Re => re;

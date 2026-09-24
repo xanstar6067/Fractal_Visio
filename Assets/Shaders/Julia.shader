@@ -1,13 +1,13 @@
-Shader "FractalVisio/BurningShip"
+Shader "FractalVisio/Julia"
 {
     Properties
     {
-        _Center ("Center", Vector) = (-0.4, 0.5, 0, 0)
-        _Scale ("Scale", Float) = 3
+        _Center ("Center", Vector) = (0, 0, 0, 0)
+        _Scale ("Scale", Float) = 3.2
         _Aspect ("Aspect", Float) = 1
         _Rotation ("Rotation", Float) = 0
         _Iterations ("Iterations", Int) = 128
-        _Bailout ("Bailout", Float) = 256
+        _JuliaC ("C", Vector) = (-0.8, 0.156, 0, 0)
         _PaletteTex ("Palette", 2D) = "white" {}
         _ColorCycle ("Iterations per palette sweep", Float) = 48
         _ColorOffset ("Palette offset", Float) = 0
@@ -30,17 +30,20 @@ Shader "FractalVisio/BurningShip"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            // Uniforms of this fractal, folded into the shared constant buffer.
-            #define FRACTAL_EXTRA_UNIFORMS float _Bailout;
+            // The constant C, set by JuliaDefinition.BindMaterial.
+            #define FRACTAL_EXTRA_UNIFORMS float4 _JuliaC;
             #include "Common/FractalCommon.hlsl"
 
             half4 Frag(Varyings input) : SV_Target
             {
-                float2 c = FractalPlanePoint(input.uv);
+                // The pixel is where the orbit starts; C is the same everywhere.
+                float2 z = FractalPlanePoint(input.uv);
+                float2 c = _JuliaC.xy;
 
-                float2 z = 0.0;
+                // Matches MandelbrotSamplerD.Bailout, which the Julia samplers share.
+                const float bailout = 65536.0;
+
                 int maxIterations = FractalMaxIterations();
-                float bailout = max(_Bailout, 4.0);
                 int iteration = 0;
                 float squared = 0.0;
                 bool escaped = false;
@@ -53,9 +56,7 @@ Shader "FractalVisio/BurningShip"
                         break;
                     }
 
-                    // z -> (|Re z| - i|Im z|)^2 + c: masts up, as in the WPF engine. The CPU
-                    // samplers (BurningShipSamplers.cs) use the same sign - keep them in step.
-                    z = float2(z.x * z.x - z.y * z.y, -2.0 * abs(z.x * z.y)) + c;
+                    z = float2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
                     iteration = i + 1;
                     squared = dot(z, z);
                     if (squared > bailout)

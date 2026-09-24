@@ -45,6 +45,8 @@ namespace FractalVisio.App
             services.Provide<IFractalThumbnails>(this);
         }
 
+        public int ColoringVersion { get; private set; }
+
         public void Tick()
         {
             if (services == null)
@@ -52,15 +54,7 @@ namespace FractalVisio.App
                 return;
             }
 
-            if (coloringDirty)
-            {
-                coloringDirty = false;
-                renderer.SetColoring(services.Session.Palette, services.Session.Coloring);
-                foreach (var slot in slots.Values)
-                {
-                    slot.Stale = true;
-                }
-            }
+            ApplyColoring();
 
             var now = Time.unscaledTime;
             var budget = DrawsPerFrame;
@@ -127,11 +121,43 @@ namespace FractalVisio.App
             return slot.Supported && slot.Texture != null && slot.Texture.IsCreated() ? slot.Texture : null;
         }
 
+        public bool Draw(IFractalDefinition definition, in FractalParameterSet parameters, in ViewState view, RenderTexture target)
+        {
+            if (renderer == null || definition == null || target == null || !renderer.Supports(definition))
+            {
+                return false;
+            }
+
+            // Asked between two ticks, right after a palette change: draw in the new one.
+            ApplyColoring();
+
+            var framed = view;
+            framed.iterations = services.Session.IterationBudget(view.scale.AsDouble);
+            renderer.Render(definition, parameters, framed, framed.iterations, target);
+            return true;
+        }
+
         private void OnSessionChanged(SessionChange change)
         {
             if ((change & (SessionChange.Palette | SessionChange.Coloring)) != 0)
             {
                 coloringDirty = true;
+            }
+        }
+
+        private void ApplyColoring()
+        {
+            if (!coloringDirty)
+            {
+                return;
+            }
+
+            coloringDirty = false;
+            ColoringVersion++;
+            renderer.SetColoring(services.Session.Palette, services.Session.Coloring);
+            foreach (var slot in slots.Values)
+            {
+                slot.Stale = true;
             }
         }
 

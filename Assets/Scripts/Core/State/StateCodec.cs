@@ -110,7 +110,10 @@ namespace FractalVisio.Core
             return PaletteData.FromStops(dto.id, string.IsNullOrEmpty(dto.name) ? dto.id : dto.name, stops);
         }
 
-        /// <summary>Bring an older saved state up to <see cref="FractalStateDto.CurrentVersion"/>. Null if unreadable.</summary>
+        /// <summary>
+        /// Bring an older saved state up to <see cref="FractalStateDto.CurrentVersion"/>, in place.
+        /// Null if unreadable. A file from a newer build is read as far as it goes.
+        /// </summary>
         public static FractalStateDto Upgrade(FractalStateDto dto)
         {
             if (dto == null || string.IsNullOrEmpty(dto.fractal))
@@ -118,13 +121,34 @@ namespace FractalVisio.Core
                 return null;
             }
 
-            // Version 1 is the first shape; a file from a newer build is read as far as it goes.
-            if (dto.version <= 0)
+            // Version 0 is a file written before the field existed, which is version 1's shape.
+            if (dto.version < 2)
             {
-                dto.version = FractalStateDto.CurrentVersion;
+                // Version 2 turned the Burning Ship the way the WPF engine draws it, masts up - the
+                // same set mirrored top to bottom. A view saved of the old one shows the same place
+                // once it is mirrored too: y and the rotation change sign.
+                if (dto.fractal == MirroredInVersion2)
+                {
+                    MirrorVertically(dto);
+                }
+
+                dto.version = 2;
             }
 
             return dto;
+        }
+
+        /// <summary>The fractal whose picture version 2 mirrored. A historical fact, not a list to extend.</summary>
+        private const string MirroredInVersion2 = "burning-ship";
+
+        private static void MirrorVertically(FractalStateDto dto)
+        {
+            if (TryParseDecimal(dto.centerY, out var y))
+            {
+                dto.centerY = FormatDecimal(-y);
+            }
+
+            dto.rotation = double.IsNaN(dto.rotation) ? 0d : -dto.rotation;
         }
 
         public static string ToJson(object value) => JsonUtility.ToJson(value);

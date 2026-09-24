@@ -59,6 +59,17 @@ toolbar.settings = Настройки
 # Панель «Фрактал»
 fractal_panel.reset_view = Сбросить вид
 fractal_panel.all_fractals = Все фракталы
+fractal_panel.constant = КОНСТАНТА C
+fractal_panel.pick_on_map = Выбрать C на карте
+fractal_panel.presets = ИЗВЕСТНЫЕ C
+fractal_panel.julia_here = Жюлиа для центра экрана
+
+# Карта C: кнопка в углу экрана и панель, которую она открывает
+plane.button = Карта C
+plane.title = Константа C
+plane.hint = {0}: коснитесь или ведите пальцем
+plane.whole = Вся карта
+plane.value = C = {0}
 
 # Панель «Цвет»
 colour.title = Цвет
@@ -109,6 +120,26 @@ fractal.celtic.about = Вещественная часть z² берётся п
 fractal.multibrot = Мультиброт
 fractal.multibrot.about = z = z^p + c с целой степенью от 3 до 8: вокруг центра p - 1 луковиц.
 fractal.multibrot.power = Степень
+fractal.julia = Жюлиа
+fractal.julia.about = z = z² + C из каждой точки плоскости. C - точка множества Мандельброта: внутри него картинка цельная, снаружи рассыпается в пыль.
+fractal.julia.preset.classic-spiral = Классическая спираль
+fractal.julia.preset.douady-rabbit = Кролик Дуади
+fractal.julia.preset.dendrite = Дендрит
+fractal.julia.preset.snowflake = Снежинка
+fractal.julia.preset.fire-whirl = Огненный вихрь
+fractal.julia.preset.lace-spiral = Кружевная спираль
+fractal.julia.preset.double-curls = Двойные завитки
+fractal.julia.preset.rainbow-dragon = Радужный дракон
+fractal.julia.preset.neon-cloud = Неоновое облако
+fractal.julia.preset.siegel-disk = Диск Зигеля
+fractal.julia.preset.san-marco = Сан-Марко
+fractal.julia-burning-ship = Горящий корабль (Жюлиа)
+fractal.julia-burning-ship.about = Итерация «Горящего корабля» из каждой точки, C постоянна и выбирается на карте корабля. Симметрична относительно обеих осей.
+fractal.julia-burning-ship.preset.needle-ship = Корабль на игле
+fractal.julia-burning-ship.preset.crystal-axis = Кристальная ось
+fractal.julia-burning-ship.preset.violet-flame = Фиолетовое пламя
+fractal.julia-burning-ship.preset.pulsar-ruby = Пульсарный рубин
+fractal.julia-burning-ship.preset.psychonaut = Психонавт
 
 # Встроенные палитры
 palette.aurora = Сияние

@@ -12,12 +12,13 @@ namespace FractalVisio.Core
     /// override a better budget after an update.
     ///
     /// Raise <see cref="CurrentVersion"/> on any incompatible change and teach
-    /// <see cref="StateCodec.Upgrade"/> to read the old shape.
+    /// <see cref="StateCodec.Upgrade"/> to read the old shape. Version 2 (2026-09-24): the Burning
+    /// Ship was mirrored top to bottom, so its saved views are too.
     /// </summary>
     [Serializable]
     public sealed class FractalStateDto
     {
-        public const int CurrentVersion = 1;
+        public const int CurrentVersion = 2;
 
         public int version = CurrentVersion;
 

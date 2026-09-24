@@ -27,7 +27,9 @@ namespace FractalVisio.Fractals
             new(new BurningShipDefinition(), Sections.MandelbrotFamily),
             new(new TricornDefinition(), Sections.MandelbrotFamily),
             new(new CelticDefinition(), Sections.MandelbrotFamily),
-            new(new MultibrotDefinition(), Sections.MandelbrotFamily)
+            new(new MultibrotDefinition(), Sections.MandelbrotFamily),
+            new(new JuliaDefinition(), Sections.JuliaFamily),
+            new(new JuliaBurningShipDefinition(), Sections.JuliaFamily)
         };
 
         private static readonly IFractalDefinition[] Definitions = BuildDefinitions();

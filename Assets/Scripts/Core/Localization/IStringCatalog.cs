@@ -95,6 +95,14 @@ namespace FractalVisio.Core
                 : strings.GetOr("fractal." + definition.Id + "." + descriptor.Key, descriptor.Label);
         }
 
+        /// <summary><c>fractal.&lt;id&gt;.preset.&lt;preset id&gt;</c>, else the preset id.</summary>
+        public static string PresetName(this IStringCatalog strings, IFractalDefinition definition, in PlanePreset preset)
+        {
+            return definition == null
+                ? preset.Id
+                : strings.GetOr("fractal." + definition.Id + ".preset." + preset.Id, preset.Id);
+        }
+
         /// <summary>
         /// <c>palette.&lt;id&gt;</c>, else the palette's own name. Only built-ins have entries: a
         /// user palette's name is whatever the user called it, in whatever language they wrote it.

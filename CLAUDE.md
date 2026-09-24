@@ -115,6 +115,14 @@ Identify by `$env:COMPUTERNAME`, or by which project root exists.
   stay as the exact reference to check perturbation against (`docs\ARCHITECTURE.md` §4.8). A folded
   map (Burning Ship, anything with per-component `abs`) must rebase **per component**
   (`|z_r| < |d_r|` or `|z_i| < |d_i|`); the modulus test alone left up to half the frame wrong at 1e-23.
+- A Julia set's reference starts at the view centre, so its pixels rebase onto the **critical
+  orbit** - the orbit of 0 at the same C, kept in `ReferenceOrbit.Secondary` - with `d = z`, never
+  onto their own `Z_0` with `d = z - Z_0` (the WPF way): near the critical point that difference
+  loses the digits rebasing exists to keep, and the orbit of 0 is also what makes the interior cheap
+  (interior pixels converge along it and its BLA skips them).
+- The Burning Ship's fold is `(|x|, -|y|)` - masts up, as in WPF - since 2026-09-24. The step in all
+  three forms lives in `BurningShipStep` and its Julia sets use the same one; never write the sign
+  twice. `StateCodec.Upgrade` mirrors ship views saved before (state version 2).
 - `ReferenceOrbit` and its BLA table are owned by the renderer and rebuilt in place. Do not allocate
   them per request: gestures restart renders several times a second.
 - Samplers **return** on cancellation, never throw, and `Parallel.For` gets no cancellation token.
@@ -145,7 +153,7 @@ any feature that is not a bug fix, and update it when a design decision changes.
 - Adding a fractal must cost exactly: one sampler struct, one `IFractalDefinition`, one
   `.shader` including `Shaders\Common\FractalCommon.hlsl`, plus a definition asset and a
   catalog entry (with its gallery section) and, optionally, its name and description in the
-  locales. The shader also goes into Always Included Shaders (`GraphicsSettings`): it is found by
+  locales - and `IParameterPlane` on the definition if it is a Julia-type set. The shader also goes into Always Included Shaders (`GraphicsSettings`): it is found by
   `Shader.Find`, which the editor always satisfies and a player build does not - Burning Ship and
   the glass blur were silently missing on the phone until 2026-09-23. Check a new perturbation
   sampler against its `*SamplerDD` on grids around boundary points; the DD samplers test z
@@ -251,6 +259,15 @@ any feature that is not a bug fix, and update it when a design decision changes.
   beside it through `UiTheme.DockPanel`; every offset from a screen edge includes
   `UiTheme.Safe*` (cut-outs). A new panel is a `BlockScreen` added to `UiRouter.panels` and, if it
   deserves one, a toolbar item - the toolbar has room for five on a narrow phone.
+- **A Julia set's C is chosen on a map, through a visible button** (docs\ARCHITECTURE.md §5.8). A
+  definition two of whose parameters are a point on another fractal's plane implements
+  `IParameterPlane`; then the explorer shows the "C map" button top right (`PlaneMapButton`: a live
+  thumbnail with the point on it), the fractal panel shows C as one value with presets instead of
+  two sliders, and the plane's own fractal gets "Julia set of the centre". The author rejected a
+  long press on the Mandelbrot set for this as not obvious: do not hide such links in gestures.
+  While the map (`ParameterMapScreen`) is open the session view is panned into the free part of the
+  screen and put back on close; C follows the finger only while the GPU draws the picture
+  (`RenderStatus.Backend`), on release while the CPU does.
 - A tap on the picture is `FractalGestureFrame.Tapped`; the bootstrap hands it to
   `UiRouter.HandleBackgroundTap` (close the open panel, else show/hide the chrome) unless the press
   began on a control (`pressStartedOnUi` - by the release frame the touch no longer reports as over

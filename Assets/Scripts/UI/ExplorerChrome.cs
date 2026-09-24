@@ -9,7 +9,8 @@ namespace FractalVisio.UI
 {
     /// <summary>
     /// The controls that float over the picture while exploring: the gallery button in the top-left
-    /// corner, which also names the fractal on screen, and the toolbar - along the bottom in
+    /// corner, which also names the fractal on screen, the C map button opposite it for a fractal
+    /// with a parameter plane (<see cref="PlaneMapButton"/>), and the toolbar - along the bottom in
     /// portrait, down the right edge in landscape (<see cref="UiTheme.ToolbarVertical"/>).
     ///
     /// Every toolbar button carries a word under its icon. Four bare icons in a corner were the
@@ -33,6 +34,7 @@ namespace FractalVisio.UI
         private Text pillLabel;
         private IFractalDefinition labelledDefinition;
         private GlassPanel toolbar;
+        private PlaneMapButton planeButton;
         private float visibility = 1f;
         private float target = 1f;
 
@@ -58,7 +60,15 @@ namespace FractalVisio.UI
         /// <summary>True while any of it is on screen, the fade included.</summary>
         public bool IsVisible => visibility > 0.001f;
 
-        public void Build(RectTransform parent, AppServices appServices, IReadOnlyList<Item> items, Action openGallery)
+        /// <param name="openPlaneMap">Opens or closes the C map; the map button calls it.</param>
+        /// <param name="isPlaneMapOpen">Lights the map button while the map is open.</param>
+        public void Build(
+            RectTransform parent,
+            AppServices appServices,
+            IReadOnlyList<Item> items,
+            Action openGallery,
+            Action openPlaneMap,
+            Func<bool> isPlaneMapOpen)
         {
             services = appServices;
             surfaces.Clear();
@@ -68,6 +78,10 @@ namespace FractalVisio.UI
             root = UiFactory.CreateRect("ExplorerChrome", parent);
             UiFactory.Stretch(root);
             group = root.gameObject.AddComponent<CanvasGroup>();
+
+            // Before the gallery button, which sizes itself to leave the map button its corner.
+            planeButton = PlaneMapButton.Build(root, services, openPlaneMap, isPlaneMapOpen);
+            surfaces.Add(planeButton.Surface);
 
             BuildPill(openGallery);
             BuildToolbar(items);
@@ -97,6 +111,9 @@ namespace FractalVisio.UI
                 return;
             }
 
+            // First: whether the map button shows decides how wide the gallery button may be.
+            planeButton.Refresh();
+
             for (var i = 0; i < surfaces.Count; i++)
             {
                 surfaces[i].SetBackdrop(backdrop);
@@ -122,7 +139,10 @@ namespace FractalVisio.UI
 
             for (var i = 0; i < surfaces.Count; i++)
             {
-                if (RectTransformUtility.RectangleContainsScreenPoint(surfaces[i].Root, point, null))
+                // A hidden surface still has a rectangle: the map button of a fractal without one.
+                var surface = surfaces[i].Root;
+                if (surface.gameObject.activeInHierarchy &&
+                    RectTransformUtility.RectangleContainsScreenPoint(surface, point, null))
                 {
                     return true;
                 }
@@ -133,6 +153,7 @@ namespace FractalVisio.UI
 
         public void Dispose()
         {
+            planeButton?.Dispose();
             if (root != null)
             {
                 UnityEngine.Object.Destroy(root.gameObject);
@@ -143,6 +164,7 @@ namespace FractalVisio.UI
             pill = null;
             pillLabel = null;
             toolbar = null;
+            planeButton = null;
             surfaces.Clear();
             itemViews.Clear();
         }
@@ -180,28 +202,61 @@ namespace FractalVisio.UI
         }
 
         /// <summary>
-        /// Name the fractal on screen and fit the capsule to it, up to most of the screen width. A
-        /// name longer than that is set smaller, on one line: best fit would rather wrap it, and a
-        /// two-line name in a one-line capsule reads as a mistake.
+        /// Name the fractal on screen and fit the capsule to it, up to most of the screen width - less
+        /// the map button's corner when it shows. A name longer than that is set smaller on one line,
+        /// or, when that would make it markedly smaller than two lines would, split in two at the space
+        /// nearest its middle. Best fit's own wrap broke wherever the room ran out and read as a
+        /// mistake; a balanced split reads as a label, and the capsule is tall enough for it.
         /// </summary>
         private void LabelPill()
         {
             labelledDefinition = services.Session.Definition;
-            pillLabel.text = services.Strings.FractalName(labelledDefinition);
+            var name = services.Strings.FractalName(labelledDefinition);
+            pillLabel.text = name;
+            pillLabel.lineSpacing = 1f;
 
             var height = UiTheme.TopBarHeight;
             var margin = UiTheme.Px(UiTheme.ScreenMargin);
             var textStart = height * 0.34f + Mathf.Round(height * 0.4f) + height * 0.22f;
             var textEnd = height * 0.42f;
-            var room = Mathf.Max(height * 1.6f, (Screen.width - UiTheme.SafeLeft - UiTheme.SafeRight) * 0.62f);
+            var usable = Screen.width - UiTheme.SafeLeft - UiTheme.SafeRight;
+            var room = usable * 0.62f;
+            if (planeButton != null && planeButton.IsShown)
+            {
+                // Share the top edge with the map button: both margins, a gap, and its width.
+                room = Mathf.Min(room, usable - margin * 3f - planeButton.Width);
+            }
+
+            room = Mathf.Max(height * 1.6f, room);
 
             var fullSize = Mathf.Max(8, Mathf.RoundToInt(UiTheme.Px(UiTheme.SegmentFontSize - 1)));
+            var smallest = Mathf.RoundToInt(fullSize * 0.6f);
             pillLabel.fontSize = fullSize;
             var textWidth = pillLabel.preferredWidth;
             var textRoom = room - textStart - textEnd;
             if (textWidth > textRoom && textWidth > 0f)
             {
-                pillLabel.fontSize = Mathf.Max(Mathf.RoundToInt(fullSize * 0.6f), Mathf.FloorToInt(fullSize * textRoom / textWidth));
+                var oneLine = textRoom / textWidth;
+                var split = SplitInTwo(name);
+                var twoLines = 0f;
+                if (split != null)
+                {
+                    // Preferred width of a text with a line break is its longest line.
+                    pillLabel.text = split;
+                    twoLines = Mathf.Min(1f, textRoom / Mathf.Max(1f, pillLabel.preferredWidth));
+                }
+
+                if (twoLines > oneLine * 1.15f)
+                {
+                    pillLabel.lineSpacing = 0.9f;
+                    pillLabel.fontSize = Mathf.Max(smallest, Mathf.FloorToInt(fullSize * twoLines));
+                }
+                else
+                {
+                    pillLabel.text = name;
+                    pillLabel.fontSize = Mathf.Max(smallest, Mathf.FloorToInt(fullSize * oneLine));
+                }
+
                 textWidth = Mathf.Min(textRoom, pillLabel.preferredWidth);
             }
 
@@ -217,6 +272,22 @@ namespace FractalVisio.UI
             labelRect.anchorMax = Vector2.one;
             labelRect.offsetMin = new Vector2(textStart, 0f);
             labelRect.offsetMax = new Vector2(-textEnd, 0f);
+        }
+
+        /// <summary>The name with its space nearest the middle turned into a line break, or null for one word.</summary>
+        private static string SplitInTwo(string name)
+        {
+            var best = -1;
+            var middle = name.Length * 0.5f;
+            for (var i = 0; i < name.Length; i++)
+            {
+                if (name[i] == ' ' && (best < 0 || Mathf.Abs(i - middle) < Mathf.Abs(best - middle)))
+                {
+                    best = i;
+                }
+            }
+
+            return best <= 0 ? null : name.Substring(0, best) + "\n" + name.Substring(best + 1);
         }
 
         private void BuildToolbar(IReadOnlyList<Item> items)
@@ -306,7 +377,7 @@ namespace FractalVisio.UI
         /// Invisible hit area over a control. Transparent at rest, a white flash while pressed: the
         /// glass under it already is the button, it only needs to answer the finger.
         /// </summary>
-        private static void AddHitArea(RectTransform parent, float referenceRadius, Action onClick)
+        internal static void AddHitArea(RectTransform parent, float referenceRadius, Action onClick)
         {
             var hit = UiFactory.CreateImage(
                 "Hit", parent, UiSprites.Rounded(UiTheme.PxInt(referenceRadius)), new Color(1f, 1f, 1f, 0.12f));

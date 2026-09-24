@@ -106,34 +106,7 @@ namespace FractalVisio.Fractals
 
         public void BuildReference(ReferenceOrbit orbit, in DoubleDouble cx, in DoubleDouble cy, int maxIterations, double maxDeltaC)
         {
-            orbit.Begin(maxIterations);
-
-            var zx = new DoubleDouble(0d);
-            var zy = new DoubleDouble(0d);
-
-            for (var index = 0; index <= maxIterations; index++)
-            {
-                var real = zx.ToDouble();
-                var imaginary = zy.ToDouble();
-                if (!orbit.Append(real, imaginary))
-                {
-                    break;
-                }
-
-                // Z_0 and Z_1 are always kept; see IPerturbationSampler.
-                var magnitude = real * real + imaginary * imaginary;
-                if (index >= 1 && (!(magnitude <= ReferenceEscape)))
-                {
-                    break;
-                }
-
-                var xSquared = DoubleDouble.Square(zx);
-                var ySquared = DoubleDouble.Square(zy);
-                var nextX = DoubleDouble.Add(DoubleDouble.Subtract(xSquared, ySquared), cx);
-                zy = DoubleDouble.Add(DoubleDouble.Multiply(DoubleDouble.Multiply(zx, zy), 2d), cy);
-                zx = nextX;
-            }
-
+            QuadraticOrbit.Build(orbit, new DoubleDouble(0d), new DoubleDouble(0d), cx, cy, maxIterations, ReferenceEscape);
             orbit.BuildQuadraticBla(MandelbrotSamplerD.Bailout, maxDeltaC);
         }
 
@@ -204,6 +177,53 @@ namespace FractalVisio.Fractals
             }
 
             return EscapeMath.Interior;
+        }
+    }
+
+    /// <summary>
+    /// A z^2 + c orbit in double-double, stored as doubles: the Mandelbrot reference (start 0, c the
+    /// centre) and both orbits of a Julia set (start the centre or 0, c the constant).
+    /// </summary>
+    internal static class QuadraticOrbit
+    {
+        /// <summary>
+        /// Fill <paramref name="orbit"/> with the orbit of (<paramref name="startX"/>,
+        /// <paramref name="startY"/>) under z^2 + (<paramref name="cx"/>, <paramref name="cy"/>),
+        /// until it passes <paramref name="referenceEscape"/> on the squared modulus. Z_0 and Z_1 are
+        /// always kept; see <see cref="IPerturbationSampler"/>.
+        /// </summary>
+        public static void Build(
+            ReferenceOrbit orbit,
+            DoubleDouble startX, DoubleDouble startY,
+            in DoubleDouble cx, in DoubleDouble cy,
+            int maxIterations, double referenceEscape)
+        {
+            orbit.Begin(maxIterations);
+
+            var zx = startX;
+            var zy = startY;
+
+            for (var index = 0; index <= maxIterations; index++)
+            {
+                var real = zx.ToDouble();
+                var imaginary = zy.ToDouble();
+                if (!orbit.Append(real, imaginary))
+                {
+                    break;
+                }
+
+                var magnitude = real * real + imaginary * imaginary;
+                if (index >= 1 && !(magnitude <= referenceEscape))
+                {
+                    break;
+                }
+
+                var xSquared = DoubleDouble.Square(zx);
+                var ySquared = DoubleDouble.Square(zy);
+                var nextX = DoubleDouble.Add(DoubleDouble.Subtract(xSquared, ySquared), cx);
+                zy = DoubleDouble.Add(DoubleDouble.Multiply(DoubleDouble.Multiply(zx, zy), 2d), cy);
+                zx = nextX;
+            }
         }
     }
 }
