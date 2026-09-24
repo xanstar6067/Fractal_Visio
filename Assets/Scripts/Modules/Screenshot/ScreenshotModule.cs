@@ -191,7 +191,7 @@ namespace FractalVisio.Modules
                     var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
                     texture.ReadPixels(new Rect(0, 0, width, height), 0, 0, false);
                     texture.Apply(false, false);
-                    var pixels = texture.GetRawTextureData().ToArray();
+                    var pixels = texture.GetRawTextureData();
                     UnityEngine.Object.Destroy(texture);
                     StartEncoding(pixels, width, height);
                 }

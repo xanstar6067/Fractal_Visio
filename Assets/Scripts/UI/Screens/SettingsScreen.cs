@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using FractalVisio.App;
 
@@ -287,13 +288,16 @@ namespace FractalVisio.UI
                 input.text = current.ScreenshotWidth > 0
                     ? current.ScreenshotWidth + " × " + current.ScreenshotHeight
                     : "1920 × 1080";
-                input.onSelect.AddListener(_ =>
+                var selectTrigger = background.gameObject.AddComponent<EventTrigger>();
+                var selectEntry = new EventTrigger.Entry { eventID = EventTriggerType.Select };
+                selectEntry.callback.AddListener(_ =>
                 {
                     if (input.text == owner.Strings.Get("settings.screenshot_invalid"))
                     {
                         input.text = string.Empty;
                     }
                 });
+                selectTrigger.triggers.Add(selectEntry);
                 owner.screenshotInput = input;
 
                 ActionRow.Create(content, owner.Strings.Get("settings.screenshot_apply"),
