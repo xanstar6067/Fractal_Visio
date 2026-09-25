@@ -63,6 +63,9 @@ namespace FractalVisio.Core
         public string id;
         public string name;
         public PaletteStopDto[] stops;
+
+        /// <summary><see cref="PaletteData.Bands"/>. Absent in files from before it existed, which reads as a ramp.</summary>
+        public bool bands;
     }
 
     [Serializable]

@@ -359,7 +359,10 @@ any feature that is not a bug fix, and update it when a design decision changes.
   first (restores the session), `UiRouter` last (its screens need the services).
 - User palettes are JSON (`PaletteCatalog`, stored as stops), not ScriptableObjects - they are made
   on the phone. Built-ins stay in `PaletteLibrary` and are never overwritten; the palette editor
-  saves a copy.
+  saves a copy. A palette option (`PaletteData.Bands`, "Steps") is baked into the 256 colours - never
+  teach the renderers about one. Every palette is a ring: a ramp that runs dark to light (all of
+  WPF's) goes out and back (`PaletteLibrary.Mirrored`) rather than jumping once per cycle. The
+  editor's first stop stays at 0; the offset slider turns the ring.
 - Screens are created once by `UiRouter` and survive rebuilds; only their GameObjects are rebuilt.
   A screen whose shape no longer matches the session sets `NeedsRebuild`. One panel is open at a time.
 - A slider that changes something which re-renders the fractal (a parameter) applies on release

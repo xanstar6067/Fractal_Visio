@@ -98,7 +98,7 @@ namespace FractalVisio.UI
             gallery = new GalleryScreen(() => ToggleExclusive(settings), bookmark => ShowBookmarkActions(bookmark, false));
             fractalPanel = new FractalScreen(OpenGallery, () => OpenExclusive(planeMap));
             planeMap = new ParameterMapScreen();
-            colorPanel = new ColorScreen(OpenPaletteEditor);
+            colorPanel = new ColorScreen(OpenPaletteEditor, CreatePalette);
             settings = new SettingsScreen();
             bookmarks = new BookmarksScreen(bookmark => ShowBookmarkActions(bookmark, true));
             bookmarkActions = new BookmarkActionsScreen(OpenBookmark, ShowUndo);
@@ -334,6 +334,12 @@ namespace FractalVisio.UI
         {
             colorPanel.Close();
             paletteEditor.Open();
+        }
+
+        private void CreatePalette()
+        {
+            paletteEditor.StartFresh = true;
+            OpenPaletteEditor();
         }
 
         /// <summary><paramref name="screen"/> as the one panel, left open if it already is - for a panel that replaces the one it was opened from.</summary>

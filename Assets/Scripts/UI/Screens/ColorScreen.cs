@@ -10,8 +10,8 @@ namespace FractalVisio.UI
     /// editor. Every change here is a recolour of the frame already computed, never a new render,
     /// so it is applied the moment a row is tapped.
     ///
-    /// Each palette row carries a strip of the palette itself: a list of names ("Aurora", "Ember")
-    /// asks the user to remember what each looked like.
+    /// Palettes are a grid of cards, each its strip over its name (<see cref="PaletteGrid"/>): a list
+    /// of names ("Aurora", "Ember") asks the user to remember what each looked like.
     /// </summary>
     public sealed class ColorScreen : BlockScreen
     {
@@ -31,19 +31,21 @@ namespace FractalVisio.UI
             { "settings.coloring.bands", "settings.coloring.smooth", "settings.coloring.smooth_log" };
 
         /// <summary>Swatch resolution. A strip a few dozen pixels wide needs no more.</summary>
-        private const int SwatchWidth = 64;
+        private const int SwatchWidth = 128;
 
         private readonly Action openPaletteEditor;
+        private readonly Action createPalette;
         private readonly List<Texture2D> swatches = new();
 
-        private SettingsSection paletteSection;
+        private PaletteGrid paletteGrid;
         private SettingsSection coloringSection;
         private int paletteVersion;
         private int builtPaletteVersion;
 
-        public ColorScreen(Action openPaletteEditor)
+        public ColorScreen(Action openPaletteEditor, Action createPalette)
         {
             this.openPaletteEditor = openPaletteEditor;
+            this.createPalette = createPalette;
         }
 
         protected override int MaximumColumns => 2;
@@ -66,9 +68,11 @@ namespace FractalVisio.UI
                 textures[i] = swatches[i];
             }
 
-            blocks.Add(new OptionsBlock(
-                Strings.Get("settings.palette"), Names(palettes, p => Strings.PaletteName(p)), SelectPalette,
-                s => paletteSection = s, Strings.Get("settings.palette.edit"), openPaletteEditor, textures));
+            blocks.Add(new PaletteGridBlock(
+                Strings.Get("settings.palette"), Names(palettes, p => Strings.PaletteName(p)), textures, SelectPalette,
+                grid => paletteGrid = grid,
+                Strings.Get("settings.palette.edit"), openPaletteEditor,
+                Strings.Get("settings.palette.new"), createPalette));
             blocks.Add(new OptionsBlock(
                 Strings.Get("settings.coloring"), Localize(ColoringKeys), SelectColoring, s => coloringSection = s));
         }
@@ -175,7 +179,7 @@ namespace FractalVisio.UI
         private void RefreshSelection()
         {
             var session = Services.Session;
-            paletteSection?.SetSelected(Services.Palettes.IndexOf(session.Palette));
+            paletteGrid?.SetSelected(Services.Palettes.IndexOf(session.Palette));
             coloringSection?.SetSelected(ColoringIndex(session.Coloring));
         }
 
@@ -190,6 +194,50 @@ namespace FractalVisio.UI
             }
 
             return -1;
+        }
+
+        /// <summary>The palette grid with its two commands under it: change this one, make a new one.</summary>
+        private sealed class PaletteGridBlock : Block
+        {
+            private readonly string label;
+            private readonly IReadOnlyList<string> names;
+            private readonly IReadOnlyList<Texture> strips;
+            private readonly Action<int> onSelect;
+            private readonly Action<PaletteGrid> onBuilt;
+            private readonly string editLabel;
+            private readonly Action edit;
+            private readonly string createLabel;
+            private readonly Action create;
+
+            public PaletteGridBlock(
+                string label, IReadOnlyList<string> names, IReadOnlyList<Texture> strips, Action<int> onSelect,
+                Action<PaletteGrid> onBuilt, string editLabel, Action edit, string createLabel, Action create)
+            {
+                this.label = label;
+                this.names = names;
+                this.strips = strips;
+                this.onSelect = onSelect;
+                this.onBuilt = onBuilt;
+                this.editLabel = editLabel;
+                this.edit = edit;
+                this.createLabel = createLabel;
+                this.create = create;
+            }
+
+            public override float Measure(float width) =>
+                PaletteGrid.MeasureHeight(names.Count, width) + UiTheme.PanelPx(UiTheme.RowSpacing) + ActionRow.MeasureHeight();
+
+            public override void Build(RectTransform content, float x, float y, float width)
+            {
+                var grid = PaletteGrid.Create(content, label, names, strips, onSelect, x, y, width);
+                onBuilt?.Invoke(grid);
+
+                var gap = UiTheme.PanelPx(UiTheme.RowSpacing);
+                var actionY = y - PaletteGrid.MeasureHeight(names.Count, width) - gap;
+                var half = (width - gap) * 0.5f;
+                ActionRow.Create(content, editLabel, x, actionY, half, edit, ActionStyle.Accent);
+                ActionRow.Create(content, createLabel, x + half + gap, actionY, half, create);
+            }
         }
     }
 }

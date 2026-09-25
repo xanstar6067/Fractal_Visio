@@ -80,6 +80,7 @@ namespace FractalVisio.Core
             {
                 id = palette.Id,
                 name = palette.DisplayName,
+                bands = palette.Bands,
                 stops = new PaletteStopDto[stops.Count]
             };
 
@@ -107,7 +108,7 @@ namespace FractalVisio.Core
                 stops[i] = new PaletteData.ColorStop(source?.position ?? 0f, color);
             }
 
-            return PaletteData.FromStops(dto.id, string.IsNullOrEmpty(dto.name) ? dto.id : dto.name, stops);
+            return PaletteData.FromStops(dto.id, string.IsNullOrEmpty(dto.name) ? dto.id : dto.name, dto.bands, stops);
         }
 
         /// <summary>

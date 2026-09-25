@@ -28,8 +28,9 @@ namespace FractalVisio.Core
         {
         }
 
-        private PaletteData(string id, string displayName, Color32[] colors, ColorStop[] stops)
+        private PaletteData(string id, string displayName, Color32[] colors, ColorStop[] stops, bool bands = false)
         {
+            Bands = bands;
             Id = id ?? string.Empty;
             DisplayName = displayName ?? Id;
             this.colors = colors is { Length: > 0 } ? colors : new[] { new Color32(255, 255, 255, 255) };
@@ -46,6 +47,12 @@ namespace FractalVisio.Core
         /// Kept because a palette is edited and saved as its stops, never as 256 baked colours.
         /// </summary>
         public IReadOnlyList<ColorStop> Stops => stops;
+
+        /// <summary>
+        /// Each stop's colour holds until the next stop instead of blending into it: hard bands rather
+        /// than a ramp. Baked into the colours like everything else, so neither renderer knows about it.
+        /// </summary>
+        public bool Bands { get; }
 
         public int Count => colors.Length;
 
@@ -79,7 +86,11 @@ namespace FractalVisio.Core
         /// from the last stop to the first, so give both ends the same colour unless a seam is
         /// wanted.
         /// </summary>
-        public static PaletteData FromStops(string id, string displayName, params ColorStop[] stops)
+        public static PaletteData FromStops(string id, string displayName, params ColorStop[] stops) =>
+            FromStops(id, displayName, false, stops);
+
+        /// <param name="bands">See <see cref="Bands"/>.</param>
+        public static PaletteData FromStops(string id, string displayName, bool bands, params ColorStop[] stops)
         {
             var colors = new Color32[Resolution];
             if (stops == null || stops.Length == 0)
@@ -97,13 +108,13 @@ namespace FractalVisio.Core
 
             for (var i = 0; i < Resolution; i++)
             {
-                colors[i] = EvaluateStops(sorted, i / (float)Resolution);
+                colors[i] = EvaluateStops(sorted, i / (float)Resolution, bands);
             }
 
-            return new PaletteData(id, displayName, colors, sorted);
+            return new PaletteData(id, displayName, colors, sorted, bands);
         }
 
-        private static Color32 EvaluateStops(ColorStop[] stops, float t)
+        private static Color32 EvaluateStops(ColorStop[] stops, float t, bool bands)
         {
             if (t <= stops[0].Position)
             {
@@ -115,6 +126,11 @@ namespace FractalVisio.Core
                 if (t > stops[i].Position)
                 {
                     continue;
+                }
+
+                if (bands)
+                {
+                    return t < stops[i].Position ? stops[i - 1].Color : stops[i].Color;
                 }
 
                 var span = Mathf.Max(1e-5f, stops[i].Position - stops[i - 1].Position);
