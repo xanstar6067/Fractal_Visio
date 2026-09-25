@@ -102,13 +102,19 @@ namespace FractalVisio.Bootstrap
             var rawGesture = gestureInput != null ? gestureInput.Current : default;
             var gesture = rawGesture;
 
-            // A drag that starts on a panel belongs to the panel. Without this the fractal pans
-            // under the interface at the same time.
+            // A drag that starts on a panel belongs to the panel - for the whole press, not only
+            // while the finger is still over it. A finger that slides off a slider, the colour
+            // square or the end of a scrolling list used to become a pan or a pinch of the fractal
+            // the moment it crossed the panel's edge.
             var pointerOverUi = uiRouter != null && uiRouter.PointerOverUi;
             if (pointerOverUi)
             {
-                gesture = default;
                 pressStartedOnUi = true;
+            }
+
+            if (pressStartedOnUi)
+            {
+                gesture = default;
             }
 
             // A tap on the picture itself - not on a control, not the end of a press that began on

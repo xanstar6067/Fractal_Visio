@@ -296,7 +296,9 @@ any feature that is not a bug fix, and update it when a design decision changes.
 - A tap on the picture is `FractalGestureFrame.Tapped`; the bootstrap hands it to
   `UiRouter.HandleBackgroundTap` (close the open panel, else show/hide the chrome) unless the press
   began on a control (`pressStartedOnUi` - by the release frame the touch no longer reports as over
-  it). Back/Escape walks outwards: palette editor, panel, hidden chrome, gallery, then (Android) a
+  it). The same flag keeps the whole press away from the fractal: a finger that started on a panel
+  and slides off it (a slider, the colour square, an overscrolled list) must not become a pan or
+  pinch - on the phone it did, 2026-09-26. Back/Escape walks outwards: palette editor, panel, hidden chrome, gallery, then (Android) a
   second press within 2 s quits. A panel opened over the gallery gets a dimming shield that closes
   it; the explorer has none, because there a drag on the picture must still move it.
 - `EventSystem.pixelDragThreshold` is set in dp by the router. The default 10 px is about 1 dp on a
