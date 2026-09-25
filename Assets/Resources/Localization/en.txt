@@ -30,6 +30,8 @@ settings.screenshot_resolution = SAVED IMAGE RESOLUTION
 settings.screenshot_native = Screen size
 settings.screenshot_apply = Apply custom size
 settings.screenshot_invalid = Invalid size (up to 16 MP)
+settings.screenshot_supersampling = SAVED IMAGE SMOOTHING
+settings.screenshot_format = SAVED IMAGE FORMAT
 settings.inertia = INERTIA
 settings.inertia.off = Off
 settings.inertia.short = Short
@@ -121,9 +123,12 @@ screenshot.rendering = Rendering…
 screenshot.rendering_progress = Rendering: {0}% · {1}s
 screenshot.stage_progress = {0} · {1}s
 screenshot.reading = Reading image…
-screenshot.encoding = Creating PNG…
+# {0} is the format, PNG or JPEG
+screenshot.encoding = Creating {0}…
 screenshot.gallery = Adding to gallery…
 screenshot.nothing_to_save = Nothing to save yet
+screenshot.cancelled = Saving cancelled
+screenshot.share = Share
 screenshot.failed = Could not save the image
 screenshot.size_unsupported = Image size is not supported
 # {0} is the gallery folder

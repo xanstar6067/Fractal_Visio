@@ -158,7 +158,8 @@ any feature that is not a bug fix, and update it when a design decision changes.
 - Adding a fractal must cost exactly: one sampler struct, one `IFractalDefinition`, one
   `.shader` including `Shaders\Common\FractalCommon.hlsl`, plus a definition asset and a
   catalog entry (with its gallery section) and, optionally, its name and description in the
-  locales - and `IParameterPlane` on the definition if it is a Julia-type set. The shader goes
+  locales - and `IParameterPlane` on the definition if it is a Julia-type set, `IPlacesOfInterest`
+  if it has built-in views worth visiting (names `fractal.<id>.place.<place id>`). The shader goes
   under `Assets\Shaders`: every shader is found by `Shader.Find`, which the editor always satisfies
   and a player build only for shaders in Always Included Shaders (`GraphicsSettings`).
   `Assets\Scripts\Editor\ShaderInclusion.cs` adds every shader in that folder to the list - when one
@@ -280,6 +281,18 @@ any feature that is not a bug fix, and update it when a design decision changes.
   While the map (`ParameterMapScreen`) is open the session view is panned into the free part of the
   screen and put back on close; C follows the finger only while the GPU draws the picture
   (`RenderStatus.Backend`), on release while the CPU does.
+- **Saved images are rendered, not stretched** (docs\ARCHITECTURE.md §5.9). Any size other than the
+  screen's, or any supersampling, goes through `IFrameExport` (`App/Capture/FrameExportModule`): the
+  image is cut into tiles, each an ordinary view (centre under the tile's middle, scale its share of
+  the height), so neither engine knows it draws a tile - keep it that way rather than teaching the
+  shaders or kernels about windows. The engine is chosen by the spacing between *samples*
+  (`GpuMinimumScale` / `ExtendedPrecisionScale` divided by the screen height), not by the view's scale:
+  a 4K image of a view the screen draws on the GPU may need the CPU. "Screen size" without smoothing
+  stays the instant copy of the displayed frame.
+- Bookmark previews are PNGs in `IAppStorage`'s byte store (`previews/<id>.png`), taken when the view
+  is still and the render idle; a deleted bookmark's file survives until the next start so the toast's
+  Undo can bring it back. Deletes never ask first - the toast carries Undo (`UiRouter.ShowUndo`); a
+  toast with an action takes touches, one without lets them through to the picture.
 - A tap on the picture is `FractalGestureFrame.Tapped`; the bootstrap hands it to
   `UiRouter.HandleBackgroundTap` (close the open panel, else show/hide the chrome) unless the press
   began on a control (`pressStartedOnUi` - by the release frame the touch no longer reports as over

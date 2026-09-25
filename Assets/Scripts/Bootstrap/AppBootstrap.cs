@@ -256,6 +256,7 @@ namespace FractalVisio.Bootstrap
                 modules.Add(new StateStoreModule());
                 modules.Add(new HudModule(scaleValueText, computeBackendText, hudFontSize));
                 modules.Add(new BookmarksModule());
+                modules.Add(new FrameExportModule(presenter));
                 modules.Add(new ScreenshotModule());
                 modules.Add(new GalleryPreferencesModule());
                 modules.Add(new ThumbnailModule());

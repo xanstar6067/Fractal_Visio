@@ -51,6 +51,15 @@ namespace FractalVisio.App
         public int ScreenshotWidth;
         public int ScreenshotHeight;
 
+        /// <summary>
+        /// Samples per saved pixel along each side: 1 is off, 2 and 3 average 4 and 9 samples. Anything
+        /// above 1 renders the image again rather than copying the screen.
+        /// </summary>
+        public int ScreenshotSupersampling;
+
+        /// <summary>Save as JPEG rather than PNG: a fraction of the size, at a small loss.</summary>
+        public bool ScreenshotJpeg;
+
         public InterfaceSettings Sanitized()
         {
             var result = this;
@@ -67,6 +76,7 @@ namespace FractalVisio.App
                 result.ScreenshotWidth = Mathf.Clamp(result.ScreenshotWidth, 16, 8192);
                 result.ScreenshotHeight = Mathf.Clamp(result.ScreenshotHeight, 16, 8192);
             }
+            result.ScreenshotSupersampling = Mathf.Clamp(result.ScreenshotSupersampling, 1, 3);
             return result;
         }
 
@@ -76,6 +86,8 @@ namespace FractalVisio.App
             string.Equals(Language ?? string.Empty, other.Language ?? string.Empty, StringComparison.Ordinal) &&
             ShowDebugInfo == other.ShowDebugInfo &&
             ScreenshotWidth == other.ScreenshotWidth &&
-            ScreenshotHeight == other.ScreenshotHeight;
+            ScreenshotHeight == other.ScreenshotHeight &&
+            ScreenshotSupersampling == other.ScreenshotSupersampling &&
+            ScreenshotJpeg == other.ScreenshotJpeg;
     }
 }

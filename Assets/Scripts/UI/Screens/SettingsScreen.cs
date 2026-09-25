@@ -36,6 +36,14 @@ namespace FractalVisio.UI
 
         private static readonly string[] BoolKeys = { "common.off", "common.on" };
 
+        /// <summary>Samples per saved pixel along each side; the names after "Off" are the grids, the same in every language.</summary>
+        private static readonly int[] Supersampling = { 1, 2, 3 };
+
+        private static readonly string[] SupersamplingGrids = { "2 × 2", "3 × 3" };
+
+        /// <summary>File formats go by their own names.</summary>
+        private static readonly string[] FormatNames = { "PNG", "JPEG" };
+
         private static readonly Vector2Int[] ScreenshotSizes =
         {
             new(0, 0), new(1280, 720), new(1920, 1080), new(2560, 1440), new(3840, 2160)
@@ -47,6 +55,8 @@ namespace FractalVisio.UI
         private SettingsSection languageSection;
         private SettingsSection debugSection;
         private SettingsSection screenshotSection;
+        private SettingsSection supersamplingSection;
+        private SettingsSection formatSection;
         private InputField screenshotInput;
 
         protected override string BuildTitle() => Strings.Get("settings.title");
@@ -56,6 +66,10 @@ namespace FractalVisio.UI
             blocks.Add(new OptionsBlock(
                 Strings.Get("settings.resolution"), ResolutionNames(), SelectResolution, s => resolutionSection = s));
             blocks.Add(new ScreenshotCustomBlock(this));
+            blocks.Add(new OptionsBlock(
+                Strings.Get("settings.screenshot_supersampling"), SupersamplingNames(), SelectSupersampling, s => supersamplingSection = s));
+            blocks.Add(new OptionsBlock(
+                Strings.Get("settings.screenshot_format"), FormatNames, SelectFormat, s => formatSection = s));
             blocks.Add(new OptionsBlock(
                 Strings.Get("settings.inertia"), Localize(InertiaKeys), SelectInertia, s => inertiaSection = s));
             blocks.Add(new OptionsBlock(
@@ -97,6 +111,33 @@ namespace FractalVisio.UI
             return names;
         }
 
+        private string[] SupersamplingNames()
+        {
+            var names = new string[SupersamplingGrids.Length + 1];
+            names[0] = Strings.Get("common.off");
+            SupersamplingGrids.CopyTo(names, 1);
+            return names;
+        }
+
+        private void SelectSupersampling(int index)
+        {
+            if (index < 0 || index >= Supersampling.Length)
+            {
+                return;
+            }
+
+            var settings = Services.Session.Interface;
+            settings.ScreenshotSupersampling = Supersampling[index];
+            Services.Session.SetInterface(settings);
+        }
+
+        private void SelectFormat(int index)
+        {
+            var settings = Services.Session.Interface;
+            settings.ScreenshotJpeg = index == 1;
+            Services.Session.SetInterface(settings);
+        }
+
         private void SelectScreenshotSize(int index)
         {
             if (index < 0 || index >= ScreenshotSizes.Length)
@@ -126,8 +167,7 @@ namespace FractalVisio.UI
             if (parts.Length != 2 || !int.TryParse(parts[0].Trim(), out var width) ||
                 !int.TryParse(parts[1].Trim(), out var height) ||
                 width < 16 || height < 16 || width > 8192 || height > 8192 ||
-                (long)width * height > 16000000 ||
-                width > SystemInfo.maxTextureSize || height > SystemInfo.maxTextureSize)
+                (long)width * height > 16000000)
             {
                 screenshotInput.text = Strings.Get("settings.screenshot_invalid");
                 return;
@@ -246,6 +286,8 @@ namespace FractalVisio.UI
             }
 
             screenshotSection?.SetSelected(selected);
+            supersamplingSection?.SetSelected(Array.IndexOf(Supersampling, session.Interface.ScreenshotSupersampling));
+            formatSection?.SetSelected(session.Interface.ScreenshotJpeg ? 1 : 0);
         }
 
         private sealed class ScreenshotCustomBlock : Block

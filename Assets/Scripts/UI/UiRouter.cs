@@ -572,7 +572,27 @@ namespace FractalVisio.UI
 
         private void OnScreenshotStateChanged(ScreenshotState state)
         {
-            ShowToast(screenshots.LastMessage, IsScreenshotBusy(state) ? 3600f : ToastSeconds);
+            ShowScreenshotToast(state);
+        }
+
+        /// <summary>
+        /// The screenshot's progress or outcome, with Cancel while the image renders and Share once
+        /// it is in the gallery - the one place either can be reached from.
+        /// </summary>
+        private void ShowScreenshotToast(ScreenshotState state)
+        {
+            if (screenshots.CanCancel)
+            {
+                ShowToast(screenshots.LastMessage, 3600f, services.Strings.Get("common.cancel"), screenshots.Cancel);
+            }
+            else if (screenshots.CanShare)
+            {
+                ShowToast(screenshots.LastMessage, UndoSeconds, services.Strings.Get("screenshot.share"), screenshots.Share);
+            }
+            else
+            {
+                ShowToast(screenshots.LastMessage, IsScreenshotBusy(state) ? 3600f : ToastSeconds);
+            }
         }
 
         private static bool IsScreenshotBusy(ScreenshotState state) =>
@@ -690,7 +710,7 @@ namespace FractalVisio.UI
             {
                 if (toast != null && !toast.Root.gameObject.activeSelf)
                 {
-                    ShowToast(screenshots.LastMessage, 3600f);
+                    ShowScreenshotToast(screenshots.State);
                 }
 
                 if (screenshots.State == ScreenshotState.WaitingForRender && toastText != null)

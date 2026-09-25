@@ -93,6 +93,8 @@ namespace FractalVisio.Modules
                 interfaceSettings.ShowDebugInfo = settings.showDebugInfo;
                 interfaceSettings.ScreenshotWidth = settings.screenshotWidth;
                 interfaceSettings.ScreenshotHeight = settings.screenshotHeight;
+                interfaceSettings.ScreenshotSupersampling = settings.screenshotSupersampling;
+                interfaceSettings.ScreenshotJpeg = settings.screenshotJpeg;
                 services.Session.SetInterface(interfaceSettings);
             }
 
@@ -123,7 +125,9 @@ namespace FractalVisio.Modules
                 language = session.Interface.Language,
                 showDebugInfo = session.Interface.ShowDebugInfo,
                 screenshotWidth = session.Interface.ScreenshotWidth,
-                screenshotHeight = session.Interface.ScreenshotHeight
+                screenshotHeight = session.Interface.ScreenshotHeight,
+                screenshotSupersampling = session.Interface.ScreenshotSupersampling,
+                screenshotJpeg = session.Interface.ScreenshotJpeg
             }));
         }
 
@@ -144,6 +148,10 @@ namespace FractalVisio.Modules
             public bool showDebugInfo;
             public int screenshotWidth;
             public int screenshotHeight;
+
+            /// <summary>Files from before supersampling read as off.</summary>
+            public int screenshotSupersampling = 1;
+            public bool screenshotJpeg;
         }
     }
 }

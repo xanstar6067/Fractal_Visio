@@ -156,7 +156,13 @@ namespace FractalVisio.App
         private static double TargetFrameSeconds =>
             Application.targetFrameRate > 0 ? 1d / Math.Min(Application.targetFrameRate, 90) : 1d / 60d;
 
-        public string ActiveTextureName => targetImage != null && targetImage.texture != null
+        /// <summary>
+        /// The thread budget every CPU renderer shares - an export's too, so a picture being saved
+        /// takes its cores from the same pool as the one on screen rather than doubling up on them.
+        /// </summary>
+        internal CpuWorkerBudget WorkerBudget => workerBudget;
+
+        public string ActiveTextureName =>targetImage != null && targetImage.texture != null
             ? targetImage.texture.name
             : string.Empty;
 
