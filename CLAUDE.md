@@ -239,7 +239,16 @@ any feature that is not a bug fix, and update it when a design decision changes.
   bailout makes the smooth term a bad approximation and the banding comes back.
 - The palette-position formula lives in exactly two places - `EscapeColorMapper.MapRange` and
   `FractalCommon.hlsl:FractalEscapeColor` - and they must agree. The backend switches under the
-  viewer mid-zoom; a palette that shifts at the handoff reads as a glitch.
+  viewer mid-zoom; a palette that shifts at the handoff reads as a glitch. The relief's lighting
+  is the same kind of pair: `EscapeColorMapper.Shade` and `FractalReliefColor`.
+- **Relief** (`ColoringSettings.Relief`, docs\ARCHITECTURE.md §5.10) lights the picture from the
+  orbit's own derivative, never from neighbouring pixels - that is what keeps it right across
+  passes, export tiles and perturbation. Every escape sampler has a second method,
+  `SampleWithSlope` (a separate loop, so the picture without relief pays nothing), and every fractal
+  shader a `FRACTAL_RELIEF` variant; a new fractal needs both. Folded and conjugate maps carry a
+  real Jacobian (`EscapeMath.QuadraticJacobianStep`). The CPU keeps packed screen-space slopes beside
+  the escape buffer, so light, depth and shine are remaps; switching the relief on is the one
+  colouring change that costs a render (the presenter asks for it).
 - UI sizes are **dp, scaled by `Screen.dpi`**, never by screen height: a touch target has to be a
   certain number of millimetres wide, and pixel counts say nothing about millimetres. Scaling by
   height made every control a third of its size in landscape. `UiTheme.UserScale` (the INTERFACE

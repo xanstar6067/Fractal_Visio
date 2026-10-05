@@ -29,6 +29,7 @@ Shader "FractalVisio/JuliaBurningShip"
             #pragma target 3.0
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile_local __ FRACTAL_RELIEF
 
             // The constant C, set by JuliaBurningShipDefinition.BindMaterial.
             #define FRACTAL_EXTRA_UNIFORMS float4 _JuliaC;
@@ -45,6 +46,10 @@ Shader "FractalVisio/JuliaBurningShip"
                 float squared = 0.0;
                 bool escaped = false;
 
+#if defined(FRACTAL_RELIEF)
+                float4 j = float4(1.0, 0.0, 0.0, 1.0);
+#endif
+
                 [loop]
                 for (int i = 0; i < 2048; i++)
                 {
@@ -55,6 +60,9 @@ Shader "FractalVisio/JuliaBurningShip"
 
                     // The Burning Ship's step, masts up: same sign as BurningShip.shader and the
                     // CPU samplers - a C picked on the ship's map must mean the same map here.
+#if defined(FRACTAL_RELIEF)
+                    j = FractalJacobianStep(z, 1.0, z.x * z.y >= 0.0 ? -1.0 : 1.0, 0.0, j);
+#endif
                     z = float2(z.x * z.x - z.y * z.y, -2.0 * abs(z.x * z.y)) + c;
                     iteration = i + 1;
                     squared = dot(z, z);
@@ -70,7 +78,11 @@ Shader "FractalVisio/JuliaBurningShip"
                     return FRACTAL_INTERIOR_COLOR;
                 }
 
+#if defined(FRACTAL_RELIEF)
+                return FractalReliefColor(FractalSmoothCount(iteration, squared, bailout), FractalSlopeJacobian(z, j));
+#else
                 return FractalEscapeColor(FractalSmoothCount(iteration, squared, bailout));
+#endif
             }
             ENDHLSL
         }

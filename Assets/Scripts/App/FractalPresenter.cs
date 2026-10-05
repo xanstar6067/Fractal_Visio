@@ -90,6 +90,7 @@ namespace FractalVisio.App
         private bool hasBackend;
         private bool renderDirty;
         private bool coloringDirty = true;
+        private bool reliefApplied;
         private bool placeholdersStale;
         private bool hasRequestedView;
         private bool lastRequestWasInteractive;
@@ -297,6 +298,17 @@ namespace FractalVisio.App
             {
                 renderDirty = true;
             }
+
+            // The one colouring change the CPU cannot remap: escape values rendered without the
+            // relief have no slopes, so they show flat until a render that computes them. Turning it
+            // off needs nothing - the next render simply stops computing them.
+            if (coloring.Relief && !reliefApplied)
+            {
+                renderDirty = true;
+                wideLayer?.Discard();
+            }
+
+            reliefApplied = coloring.Relief;
         }
 
         private RenderBackend ResolveBackend(in ViewState view)

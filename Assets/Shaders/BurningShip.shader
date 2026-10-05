@@ -29,6 +29,7 @@ Shader "FractalVisio/BurningShip"
             #pragma target 3.0
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile_local __ FRACTAL_RELIEF
 
             // Uniforms of this fractal, folded into the shared constant buffer.
             #define FRACTAL_EXTRA_UNIFORMS float _Bailout;
@@ -45,6 +46,10 @@ Shader "FractalVisio/BurningShip"
                 float squared = 0.0;
                 bool escaped = false;
 
+#if defined(FRACTAL_RELIEF)
+                float4 j = 0.0;
+#endif
+
                 [loop]
                 for (int i = 0; i < 2048; i++)
                 {
@@ -55,6 +60,9 @@ Shader "FractalVisio/BurningShip"
 
                     // z -> (|Re z| - i|Im z|)^2 + c: masts up, as in the WPF engine. The CPU
                     // samplers (BurningShipSamplers.cs) use the same sign - keep them in step.
+#if defined(FRACTAL_RELIEF)
+                    j = FractalJacobianStep(z, 1.0, z.x * z.y >= 0.0 ? -1.0 : 1.0, 1.0, j);
+#endif
                     z = float2(z.x * z.x - z.y * z.y, -2.0 * abs(z.x * z.y)) + c;
                     iteration = i + 1;
                     squared = dot(z, z);
@@ -70,7 +78,11 @@ Shader "FractalVisio/BurningShip"
                     return FRACTAL_INTERIOR_COLOR;
                 }
 
+#if defined(FRACTAL_RELIEF)
+                return FractalReliefColor(FractalSmoothCount(iteration, squared, bailout), FractalSlopeJacobian(z, j));
+#else
                 return FractalEscapeColor(FractalSmoothCount(iteration, squared, bailout));
+#endif
             }
             ENDHLSL
         }

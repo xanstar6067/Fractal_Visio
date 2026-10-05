@@ -40,6 +40,47 @@ namespace FractalVisio.Fractals
 
             return EscapeMath.Interior;
         }
+
+        public float SampleWithSlope(
+            double cx, double cy, int maxIterations, CancellationToken token, out double slopeX, out double slopeY)
+        {
+            slopeX = 0d;
+            slopeY = 0d;
+
+            var zx = 0d;
+            var zy = 0d;
+            var j00 = 0d;
+            var j01 = 0d;
+            var j10 = 0d;
+            var j11 = 0d;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 127) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                // Conjugation is not complex-analytic: the derivative is a real Jacobian, the
+                // z^2 one with its second row negated.
+                EscapeMath.QuadraticJacobianStep(zx, zy, 1d, -1d, 1d, ref j00, ref j01, ref j10, ref j11);
+
+                var nextX = zx * zx - zy * zy + cx;
+                zy = -2d * zx * zy + cy;
+                zx = nextX;
+                iteration++;
+
+                var squared = zx * zx + zy * zy;
+                if (squared > Bailout)
+                {
+                    EscapeMath.JacobianSlope(zx, zy, j00, j01, j10, j11, out slopeX, out slopeY);
+                    return EscapeMath.Smooth(iteration, squared, Bailout);
+                }
+            }
+
+            return EscapeMath.Interior;
+        }
     }
 
     /// <summary>Same iteration in double-double: the reference the perturbation sampler is checked against.</summary>
@@ -154,6 +195,69 @@ namespace FractalVisio.Fractals
 
                 if (magnitude > TricornSamplerD.Bailout)
                 {
+                    return EscapeMath.Smooth(iteration, magnitude, TricornSamplerD.Bailout);
+                }
+
+                if (referenceIndex >= length - 1 ||
+                    magnitude < dx * dx + dy * dy ||
+                    magnitude < GlitchToleranceSquared * (referenceX * referenceX + referenceY * referenceY))
+                {
+                    dx = fullX - re[0];
+                    dy = fullY - im[0];
+                    referenceIndex = 0;
+                }
+            }
+
+            return EscapeMath.Interior;
+        }
+
+        public float SampleWithSlope(
+            ReferenceOrbit orbit, double deltaCx, double deltaCy, int maxIterations, CancellationToken token,
+            out double slopeX, out double slopeY)
+        {
+            slopeX = 0d;
+            slopeY = 0d;
+
+            var re = orbit.Re;
+            var im = orbit.Im;
+            var length = orbit.Length;
+
+            var dx = 0d;
+            var dy = 0d;
+            var j00 = 0d;
+            var j01 = 0d;
+            var j10 = 0d;
+            var j11 = 0d;
+            var referenceIndex = 0;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 1023) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                var zr = re[referenceIndex];
+                var zi = im[referenceIndex];
+                EscapeMath.QuadraticJacobianStep(zr + dx, zi + dy, 1d, -1d, 1d, ref j00, ref j01, ref j10, ref j11);
+
+                var stepX = 2d * (zr * dx - zi * dy) + dx * dx - dy * dy;
+                var stepY = 2d * (zr * dy + zi * dx) + 2d * dx * dy;
+                dx = stepX + deltaCx;
+                dy = -stepY + deltaCy;
+                referenceIndex++;
+                iteration++;
+
+                var referenceX = referenceIndex < length ? re[referenceIndex] : 0d;
+                var referenceY = referenceIndex < length ? im[referenceIndex] : 0d;
+                var fullX = referenceX + dx;
+                var fullY = referenceY + dy;
+                var magnitude = fullX * fullX + fullY * fullY;
+
+                if (magnitude > TricornSamplerD.Bailout)
+                {
+                    EscapeMath.JacobianSlope(fullX, fullY, j00, j01, j10, j11, out slopeX, out slopeY);
                     return EscapeMath.Smooth(iteration, magnitude, TricornSamplerD.Bailout);
                 }
 

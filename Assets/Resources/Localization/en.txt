@@ -91,6 +91,11 @@ plane.value = C = {0}
 
 # Colour panel
 colour.title = Colour
+colour.relief = RELIEF
+colour.relief.off = Off
+colour.relief.on = On
+colour.relief.depth = Depth
+colour.relief.shine = Shine
 
 # Bookmarks panel
 bookmarks.title = Bookmarks

@@ -29,6 +29,7 @@ Shader "FractalVisio/Multibrot"
             #pragma target 3.0
             #pragma vertex Vert
             #pragma fragment Frag
+            #pragma multi_compile_local __ FRACTAL_RELIEF
 
             // Uniforms of this fractal, folded into the shared constant buffer.
             #define FRACTAL_EXTRA_UNIFORMS float _Power;
@@ -48,6 +49,10 @@ Shader "FractalVisio/Multibrot"
                 float squared = 0.0;
                 bool escaped = false;
 
+#if defined(FRACTAL_RELIEF)
+                float2 dz = 0.0;
+#endif
+
                 [loop]
                 for (int i = 0; i < 2048; i++)
                 {
@@ -56,8 +61,9 @@ Shader "FractalVisio/Multibrot"
                         break;
                     }
 
-                    // z -> z^power + c, by repeated multiplication
-                    float2 w = z;
+                    // z -> z^power + c, by repeated multiplication: w = z^(power-1) first, which the
+                    // relief's derivative p z^(p-1) dz + 1 needs too.
+                    float2 w = float2(1.0, 0.0);
                     [loop]
                     for (int k = 1; k < 8; k++)
                     {
@@ -69,7 +75,10 @@ Shader "FractalVisio/Multibrot"
                         w = float2(w.x * z.x - w.y * z.y, w.x * z.y + w.y * z.x);
                     }
 
-                    z = w + c;
+#if defined(FRACTAL_RELIEF)
+                    dz = power * float2(w.x * dz.x - w.y * dz.y, w.x * dz.y + w.y * dz.x) + float2(1.0, 0.0);
+#endif
+                    z = float2(w.x * z.x - w.y * z.y, w.x * z.y + w.y * z.x) + c;
                     iteration = i + 1;
                     squared = dot(z, z);
                     if (squared > bailout)
@@ -84,7 +93,11 @@ Shader "FractalVisio/Multibrot"
                     return FRACTAL_INTERIOR_COLOR;
                 }
 
+#if defined(FRACTAL_RELIEF)
+                return FractalReliefColor(FractalSmoothCountPower(iteration, squared, bailout, power), FractalSlope(z, dz));
+#else
                 return FractalEscapeColor(FractalSmoothCountPower(iteration, squared, bailout, power));
+#endif
             }
             ENDHLSL
         }

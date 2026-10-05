@@ -46,6 +46,47 @@ namespace FractalVisio.Fractals
 
             return EscapeMath.Interior;
         }
+
+        public float SampleWithSlope(
+            double x, double y, int maxIterations, CancellationToken token, out double slopeX, out double slopeY)
+        {
+            slopeX = 0d;
+            slopeY = 0d;
+
+            var zx = x;
+            var zy = y;
+
+            // The derivative is with respect to the starting point, which is the pixel: dz_0 = 1.
+            var dx = 1d;
+            var dy = 0d;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 127) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                var nextDx = 2d * (zx * dx - zy * dy);
+                dy = 2d * (zx * dy + zy * dx);
+                dx = nextDx;
+
+                var nextX = zx * zx - zy * zy + constantX;
+                zy = 2d * zx * zy + constantY;
+                zx = nextX;
+                iteration++;
+
+                var squared = zx * zx + zy * zy;
+                if (squared > MandelbrotSamplerD.Bailout)
+                {
+                    EscapeMath.HolomorphicSlope(zx, zy, dx, dy, out slopeX, out slopeY);
+                    return EscapeMath.Smooth(iteration, squared, MandelbrotSamplerD.Bailout);
+                }
+            }
+
+            return EscapeMath.Interior;
+        }
     }
 
     /// <summary>Same iteration in double-double: the exact reference the perturbation sampler is checked against.</summary>
@@ -199,6 +240,98 @@ namespace FractalVisio.Fractals
                     magnitude < GlitchToleranceSquared * (referenceX * referenceX + referenceY * referenceY))
                 {
                     // Onto the orbit of the critical point. It starts at 0, so d = z exactly.
+                    re = critical.Re;
+                    im = critical.Im;
+                    length = critical.Length;
+                    bla = critical.HasBla ? critical.Bla : null;
+                    dx = fullX;
+                    dy = fullY;
+                    referenceIndex = 0;
+                }
+            }
+
+            return EscapeMath.Interior;
+        }
+
+        public float SampleWithSlope(
+            ReferenceOrbit orbit, double deltaX, double deltaY, int maxIterations, CancellationToken token,
+            out double slopeX, out double slopeY)
+        {
+            slopeX = 0d;
+            slopeY = 0d;
+
+            var critical = orbit.Secondary;
+            var re = orbit.Re;
+            var im = orbit.Im;
+            var length = orbit.Length;
+            var bla = orbit.HasBla ? orbit.Bla : null;
+
+            var dx = deltaX;
+            var dy = deltaY;
+            var derX = 1d;
+            var derY = 0d;
+            var referenceIndex = 0;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 1023) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                if (bla != null &&
+                    bla.TryLookup(referenceIndex, dx * dx + dy * dy, maxIterations - iteration,
+                        out var aX, out var aY, out _, out _, out var steps))
+                {
+                    var skippedX = aX * dx - aY * dy;
+                    var skippedY = aX * dy + aY * dx;
+                    dx = skippedX;
+                    dy = skippedY;
+
+                    // d <- A d, so dz <- A dz.
+                    var nextDerX = aX * derX - aY * derY;
+                    derY = aX * derY + aY * derX;
+                    derX = nextDerX;
+
+                    referenceIndex += steps;
+                    iteration += steps;
+                }
+                else
+                {
+                    var zr = re[referenceIndex];
+                    var zi = im[referenceIndex];
+
+                    var fx = zr + dx;
+                    var fy = zi + dy;
+                    var nextDerX = 2d * (fx * derX - fy * derY);
+                    derY = 2d * (fx * derY + fy * derX);
+                    derX = nextDerX;
+
+                    var nextX = 2d * (zr * dx - zi * dy) + dx * dx - dy * dy;
+                    var nextY = 2d * (zr * dy + zi * dx) + 2d * dx * dy;
+                    dx = nextX;
+                    dy = nextY;
+                    referenceIndex++;
+                    iteration++;
+                }
+
+                var referenceX = referenceIndex < length ? re[referenceIndex] : 0d;
+                var referenceY = referenceIndex < length ? im[referenceIndex] : 0d;
+                var fullX = referenceX + dx;
+                var fullY = referenceY + dy;
+                var magnitude = fullX * fullX + fullY * fullY;
+
+                if (magnitude > MandelbrotSamplerD.Bailout)
+                {
+                    EscapeMath.HolomorphicSlope(fullX, fullY, derX, derY, out slopeX, out slopeY);
+                    return EscapeMath.Smooth(iteration, magnitude, MandelbrotSamplerD.Bailout);
+                }
+
+                if (referenceIndex >= length - 1 ||
+                    magnitude < dx * dx + dy * dy ||
+                    magnitude < GlitchToleranceSquared * (referenceX * referenceX + referenceY * referenceY))
+                {
                     re = critical.Re;
                     im = critical.Im;
                     length = critical.Length;

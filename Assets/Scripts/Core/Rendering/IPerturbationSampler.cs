@@ -39,6 +39,16 @@ namespace FractalVisio.Core
 
         /// <summary>Escape value for the pixel at offset (<paramref name="deltaCx"/>, <paramref name="deltaCy"/>) from the reference.</summary>
         float Sample(ReferenceOrbit orbit, double deltaCx, double deltaCy, int maxIterations, CancellationToken token);
+
+        /// <summary>
+        /// <see cref="Sample"/> with the relief slope, as <see cref="IEscapeSamplerD.SampleWithSlope"/>.
+        /// The derivative is of the pixel's full orbit, iterated in fp64 from the full z = Z + d (it
+        /// needs a direction, not digits); a BLA skip moves it as <c>dz' = A dz + B</c>, the
+        /// derivative of the skip itself, and a rebase leaves it alone, since z does not change.
+        /// </summary>
+        float SampleWithSlope(
+            ReferenceOrbit orbit, double deltaCx, double deltaCy, int maxIterations, CancellationToken token,
+            out double slopeX, out double slopeY);
     }
 
     /// <summary>

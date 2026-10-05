@@ -28,6 +28,15 @@ namespace FractalVisio.Rendering
         private static readonly int ColorSmoothId = Shader.PropertyToID("_ColorSmooth");
         private static readonly int ColorLogarithmicId = Shader.PropertyToID("_ColorLogarithmic");
         private static readonly int InteriorColorId = Shader.PropertyToID("_InteriorColor");
+        private static readonly int ReliefLightId = Shader.PropertyToID("_ReliefLight");
+        private static readonly int ReliefHalfId = Shader.PropertyToID("_ReliefHalf");
+        private static readonly int ReliefToneId = Shader.PropertyToID("_ReliefTone");
+
+        /// <summary>
+        /// Shader variant that carries the orbit's derivative. A keyword rather than a uniform: the
+        /// derivative costs the inner loop, and the picture without relief must not pay for it.
+        /// </summary>
+        private const string ReliefKeyword = "FRACTAL_RELIEF";
 
         private readonly Texture2D palette;
         private readonly Color32[] palettePixels = new Color32[PaletteData.Resolution];
@@ -115,6 +124,19 @@ namespace FractalVisio.Rendering
             material.SetFloat(ColorSmoothId, coloring.Smooth ? 1f : 0f);
             material.SetFloat(ColorLogarithmicId, coloring.Mode == ColoringMode.Logarithmic ? 1f : 0f);
             material.SetColor(InteriorColorId, coloring.InteriorColor);
+
+            if (coloring.Relief)
+            {
+                var light = ReliefLight.From(coloring);
+                material.SetVector(ReliefLightId, new Vector4(light.LightX, light.LightY, light.LightZ, light.Slope));
+                material.SetVector(ReliefHalfId, new Vector4(light.HalfX, light.HalfY, light.HalfZ, light.Shininess));
+                material.SetVector(ReliefToneId, new Vector4(ReliefLight.Ambient, light.InverseFlat, light.Specular, 0f));
+                material.EnableKeyword(ReliefKeyword);
+            }
+            else
+            {
+                material.DisableKeyword(ReliefKeyword);
+            }
 
             definition.BindMaterial(material, parameters);
 

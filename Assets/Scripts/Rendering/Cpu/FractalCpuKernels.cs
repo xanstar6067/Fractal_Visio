@@ -87,11 +87,22 @@ namespace FractalVisio.Rendering
         /// <summary>Escape values, one per pixel. Negative means the point never escaped.</summary>
         private float[] escape = Array.Empty<float>();
 
+        /// <summary>
+        /// Relief slope of each escape value (<see cref="ReliefLight.PackScreenSlope"/>). Allocated on
+        /// the first render with the relief on and filled only by such renders - which is why
+        /// <see cref="slopesValid"/> says whether the escape buffer's current values have them.
+        /// </summary>
+        private int[] slopes = Array.Empty<int>();
+
+        // Set at each publish by the render worker, read by a remap on the main thread.
+        private volatile bool slopesValid;
+
         /// <summary>Colours for the escape buffer, produced at publish time.</summary>
         private Color32[] mapScratch = Array.Empty<Color32>();
 
         // Scratch for smoothing a coarse pass (see MapInterpolated), reused between publishes.
         private float[] blockEscape = Array.Empty<float>();
+        private int[] blockSlopes = Array.Empty<int>();
         private Color32[] blockColors = Array.Empty<Color32>();
         private int[] columnLower = Array.Empty<int>();
         private int[] columnUpper = Array.Empty<int>();
@@ -177,7 +188,9 @@ namespace FractalVisio.Rendering
         /// <summary>
         /// Change palette or colouring. Recolours the existing escape buffer when the renderer is
         /// idle; while a render is running the next published pass picks the change up on its own.
-        /// Either way the fractal is not recomputed.
+        /// Either way the fractal is not recomputed - except that values rendered with the relief
+        /// off have no slopes, so turning it on shows the picture flat until the next render, which
+        /// the caller has to ask for.
         /// </summary>
         public void SetColoring(PaletteData palette, in ColoringSettings settings)
         {
@@ -339,6 +352,8 @@ namespace FractalVisio.Rendering
             renderTask = null;
             renderActive = false;
             escape = Array.Empty<float>();
+            slopes = Array.Empty<int>();
+            slopesValid = false;
             mapScratch = Array.Empty<Color32>();
             lock (publishLock)
             {
@@ -361,9 +376,10 @@ namespace FractalVisio.Rendering
         /// between passes, so the buffer holds one coherent step size rather than a torn pass
         /// boundary.
         /// </summary>
-        internal void PublishPass(float[] source, in ViewState view, int step)
+        internal void PublishPass(float[] source, in ViewState view, int step, bool withSlopes)
         {
             hasEscapeData = true;
+            slopesValid = withSlopes;
             MapAndStage(source, view, step);
         }
 
@@ -391,7 +407,7 @@ namespace FractalVisio.Rendering
         /// the canvas filter them up. Only the colours are smoothed: the escape buffer keeps its
         /// blocks, because later passes and remaps read it.
         /// </summary>
-        private void MapInterpolated(float[] source, Color32[] target, int step, ColorState state)
+        private void MapInterpolated(float[] source, int[] sourceSlopes, Color32[] target, int step, ColorState state)
         {
             var width = frameWidth;
             var height = frameHeight;
@@ -403,6 +419,11 @@ namespace FractalVisio.Rendering
             {
                 blockEscape = new float[samples];
                 blockColors = new Color32[samples];
+            }
+
+            if (sourceSlopes != null && blockSlopes.Length < samples)
+            {
+                blockSlopes = new int[samples];
             }
 
             if (columnLower.Length < width)
@@ -420,9 +441,20 @@ namespace FractalVisio.Rendering
                 {
                     blockEscape[blockRow + column] = source[sourceRow + column * step];
                 }
+
+                if (sourceSlopes != null)
+                {
+                    for (var column = 0; column < columns; column++)
+                    {
+                        blockSlopes[blockRow + column] = sourceSlopes[sourceRow + column * step];
+                    }
+                }
             }
 
-            mapper.MapRange(blockEscape, blockColors, 0, samples, state.Palette, state.Settings);
+            // The lighting is per sample, like the palette: the blend below smooths lit colours,
+            // not slopes, so a coarse pass reads as the same relief out of focus.
+            mapper.MapRange(
+                blockEscape, sourceSlopes != null ? blockSlopes : null, blockColors, 0, samples, state.Palette, state.Settings);
 
             // Samples stay at pixel (k * step)'s centre at every refinement level.
             // Interpolate that fixed lattice; centring them in their blocks would shift
@@ -501,10 +533,11 @@ namespace FractalVisio.Rendering
 
             var state = colorState;
             var localTarget = mapScratch;
+            var localSlopes = state.Settings.Relief && slopesValid && slopes.Length == length ? slopes : null;
 
             if (step > 1 && frameWidth * frameHeight == length)
             {
-                MapInterpolated(source, localTarget, step, state);
+                MapInterpolated(source, localSlopes, localTarget, step, state);
             }
             else
             {
@@ -517,7 +550,7 @@ namespace FractalVisio.Rendering
 
                 if (chunks <= 1)
                 {
-                    localMapper.MapRange(localSource, localTarget, 0, length, palette, settings);
+                    localMapper.MapRange(localSource, localSlopes, localTarget, 0, length, palette, settings);
                 }
                 else
                 {
@@ -526,7 +559,7 @@ namespace FractalVisio.Rendering
                         chunks,
                         new ParallelOptions { MaxDegreeOfParallelism = workerCount },
                         index => localMapper.MapRange(
-                            localSource, localTarget, index * chunk, chunk, palette, settings));
+                            localSource, localSlopes, localTarget, index * chunk, chunk, palette, settings));
                 }
             }
 
@@ -564,6 +597,14 @@ namespace FractalVisio.Rendering
             }
 
             EnsureFrameBuffer(target.width, target.height);
+
+            // Whether this run computes slopes is decided once, here: a run must not change its mind
+            // half-way, or one published pass would hold slopes for only some of its pixels.
+            var relief = colorState.Settings.Relief;
+            if (relief && slopes.Length != escape.Length)
+            {
+                slopes = new int[escape.Length];
+            }
 
             var minDim = Math.Min(frameWidth, frameHeight);
             var floor = 0;
@@ -608,7 +649,7 @@ namespace FractalVisio.Rendering
             cancellation = new CancellationTokenSource();
             var token = cancellation.Token;
             var job = new RenderJob(
-                this, escape, frameWidth, frameHeight, visibleRect, activeRequest,
+                this, escape, relief ? slopes : null, frameWidth, frameHeight, visibleRect, activeRequest,
                 budget, workerRanks, referenceOrbit, floor, ceiling);
             renderActive = true;
             renderTask = Task.Run(() => RenderProgressive(job, token));
@@ -702,6 +743,9 @@ namespace FractalVisio.Rendering
             {
                 escape[i] = EscapeMath.Interior;
             }
+
+            slopes = Array.Empty<int>();
+            slopesValid = false;
 
             mapScratch = new Color32[required];
             lock (publishLock)
@@ -866,10 +910,13 @@ namespace FractalVisio.Rendering
             }
         }
 
-        /// <summary>Pixel to plane point to escape value. Structs only - see IEscapeSamplerD.</summary>
+        /// <summary>
+        /// Pixel to plane point to escape value, and with the relief on to its packed screen-space
+        /// slope (0 otherwise). Structs only - see IEscapeSamplerD.
+        /// </summary>
         private interface IPlaneSampler
         {
-            float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token);
+            float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token, out int slope);
         }
 
         private readonly struct PlaneSamplerD<TSampler> : IPlaneSampler
@@ -882,12 +929,20 @@ namespace FractalVisio.Rendering
                 this.sampler = sampler;
             }
 
-            public float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token)
+            public float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token, out int slope)
             {
                 Normalize(job, pixelX, pixelY, out var rotatedX, out var rotatedY);
                 var cx = job.CenterXDouble + job.ScaleDouble * rotatedX;
                 var cy = job.CenterYDouble + job.ScaleDouble * rotatedY;
-                return sampler.Sample(cx, cy, job.MaxIterations, token);
+                if (!job.Relief)
+                {
+                    slope = 0;
+                    return sampler.Sample(cx, cy, job.MaxIterations, token);
+                }
+
+                var value = sampler.SampleWithSlope(cx, cy, job.MaxIterations, token, out var slopeX, out var slopeY);
+                slope = ReliefLight.PackScreenSlope(slopeX, slopeY, job.RotationCos, job.RotationSin);
+                return value;
             }
         }
 
@@ -901,8 +956,11 @@ namespace FractalVisio.Rendering
                 this.sampler = sampler;
             }
 
-            public float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token)
+            public float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token, out int slope)
             {
+                // The double-double samplers are the exact reference perturbation is checked against,
+                // not a render path any fractal takes: they carry no derivative, and light flat.
+                slope = 0;
                 Normalize(job, pixelX, pixelY, out var rotatedX, out var rotatedY);
                 var cx = DoubleDouble.Add(job.CenterX, DoubleDouble.Multiply(job.Scale, rotatedX));
                 var cy = DoubleDouble.Add(job.CenterY, DoubleDouble.Multiply(job.Scale, rotatedY));
@@ -922,13 +980,23 @@ namespace FractalVisio.Rendering
                 this.orbit = orbit;
             }
 
-            public float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token)
+            public float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token, out int slope)
             {
                 // The offset from the centre is a screen-sized number times the scale: fp64 holds
                 // it to full relative precision at any depth, which is what perturbation relies on.
                 Normalize(job, pixelX, pixelY, out var rotatedX, out var rotatedY);
-                return sampler.Sample(
-                    orbit, job.ScaleDouble * rotatedX, job.ScaleDouble * rotatedY, job.MaxIterations, token);
+                var deltaX = job.ScaleDouble * rotatedX;
+                var deltaY = job.ScaleDouble * rotatedY;
+                if (!job.Relief)
+                {
+                    slope = 0;
+                    return sampler.Sample(orbit, deltaX, deltaY, job.MaxIterations, token);
+                }
+
+                var value = sampler.SampleWithSlope(
+                    orbit, deltaX, deltaY, job.MaxIterations, token, out var slopeX, out var slopeY);
+                slope = ReliefLight.PackScreenSlope(slopeX, slopeY, job.RotationCos, job.RotationSin);
+                return value;
             }
         }
 
@@ -992,7 +1060,7 @@ namespace FractalVisio.Rendering
                     return;
                 }
 
-                job.Owner.PublishPass(job.Escape, job.View, step);
+                job.Owner.PublishPass(job.Escape, job.View, step, job.Relief);
             }
         }
 
@@ -1081,7 +1149,7 @@ namespace FractalVisio.Rendering
                     // Nested grids must sample the same coordinates where they overlap.
                     // A block-centred sample moves when step halves and cannot be reused
                     // by the coarse-grid skip above, even at the final one-pixel pass.
-                    var value = sampler.SampleAt(job, bx, by, token);
+                    var value = sampler.SampleAt(job, bx, by, token, out var slope);
                     produced++;
 
                     // A cancelled sampler returns whatever it had; that value must not reach the
@@ -1092,6 +1160,10 @@ namespace FractalVisio.Rendering
                     }
 
                     FillBlock(job.Escape, job.Width, job.Height, bx, by, step, value);
+                    if (job.Slopes != null)
+                    {
+                        FillBlock(job.Slopes, job.Width, job.Height, bx, by, step, slope);
+                    }
                 }
             }
 
@@ -1104,7 +1176,7 @@ namespace FractalVisio.Rendering
             public int Next;
         }
 
-        private static void FillBlock(float[] buffer, int width, int height, int originX, int originY, int step, float value)
+        private static void FillBlock<T>(T[] buffer, int width, int height, int originX, int originY, int step, T value)
         {
             var x1 = originX + step;
             if (x1 > width)
@@ -1180,6 +1252,7 @@ namespace FractalVisio.Rendering
             public RenderJob(
                 FractalCpuRenderer owner,
                 float[] escape,
+                int[] slopes,
                 int width,
                 int height,
                 RectInt visibleRect,
@@ -1195,6 +1268,7 @@ namespace FractalVisio.Rendering
                 Orbit = orbit;
                 Owner = owner;
                 Escape = escape;
+                Slopes = slopes;
                 Width = width;
                 Height = height;
                 Definition = request.Definition;
@@ -1227,6 +1301,12 @@ namespace FractalVisio.Rendering
 
             /// <summary>Escape values, one per pixel. Colour is applied later, at publish time.</summary>
             public float[] Escape { get; }
+
+            /// <summary>Relief slope of each escape value, or null when this run computes none.</summary>
+            public int[] Slopes { get; }
+
+            /// <summary>Whether the samplers carry the orbit's derivative for the relief.</summary>
+            public bool Relief => Slopes != null;
 
             public int Width { get; }
             public int Height { get; }

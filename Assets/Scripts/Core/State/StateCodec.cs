@@ -49,7 +49,12 @@ namespace FractalVisio.Core
                 mode = (int)settings.Mode,
                 cycleLength = settings.CycleLength,
                 offset = settings.Offset,
-                interior = FormatColor(settings.InteriorColor)
+                interior = FormatColor(settings.InteriorColor),
+                relief = settings.Relief,
+                lightAngle = settings.LightAngle,
+                lightHeight = settings.LightHeight,
+                reliefDepth = settings.ReliefDepth,
+                reliefShine = settings.ReliefShine
             };
         }
 
@@ -68,6 +73,15 @@ namespace FractalVisio.Core
             if (TryParseColor(dto.interior, out var interior))
             {
                 result.InteriorColor = interior;
+            }
+
+            result.Relief = dto.relief;
+            if (dto.lightHeight > 0f)
+            {
+                result.LightAngle = dto.lightAngle;
+                result.LightHeight = dto.lightHeight;
+                result.ReliefDepth = dto.reliefDepth;
+                result.ReliefShine = dto.reliefShine;
             }
 
             return result.Sanitized();

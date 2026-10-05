@@ -54,6 +54,49 @@ namespace FractalVisio.Fractals
 
             return EscapeMath.Interior;
         }
+
+        public float SampleWithSlope(
+            double cx, double cy, int maxIterations, CancellationToken token, out double slopeX, out double slopeY)
+        {
+            slopeX = 0d;
+            slopeY = 0d;
+
+            var zx = 0d;
+            var zy = 0d;
+            var dx = 0d;
+            var dy = 0d;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 127) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                // w = z^(p-1): the derivative needs it, and z^p is one more product.
+                MultibrotDefinition.PowerMinusOne(zx, zy, power, out var wx, out var wy);
+
+                // dz <- p z^(p-1) dz + 1
+                var nextDx = power * (wx * dx - wy * dy) + 1d;
+                dy = power * (wx * dy + wy * dx);
+                dx = nextDx;
+
+                var nextX = wx * zx - wy * zy + cx;
+                zy = wx * zy + wy * zx + cy;
+                zx = nextX;
+                iteration++;
+
+                var squared = zx * zx + zy * zy;
+                if (squared > Bailout)
+                {
+                    EscapeMath.HolomorphicSlope(zx, zy, dx, dy, out slopeX, out slopeY);
+                    return EscapeMath.Smooth(iteration, squared, Bailout, power);
+                }
+            }
+
+            return EscapeMath.Interior;
+        }
     }
 
     /// <summary>Same iteration in double-double: the reference the perturbation sampler is checked against.</summary>
@@ -198,6 +241,90 @@ namespace FractalVisio.Fractals
 
                 if (magnitude > MultibrotSamplerD.Bailout)
                 {
+                    return EscapeMath.Smooth(iteration, magnitude, MultibrotSamplerD.Bailout, power);
+                }
+
+                if (referenceIndex >= length - 1 ||
+                    magnitude < dx * dx + dy * dy ||
+                    magnitude < GlitchToleranceSquared * (referenceX * referenceX + referenceY * referenceY))
+                {
+                    dx = fullX - re[0];
+                    dy = fullY - im[0];
+                    referenceIndex = 0;
+                }
+            }
+
+            return EscapeMath.Interior;
+        }
+
+        public float SampleWithSlope(
+            ReferenceOrbit orbit, double deltaCx, double deltaCy, int maxIterations, CancellationToken token,
+            out double slopeX, out double slopeY)
+        {
+            slopeX = 0d;
+            slopeY = 0d;
+
+            var re = orbit.Re;
+            var im = orbit.Im;
+            var length = orbit.Length;
+
+            var dx = 0d;
+            var dy = 0d;
+            var derX = 0d;
+            var derY = 0d;
+            var referenceIndex = 0;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 1023) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                var zr = re[referenceIndex];
+                var zi = im[referenceIndex];
+                var fx = zr + dx;
+                var fy = zi + dy;
+
+                // dz <- p z^(p-1) dz + 1 with the pixel's own z.
+                MultibrotDefinition.PowerMinusOne(fx, fy, power, out var px, out var py);
+                var nextDerX = power * (px * derX - py * derY) + 1d;
+                derY = power * (px * derY + py * derX);
+                derX = nextDerX;
+
+                var tx = 1d;
+                var ty = 0d;
+                var wx = 1d;
+                var wy = 0d;
+                for (var m = 1; m < power; m++)
+                {
+                    var nextWx = wx * zr - wy * zi;
+                    wy = wx * zi + wy * zr;
+                    wx = nextWx;
+
+                    var productX = fx * tx - fy * ty;
+                    var productY = fx * ty + fy * tx;
+                    tx = wx + productX;
+                    ty = wy + productY;
+                }
+
+                var nextX = dx * tx - dy * ty + deltaCx;
+                var nextY = dx * ty + dy * tx + deltaCy;
+                dx = nextX;
+                dy = nextY;
+                referenceIndex++;
+                iteration++;
+
+                var referenceX = referenceIndex < length ? re[referenceIndex] : 0d;
+                var referenceY = referenceIndex < length ? im[referenceIndex] : 0d;
+                var fullX = referenceX + dx;
+                var fullY = referenceY + dy;
+                var magnitude = fullX * fullX + fullY * fullY;
+
+                if (magnitude > MultibrotSamplerD.Bailout)
+                {
+                    EscapeMath.HolomorphicSlope(fullX, fullY, derX, derY, out slopeX, out slopeY);
                     return EscapeMath.Smooth(iteration, magnitude, MultibrotSamplerD.Bailout, power);
                 }
 

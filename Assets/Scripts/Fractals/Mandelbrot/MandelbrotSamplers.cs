@@ -53,6 +53,54 @@ namespace FractalVisio.Fractals
 
             return EscapeMath.Interior;
         }
+
+        public float SampleWithSlope(
+            double cx, double cy, int maxIterations, CancellationToken token, out double slopeX, out double slopeY)
+        {
+            slopeX = 0d;
+            slopeY = 0d;
+
+            var x = cx - 0.25d;
+            var y2 = cy * cy;
+            var q = x * x + y2;
+            if (q * (q + x) <= 0.25d * y2 || (cx + 1d) * (cx + 1d) + y2 <= 0.0625d)
+            {
+                return EscapeMath.Interior;
+            }
+
+            var zx = 0d;
+            var zy = 0d;
+            var dx = 0d;
+            var dy = 0d;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 127) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                // dz <- 2 z dz + 1, from z before it moves on.
+                var nextDx = 2d * (zx * dx - zy * dy) + 1d;
+                dy = 2d * (zx * dy + zy * dx);
+                dx = nextDx;
+
+                var nextX = zx * zx - zy * zy + cx;
+                zy = 2d * zx * zy + cy;
+                zx = nextX;
+                iteration++;
+
+                var squared = zx * zx + zy * zy;
+                if (squared > Bailout)
+                {
+                    EscapeMath.HolomorphicSlope(zx, zy, dx, dy, out slopeX, out slopeY);
+                    return EscapeMath.Smooth(iteration, squared, Bailout);
+                }
+            }
+
+            return EscapeMath.Interior;
+        }
     }
 
     /// <summary>Same iteration in double-double, for scales fp64 can no longer separate.</summary>
@@ -170,6 +218,94 @@ namespace FractalVisio.Fractals
                     magnitude < GlitchToleranceSquared * (referenceX * referenceX + referenceY * referenceY))
                 {
                     // Z_0 = 0 for the Mandelbrot, so d = z - Z_0 is z itself.
+                    dx = fullX - re[0];
+                    dy = fullY - im[0];
+                    referenceIndex = 0;
+                }
+            }
+
+            return EscapeMath.Interior;
+        }
+
+        public float SampleWithSlope(
+            ReferenceOrbit orbit, double deltaCx, double deltaCy, int maxIterations, CancellationToken token,
+            out double slopeX, out double slopeY)
+        {
+            slopeX = 0d;
+            slopeY = 0d;
+
+            var re = orbit.Re;
+            var im = orbit.Im;
+            var length = orbit.Length;
+            var bla = orbit.HasBla ? orbit.Bla : null;
+
+            var dx = 0d;
+            var dy = 0d;
+            var derX = 0d;
+            var derY = 0d;
+            var referenceIndex = 0;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 1023) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                if (bla != null &&
+                    bla.TryLookup(referenceIndex, dx * dx + dy * dy, maxIterations - iteration,
+                        out var aX, out var aY, out var bX, out var bY, out var steps))
+                {
+                    var skippedX = aX * dx - aY * dy + bX * deltaCx - bY * deltaCy;
+                    var skippedY = aX * dy + aY * dx + bX * deltaCy + bY * deltaCx;
+                    dx = skippedX;
+                    dy = skippedY;
+
+                    // The skip is d <- A d + B dc, so its derivative is dz <- A dz + B.
+                    var nextDerX = aX * derX - aY * derY + bX;
+                    derY = aX * derY + aY * derX + bY;
+                    derX = nextDerX;
+
+                    referenceIndex += steps;
+                    iteration += steps;
+                }
+                else
+                {
+                    var zr = re[referenceIndex];
+                    var zi = im[referenceIndex];
+
+                    // dz <- 2 z dz + 1 with the pixel's own z, before it moves on.
+                    var fx = zr + dx;
+                    var fy = zi + dy;
+                    var nextDerX = 2d * (fx * derX - fy * derY) + 1d;
+                    derY = 2d * (fx * derY + fy * derX);
+                    derX = nextDerX;
+
+                    var nextX = 2d * (zr * dx - zi * dy) + dx * dx - dy * dy + deltaCx;
+                    var nextY = 2d * (zr * dy + zi * dx) + 2d * dx * dy + deltaCy;
+                    dx = nextX;
+                    dy = nextY;
+                    referenceIndex++;
+                    iteration++;
+                }
+
+                var referenceX = referenceIndex < length ? re[referenceIndex] : 0d;
+                var referenceY = referenceIndex < length ? im[referenceIndex] : 0d;
+                var fullX = referenceX + dx;
+                var fullY = referenceY + dy;
+                var magnitude = fullX * fullX + fullY * fullY;
+
+                if (magnitude > MandelbrotSamplerD.Bailout)
+                {
+                    EscapeMath.HolomorphicSlope(fullX, fullY, derX, derY, out slopeX, out slopeY);
+                    return EscapeMath.Smooth(iteration, magnitude, MandelbrotSamplerD.Bailout);
+                }
+
+                if (referenceIndex >= length - 1 ||
+                    magnitude < dx * dx + dy * dy ||
+                    magnitude < GlitchToleranceSquared * (referenceX * referenceX + referenceY * referenceY))
+                {
                     dx = fullX - re[0];
                     dy = fullY - im[0];
                     referenceIndex = 0;

@@ -16,9 +16,13 @@ namespace FractalVisio.Core
         /// <summary>
         /// Map <paramref name="count"/> values starting at <paramref name="start"/>. A negative
         /// escape value means the point never escaped - see <see cref="IEscapeSamplerD"/>.
+        /// <paramref name="slopes"/> is the relief slope of each value, packed by
+        /// <see cref="ReliefLight.PackScreenSlope"/>, or null when the values were rendered without
+        /// one; it is read only while <see cref="ColoringSettings.Relief"/> is on.
         /// </summary>
         void MapRange(
             float[] escapeValues,
+            int[] slopes,
             Color32[] target,
             int start,
             int count,

@@ -50,6 +50,28 @@ namespace FractalVisio.Core
         public Color32 InteriorColor;
 
         /// <summary>
+        /// Light the picture as a relief (<see cref="ReliefLight"/>). The only colouring switch that
+        /// is not a pure remap: the CPU path keeps the slope of each pixel only while this is on, so
+        /// turning it on costs one render. Everything below it is a remap again.
+        /// </summary>
+        public bool Relief;
+
+        /// <summary>
+        /// Where the light comes from, in degrees counter-clockwise from the right edge of the
+        /// screen. Screen space, not plane space: the sun stays where it is when the view turns.
+        /// </summary>
+        public float LightAngle;
+
+        /// <summary>Height of the light above the horizon in degrees, 10 (grazing) to 90 (overhead).</summary>
+        public float LightHeight;
+
+        /// <summary>How steep the relief is, 0..1.</summary>
+        public float ReliefDepth;
+
+        /// <summary>Strength and tightness of the highlights, 0..1.</summary>
+        public float ReliefShine;
+
+        /// <summary>
         /// Palette position for an escape count, before the wrap. Shared so the CPU mapper is the
         /// single definition and the shader has something exact to mirror.
         /// </summary>
@@ -73,14 +95,31 @@ namespace FractalVisio.Core
             // a palette on does not also change the scale of the banding.
             CycleLength = 48f,
             Offset = 0f,
-            InteriorColor = DefaultInteriorColor
+            InteriorColor = DefaultInteriorColor,
+            Relief = false,
+            LightAngle = DefaultLightAngle,
+            LightHeight = DefaultLightHeight,
+            ReliefDepth = DefaultReliefDepth,
+            ReliefShine = DefaultReliefShine
         }.Sanitized();
+
+        // Light from the upper left, the direction every embossed picture is drawn with.
+        public const float DefaultLightAngle = 135f;
+        public const float DefaultLightHeight = 45f;
+        public const float DefaultReliefDepth = 0.5f;
+        public const float DefaultReliefShine = 0.35f;
+        public const float MinimumLightHeight = 10f;
+        public const float MaximumLightHeight = 90f;
 
         public ColoringSettings Sanitized()
         {
             var result = this;
             result.CycleLength = Mathf.Clamp(result.CycleLength, 1f, 4096f);
             result.Offset = result.Offset - Mathf.Floor(result.Offset);
+            result.LightAngle = Mathf.Repeat(result.LightAngle, 360f);
+            result.LightHeight = Mathf.Clamp(result.LightHeight, MinimumLightHeight, MaximumLightHeight);
+            result.ReliefDepth = Mathf.Clamp01(result.ReliefDepth);
+            result.ReliefShine = Mathf.Clamp01(result.ReliefShine);
             return result;
         }
 
@@ -92,7 +131,12 @@ namespace FractalVisio.Core
                    Mathf.Approximately(Offset, other.Offset) &&
                    InteriorColor.r == other.InteriorColor.r &&
                    InteriorColor.g == other.InteriorColor.g &&
-                   InteriorColor.b == other.InteriorColor.b;
+                   InteriorColor.b == other.InteriorColor.b &&
+                   Relief == other.Relief &&
+                   Mathf.Approximately(LightAngle, other.LightAngle) &&
+                   Mathf.Approximately(LightHeight, other.LightHeight) &&
+                   Mathf.Approximately(ReliefDepth, other.ReliefDepth) &&
+                   Mathf.Approximately(ReliefShine, other.ReliefShine);
         }
     }
 }

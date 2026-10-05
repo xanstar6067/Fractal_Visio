@@ -49,6 +49,46 @@ namespace FractalVisio.Fractals
 
             return EscapeMath.Interior;
         }
+
+        public float SampleWithSlope(
+            double cx, double cy, int maxIterations, CancellationToken token, out double slopeX, out double slopeY)
+        {
+            slopeX = 0d;
+            slopeY = 0d;
+
+            var zx = 0d;
+            var zy = 0d;
+            var j00 = 0d;
+            var j01 = 0d;
+            var j10 = 0d;
+            var j11 = 0d;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 127) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                // The fold makes the derivative a real 2x2 Jacobian rather than a complex number.
+                BurningShipStep.JacobianStep(zx, zy, 1d, ref j00, ref j01, ref j10, ref j11);
+
+                var nextX = zx * zx - zy * zy + cx;
+                zy = cy - 2d * System.Math.Abs(zx * zy);
+                zx = nextX;
+                iteration++;
+
+                var squared = zx * zx + zy * zy;
+                if (squared > bailout)
+                {
+                    EscapeMath.JacobianSlope(zx, zy, j00, j01, j10, j11, out slopeX, out slopeY);
+                    return EscapeMath.Smooth(iteration, squared, bailout);
+                }
+            }
+
+            return EscapeMath.Interior;
+        }
     }
 
     public readonly struct BurningShipSamplerDD : IEscapeSamplerDD
@@ -168,6 +208,70 @@ namespace FractalVisio.Fractals
 
             return EscapeMath.Interior;
         }
+
+        public float SampleWithSlope(
+            ReferenceOrbit orbit, double deltaCx, double deltaCy, int maxIterations, CancellationToken token,
+            out double slopeX, out double slopeY)
+        {
+            slopeX = 0d;
+            slopeY = 0d;
+
+            var re = orbit.Re;
+            var im = orbit.Im;
+            var length = orbit.Length;
+
+            var dx = 0d;
+            var dy = 0d;
+            var j00 = 0d;
+            var j01 = 0d;
+            var j10 = 0d;
+            var j11 = 0d;
+            var referenceIndex = 0;
+            var iteration = 0;
+
+            while (iteration < maxIterations)
+            {
+                if ((iteration & 1023) == 0 && token.IsCancellationRequested)
+                {
+                    return EscapeMath.Interior;
+                }
+
+                var zr = re[referenceIndex];
+                var zi = im[referenceIndex];
+                BurningShipStep.JacobianStep(zr + dx, zi + dy, 1d, ref j00, ref j01, ref j10, ref j11);
+
+                BurningShipStep.Perturb(zr, zi, ref dx, ref dy);
+                dx += deltaCx;
+                dy += deltaCy;
+                referenceIndex++;
+                iteration++;
+
+                var referenceX = referenceIndex < length ? re[referenceIndex] : 0d;
+                var referenceY = referenceIndex < length ? im[referenceIndex] : 0d;
+                var fullX = referenceX + dx;
+                var fullY = referenceY + dy;
+                var magnitude = fullX * fullX + fullY * fullY;
+
+                if (magnitude > bailout)
+                {
+                    EscapeMath.JacobianSlope(fullX, fullY, j00, j01, j10, j11, out slopeX, out slopeY);
+                    return EscapeMath.Smooth(iteration, magnitude, bailout);
+                }
+
+                if (referenceIndex >= length - 1 ||
+                    magnitude < dx * dx + dy * dy ||
+                    System.Math.Abs(fullX) < System.Math.Abs(dx) ||
+                    System.Math.Abs(fullY) < System.Math.Abs(dy) ||
+                    magnitude < GlitchToleranceSquared * (referenceX * referenceX + referenceY * referenceY))
+                {
+                    dx = fullX;
+                    dy = fullY;
+                    referenceIndex = 0;
+                }
+            }
+
+            return EscapeMath.Interior;
+        }
     }
 
     /// <summary>
@@ -222,6 +326,23 @@ namespace FractalVisio.Fractals
 
                 Advance(ref zx, ref zy, DoubleDouble.Square(zx), DoubleDouble.Square(zy), cx, cy);
             }
+        }
+
+        /// <summary>
+        /// The fold's turn in the step's Jacobian: y' = -2|xy| has the derivative of 2xy times
+        /// -sign(xy). On an axis the fold has no derivative; either side will do for a direction.
+        /// </summary>
+        public static double JacobianSign(double x, double y) => x * y >= 0d ? -1d : 1d;
+
+        /// <summary>
+        /// One step of the relief derivative, from the pixel's z = (<paramref name="x"/>,
+        /// <paramref name="y"/>) before the step. <paramref name="identity"/> is 1 for the ship (c is
+        /// the pixel), 0 for its Julia sets.
+        /// </summary>
+        public static void JacobianStep(
+            double x, double y, double identity, ref double j00, ref double j01, ref double j10, ref double j11)
+        {
+            EscapeMath.QuadraticJacobianStep(x, y, 1d, JacobianSign(x, y), identity, ref j00, ref j01, ref j10, ref j11);
         }
 
         /// <summary>

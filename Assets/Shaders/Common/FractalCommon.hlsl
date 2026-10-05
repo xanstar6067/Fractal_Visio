@@ -32,6 +32,11 @@ float _ColorOffset;
 float _ColorSmooth;
 float _ColorLogarithmic;
 float4 _InteriorColor;
+// Relief (FRACTAL_RELIEF), from Core/Coloring/ReliefLight.cs: sun direction and slope,
+// highlight direction and exponent, ambient / 1 over flat light / highlight strength.
+float4 _ReliefLight;
+float4 _ReliefHalf;
+float4 _ReliefTone;
 FRACTAL_EXTRA_UNIFORMS
 CBUFFER_END
 
@@ -121,6 +126,71 @@ half4 FractalEscapeColor(float escapeCount)
     float logPosition = log(1.0 + max(count, 0.0)) / log(1.0 + cycle);
     float normalized = lerp(linearPosition, logPosition, saturate(_ColorLogarithmic));
     return SAMPLE_TEXTURE2D(_PaletteTex, sampler_PaletteTex, float2(frac(normalized + _ColorOffset), 0.5));
+}
+
+// ---- Relief -------------------------------------------------------------------------------------
+// A shader that supports it declares
+//   #pragma multi_compile_local __ FRACTAL_RELIEF
+// carries the orbit's derivative under #if defined(FRACTAL_RELIEF) and returns
+// FractalReliefColor(count, FractalSlope...(z, derivative)). See Core/Coloring/ReliefLight.cs.
+
+// Slope from a complex derivative: grad log|z| points along z conj(dz). Mirrors
+// EscapeMath.HolomorphicSlope.
+float2 FractalSlope(float2 z, float2 dz)
+{
+    return float2(z.x * dz.x + z.y * dz.y, z.y * dz.x - z.x * dz.y);
+}
+
+// Slope from a real Jacobian j = (dx/dcx, dx/dcy, dy/dcx, dy/dcy): J^T z. Mirrors
+// EscapeMath.JacobianSlope.
+float2 FractalSlopeJacobian(float2 z, float4 j)
+{
+    return float2(j.x * z.x + j.z * z.y, j.y * z.x + j.w * z.y);
+}
+
+// One Jacobian step of the z^2 family, from z before the step. Mirrors
+// EscapeMath.QuadraticJacobianStep: rows scaled by a and b, plus `identity` on the diagonal.
+float4 FractalJacobianStep(float2 z, float a, float b, float identity, float4 j)
+{
+    float x2 = 2.0 * z.x;
+    float y2 = 2.0 * z.y;
+    return float4(
+        a * (x2 * j.x - y2 * j.z) + identity,
+        a * (x2 * j.y - y2 * j.w),
+        b * (y2 * j.x + x2 * j.z),
+        b * (y2 * j.y + x2 * j.w) + identity);
+}
+
+// The palette colour lit as a relief. Must stay in step with EscapeColorMapper.Shade - the CPU
+// path lights its buffer with the same formula, and the backend switches mid-zoom.
+half4 FractalReliefColor(float escapeCount, float2 planeSlope)
+{
+    half4 baseColor = FractalEscapeColor(escapeCount);
+    float3 color = baseColor.rgb;
+
+    // Plane slope to screen slope: the view's rotation turned back (ReliefLight.PackScreenSlope).
+    float sinR, cosR;
+    sincos(_Rotation, sinR, cosR);
+    float2 slope = float2(planeSlope.x * cosR + planeSlope.y * sinR, -planeSlope.x * sinR + planeSlope.y * cosR);
+    float largest = max(abs(slope.x), abs(slope.y));
+    slope = largest > 0.0 ? slope / largest : float2(0.0, 0.0);
+    float slopeLength = length(slope);
+    slope = slopeLength > 0.0 ? slope / slopeLength : float2(0.0, 0.0);
+
+    float2 n = slope * _ReliefLight.w;
+    float inverseLength = rsqrt(dot(n, n) + 1.0);
+
+    float diffuse = max(0.0, (dot(n, _ReliefLight.xy) + _ReliefLight.z) * inverseLength);
+    float illumination = (_ReliefTone.x + (1.0 - _ReliefTone.x) * diffuse) * _ReliefTone.y;
+    color = illumination <= 1.0 ? color * illumination : lerp(color, 1.0, (illumination - 1.0) / illumination);
+
+    if (_ReliefTone.z > 0.0)
+    {
+        float facing = max(0.0, (dot(n, _ReliefHalf.xy) + _ReliefHalf.z) * inverseLength);
+        color = lerp(color, 1.0, saturate(_ReliefTone.z * pow(facing, _ReliefHalf.w)));
+    }
+
+    return half4(color, 1.0);
 }
 
 #endif // FRACTALVISIO_FRACTAL_COMMON_INCLUDED

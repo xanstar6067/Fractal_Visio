@@ -54,6 +54,17 @@ namespace FractalVisio.Core
 
         /// <summary>"#RRGGBB".</summary>
         public string interior;
+
+        /// <summary>
+        /// <see cref="ColoringSettings.Relief"/> and its light. Absent in files from before the relief
+        /// existed: off, and a <see cref="lightHeight"/> of 0 - below its minimum - reads as "use the
+        /// default light" for all four.
+        /// </summary>
+        public bool relief;
+        public float lightAngle;
+        public float lightHeight;
+        public float reliefDepth;
+        public float reliefShine;
     }
 
     /// <summary>A palette as its stops. See <see cref="PaletteData.Stops"/>.</summary>

@@ -80,6 +80,11 @@ plane.value = C = {0}
 
 # Панель «Цвет»
 colour.title = Цвет
+colour.relief = РЕЛЬЕФ
+colour.relief.off = Выкл
+colour.relief.on = Вкл
+colour.relief.depth = Глубина
+colour.relief.shine = Блеск
 
 # Закладки
 bookmarks.title = Закладки

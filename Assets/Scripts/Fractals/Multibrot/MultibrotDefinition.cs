@@ -91,6 +91,19 @@ namespace FractalVisio.Fractals
             }
         }
 
+        /// <summary>(x + iy)^(power - 1) in fp64: what the relief's derivative p z^(p-1) needs.</summary>
+        public static void PowerMinusOne(double x, double y, int power, out double resultX, out double resultY)
+        {
+            resultX = 1d;
+            resultY = 0d;
+            for (var k = 1; k < power; k++)
+            {
+                var nextX = resultX * x - resultY * y;
+                resultY = resultX * y + resultY * x;
+                resultX = nextX;
+            }
+        }
+
         private static int PowerOf(in FractalParameterSet parameters) =>
             ClampPower((int)System.Math.Round(parameters.Get(PowerKey, MinimumPower)));
     }
