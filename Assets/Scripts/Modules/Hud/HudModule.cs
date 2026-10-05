@@ -126,8 +126,8 @@ namespace FractalVisio.Modules
                     "scale  ", scale.ToString("0.000000e+00", CultureInfo.InvariantCulture), "\n",
                     "zoom   x", zoom.ToString("0.###e+00", CultureInfo.InvariantCulture), "\n",
                     "rot    ", rotationDegrees.ToString("0.0", CultureInfo.InvariantCulture), " deg\n",
-                    "X  ", view.x.AsDecimal.ToString("G29", CultureInfo.InvariantCulture), "\n",
-                    "Y  ", view.y.AsDecimal.ToString("G29", CultureInfo.InvariantCulture));
+                    "X  ", view.x.ToInvariantString(), "\n",
+                    "Y  ", view.y.ToInvariantString());
             }
 
             if (computeBackendText == null)

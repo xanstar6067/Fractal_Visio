@@ -26,6 +26,16 @@ namespace FractalVisio.Core
         /// cost. A definition that declares it takes deep renders through
         /// <see cref="ICpuPassHost.RunPerturbed{T}"/> instead of its double-double sampler.
         /// </summary>
-        Perturbation = 1 << 3
+        Perturbation = 1 << 3,
+
+        /// <summary>
+        /// The perturbation reference may take any number of digits: below double-double's reach it
+        /// is built in fixed point (<see cref="FixedPointOrbit"/>), and the zoom goes on to
+        /// <c>RenderQuality.ArbitraryMinimumScale</c> (1e-280) instead of stopping near 1e-24. A
+        /// definition declares it only if its <see cref="IPerturbationSampler.BuildReference"/>
+        /// builds an orbit at the precision the depth asks for, rather than converting the centre to
+        /// double-double.
+        /// </summary>
+        Arbitrary = 1 << 4
     }
 }

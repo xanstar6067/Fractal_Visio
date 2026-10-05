@@ -148,8 +148,13 @@ namespace FractalVisio.Fractals
             this.constantY = constantY;
         }
 
-        public void BuildReference(ReferenceOrbit orbit, in DoubleDouble cx, in DoubleDouble cy, int maxIterations, double maxDeltaC)
+        public void BuildReference(
+            ReferenceOrbit orbit, in HighPrecision centerX, in HighPrecision centerY, int maxIterations, double maxDeltaC,
+            CancellationToken token)
         {
+            // Double-double is as deep as this fractal goes (PrecisionTier.Arbitrary is not declared).
+            var cx = DoubleDouble.FromHighPrecision(centerX);
+            var cy = DoubleDouble.FromHighPrecision(centerY);
             var constantReal = new DoubleDouble(constantX);
             var constantImaginary = new DoubleDouble(constantY);
             BurningShipStep.BuildOrbit(orbit, cx, cy, constantReal, constantImaginary, maxIterations, ReferenceEscape);

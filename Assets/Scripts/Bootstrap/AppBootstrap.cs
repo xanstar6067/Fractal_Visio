@@ -149,7 +149,7 @@ namespace FractalVisio.Bootstrap
                     Time.unscaledTimeAsDouble,
                     session.Interface.InertiaSeconds,
                     pinchZoomSpeed,
-                    quality.MinimumScale,
+                    session.MinimumScale,
                     session.MaximumScale);
             }
             else if (gesture.Changed)
@@ -209,6 +209,24 @@ namespace FractalVisio.Bootstrap
             EnsureInitialized();
             lastInteractionTime = -100f;
             session.SetCenter(centerX, centerY, scale);
+        }
+
+        /// <summary>
+        /// The same with the invariant text the debug HUD prints - a deep centre has more digits than
+        /// a decimal holds. Returns false if any of the three does not parse.
+        /// </summary>
+        public bool SetView(string centerX, string centerY, string scale)
+        {
+            if (!HighPrecision.TryParse(centerX, out var x) || !HighPrecision.TryParse(centerY, out var y) ||
+                !HighPrecision.TryParse(scale, out var s) || s.Sign <= 0)
+            {
+                return false;
+            }
+
+            EnsureInitialized();
+            lastInteractionTime = -100f;
+            session.SetCenter(x, y, s);
+            return true;
         }
 
         public void ResetView()
@@ -324,7 +342,7 @@ namespace FractalVisio.Bootstrap
                     gesture.ZoomRatio,
                     pinchZoomSpeed,
                     gesture.RotationDelta,
-                    quality.MinimumScale,
+                    session.MinimumScale,
                     session.MaximumScale);
             }
             else if (gesture.PanDelta.sqrMagnitude > 0.01f)

@@ -896,17 +896,103 @@ namespace FractalVisio.Rendering
             {
                 job.Owner.activePrecision = (int)PrecisionTier.Perturbation;
 
-                // The reference is the centre of the request. Every buffer pixel lies within half
-                // the buffer's diagonal of it, which is the bound the BLA radii are built against.
+                // Every buffer pixel lies within half the buffer's diagonal of the request's centre.
                 var orbit = job.Orbit;
-                var maxDeltaC = job.ScaleDouble * 0.5d * Math.Sqrt(job.Aspect * job.Aspect + 1d) * 1.01d;
-                sampler.BuildReference(orbit, job.CenterX, job.CenterY, job.MaxIterations, maxDeltaC);
-                if (token.IsCancellationRequested)
+                var reach = job.ScaleDouble * 0.5d * Math.Sqrt(job.Aspect * job.Aspect + 1d) * 1.01d;
+
+                if (TryReuse(orbit, reach, out var offsetX, out var offsetY))
                 {
-                    return;
+                    orbit.EnsureBlaCovers(reach + ComplexBlaTable.Magnitude(offsetX, offsetY));
+                }
+                else
+                {
+                    // A new reference at the centre, with headroom in the budget: a zoom raises the
+                    // budget a little on every request, and the next one should still fit.
+                    orbit.BuiltFor = null;
+                    var budget = job.MaxIterations + job.MaxIterations / 4 + 256;
+                    sampler.BuildReference(orbit, job.CenterHighX, job.CenterHighY, budget, reach, token);
+                    if (token.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    orbit.CenterX = job.CenterHighX;
+                    orbit.CenterY = job.CenterHighY;
+                    orbit.BuiltScale = job.ScaleDouble;
+                    orbit.BuiltIterations = budget;
+                    orbit.BuiltFor = new OrbitKey(job.Definition, job.Parameters);
+                    offsetX = 0d;
+                    offsetY = 0d;
                 }
 
-                RunPasses(job, new PlaneSamplerPerturbed<TSampler>(sampler, orbit), token);
+                RunPasses(job, new PlaneSamplerPerturbed<TSampler>(sampler, orbit, offsetX, offsetY), token);
+            }
+
+            /// <summary>
+            /// Whether the orbit of an earlier request can serve this one, and the offset of this
+            /// request's centre from it. Rebasing makes any reference point work, so what decides is
+            /// cost and digits: deep in, one orbit is hundreds of milliseconds of thousand-bit
+            /// arithmetic, and a pan or a pinch restarts the render several times a second. The orbit
+            /// stays while it is the same fractal, long enough, built for a depth whose digits still
+            /// cover this one, and close enough that offsets stay screen-sized.
+            /// </summary>
+            private bool TryReuse(ReferenceOrbit orbit, double reach, out double offsetX, out double offsetY)
+            {
+                offsetX = 0d;
+                offsetY = 0d;
+                if (!(orbit.BuiltFor is OrbitKey key) || !key.Matches(job.Definition, job.Parameters) ||
+                    job.MaxIterations > orbit.BuiltIterations ||
+                    job.ScaleDouble > orbit.BuiltScale * 4d ||
+                    job.ScaleDouble < orbit.BuiltScale * ReuseDepthFactor)
+                {
+                    return false;
+                }
+
+                offsetX = (job.CenterHighX - orbit.CenterX).AsDouble;
+                offsetY = (job.CenterHighY - orbit.CenterY).AsDouble;
+                return ComplexBlaTable.Magnitude(offsetX, offsetY) <= 2d * reach;
+            }
+        }
+
+        /// <summary>
+        /// How much deeper than its own view a reused orbit may serve: 2^-16. The orbit's digits
+        /// carry a 64-bit margin below its pixel spacing (<see cref="FixedPointOrbit.FractionBitsFor"/>);
+        /// this spends a quarter of it.
+        /// </summary>
+        private const double ReuseDepthFactor = 1d / 65536d;
+
+        /// <summary>Which fractal, with which parameters, an orbit was built for.</summary>
+        private sealed class OrbitKey
+        {
+            private readonly IFractalDefinition definition;
+            private readonly double[] values;
+
+            public OrbitKey(IFractalDefinition definition, in FractalParameterSet parameters)
+            {
+                this.definition = definition;
+                values = new double[parameters.Count];
+                for (var i = 0; i < values.Length; i++)
+                {
+                    values[i] = parameters[i];
+                }
+            }
+
+            public bool Matches(IFractalDefinition other, in FractalParameterSet parameters)
+            {
+                if (!ReferenceEquals(definition, other) || parameters.Count != values.Length)
+                {
+                    return false;
+                }
+
+                for (var i = 0; i < values.Length; i++)
+                {
+                    if (!values[i].Equals(parameters[i]))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
             }
         }
 
@@ -973,20 +1059,25 @@ namespace FractalVisio.Rendering
         {
             private readonly TSampler sampler;
             private readonly ReferenceOrbit orbit;
+            private readonly double offsetX;
+            private readonly double offsetY;
 
-            public PlaneSamplerPerturbed(TSampler sampler, ReferenceOrbit orbit)
+            /// <param name="offsetX">This request's centre minus the orbit's point, in the plane.</param>
+            public PlaneSamplerPerturbed(TSampler sampler, ReferenceOrbit orbit, double offsetX, double offsetY)
             {
                 this.sampler = sampler;
                 this.orbit = orbit;
+                this.offsetX = offsetX;
+                this.offsetY = offsetY;
             }
 
             public float SampleAt(RenderJob job, int pixelX, int pixelY, CancellationToken token, out int slope)
             {
-                // The offset from the centre is a screen-sized number times the scale: fp64 holds
+                // The offset from the reference is a screen-sized number times the scale: fp64 holds
                 // it to full relative precision at any depth, which is what perturbation relies on.
                 Normalize(job, pixelX, pixelY, out var rotatedX, out var rotatedY);
-                var deltaX = job.ScaleDouble * rotatedX;
-                var deltaY = job.ScaleDouble * rotatedY;
+                var deltaX = offsetX + job.ScaleDouble * rotatedX;
+                var deltaY = offsetY + job.ScaleDouble * rotatedY;
                 if (!job.Relief)
                 {
                     slope = 0;
@@ -1277,9 +1368,11 @@ namespace FractalVisio.Rendering
                 VisibleRect = visibleRect;
                 HasMargin = visibleRect.width < width || visibleRect.height < height;
                 Aspect = width / (double)height;
-                CenterX = DoubleDouble.FromDecimal(request.View.x.AsDecimal);
-                CenterY = DoubleDouble.FromDecimal(request.View.y.AsDecimal);
-                Scale = DoubleDouble.FromDecimal(request.View.scale.AsDecimal);
+                CenterHighX = request.View.x;
+                CenterHighY = request.View.y;
+                CenterX = DoubleDouble.FromHighPrecision(request.View.x);
+                CenterY = DoubleDouble.FromHighPrecision(request.View.y);
+                Scale = DoubleDouble.FromHighPrecision(request.View.scale);
                 CenterXDouble = CenterX.ToDouble();
                 CenterYDouble = CenterY.ToDouble();
                 ScaleDouble = Scale.ToDouble();
@@ -1314,6 +1407,11 @@ namespace FractalVisio.Rendering
 
             /// <summary>The view this render depicts; travels with the frame when it is published.</summary>
             public ViewState View { get; }
+
+            /// <summary>The centre at full precision: where a reference orbit is built.</summary>
+            public HighPrecision CenterHighX { get; }
+
+            public HighPrecision CenterHighY { get; }
 
             public DoubleDouble CenterX { get; }
             public DoubleDouble CenterY { get; }

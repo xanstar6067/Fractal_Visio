@@ -30,6 +30,14 @@ namespace FractalVisio.Core
             return Normalize(hi, (double)remainder);
         }
 
+        /// <summary>The nearest double-double: the high double, then what it left over.</summary>
+        public static DoubleDouble FromHighPrecision(in HighPrecision value)
+        {
+            var hi = value.AsDouble;
+            var remainder = (value - HighPrecision.FromDouble(hi)).AsDouble;
+            return Normalize(hi, remainder);
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static DoubleDouble Add(DoubleDouble a, DoubleDouble b)
         {

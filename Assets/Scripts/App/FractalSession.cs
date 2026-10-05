@@ -35,6 +35,19 @@ namespace FractalVisio.App
         public double MaximumScale;
 
         /// <summary>
+        /// Deepest scale for a fractal with <see cref="PrecisionTier.Arbitrary"/>. The reference orbit
+        /// could go further; the pixel offsets cannot - they are fp64, and near 1e-300 the offset of one
+        /// pixel leaves the normal double range. (The WPF engine continues with FloatExp offsets.)
+        /// </summary>
+        public const double ArbitraryMinimumScale = 1e-280d;
+
+        /// <summary>
+        /// Iteration cap for those depths. A minibrot 1e-100 down takes tens of thousands of
+        /// iterations; <see cref="MaximumIterations"/> is the budget of the ordinary range.
+        /// </summary>
+        public const int ArbitraryMaximumIterations = 200000;
+
+        /// <summary>
         /// Render resolution as a fraction of the screen, or 0 for "let the device profile decide".
         /// Explicit values bypass the profile's long-edge cap: choosing 100% is a request for the
         /// screen's own resolution, and silently rendering less than that would make the setting a
@@ -129,6 +142,15 @@ namespace FractalVisio.App
         /// itself would be clamped, and the first pinch would jump in. Gestures clamp to this too.
         /// </summary>
         public double MaximumScale => displayAspect >= 1d ? quality.MaximumScale : quality.MaximumScale / displayAspect;
+
+        /// <summary>
+        /// Furthest in a view may go: <see cref="RenderQuality.ArbitraryMinimumScale"/> for a fractal whose
+        /// reference orbit takes any number of digits (<see cref="PrecisionTier.Arbitrary"/>), else
+        /// <see cref="RenderQuality.MinimumScale"/>, where double-double runs out. Gestures clamp to this too.
+        /// </summary>
+        public double MinimumScale => SupportsArbitraryDepth ? RenderQuality.ArbitraryMinimumScale : quality.MinimumScale;
+
+        private bool SupportsArbitraryDepth => (definition.SupportedPrecision & PrecisionTier.Arbitrary) != 0;
 
         /// <summary>
         /// Width over height of the screen the picture is shown on. A definition's default view is
@@ -259,12 +281,12 @@ namespace FractalVisio.App
         }
 
         /// <summary>Entry point for presets, bookmarks and restored state.</summary>
-        public void SetCenter(decimal centerX, decimal centerY, decimal scale)
+        public void SetCenter(in HighPrecision centerX, in HighPrecision centerY, in HighPrecision scale)
         {
             var next = view;
-            next.x = new HighPrecision(centerX);
-            next.y = new HighPrecision(centerY);
-            next.scale = new HighPrecision(scale);
+            next.x = centerX;
+            next.y = centerY;
+            next.scale = scale;
             SetView(next);
         }
 
@@ -291,8 +313,8 @@ namespace FractalVisio.App
             }
 
             // Scale is the height the view spans; dividing by the aspect makes the width span it.
-            // In decimal, like every other change to a view's scale.
-            target.scale = new HighPrecision(target.scale.AsDecimal / (decimal)displayAspect);
+            // At full precision, like every other change to a view's scale.
+            target.scale = target.scale / displayAspect;
             return target;
         }
 
@@ -309,9 +331,9 @@ namespace FractalVisio.App
             {
                 version = FractalStateDto.CurrentVersion,
                 fractal = definition.Id,
-                centerX = StateCodec.FormatDecimal(view.x.AsDecimal),
-                centerY = StateCodec.FormatDecimal(view.y.AsDecimal),
-                scale = StateCodec.FormatDecimal(view.scale.AsDecimal),
+                centerX = view.x.ToInvariantString(),
+                centerY = view.y.ToInvariantString(),
+                scale = view.scale.ToInvariantString(),
                 rotation = view.rotation,
                 palette = palette.Id,
                 coloring = StateCodec.ToDto(coloring),
@@ -372,14 +394,14 @@ namespace FractalVisio.App
             parameters = nextParameters;
 
             var nextView = Fitted(target.DefaultView);
-            if (StateCodec.TryParseDecimal(state.centerX, out var x) &&
-                StateCodec.TryParseDecimal(state.centerY, out var y) &&
-                StateCodec.TryParseDecimal(state.scale, out var scale) &&
-                scale > 0m)
+            if (HighPrecision.TryParse(state.centerX, out var x) &&
+                HighPrecision.TryParse(state.centerY, out var y) &&
+                HighPrecision.TryParse(state.scale, out var scale) &&
+                scale.Sign > 0)
             {
-                nextView.x = new HighPrecision(x);
-                nextView.y = new HighPrecision(y);
-                nextView.scale = new HighPrecision(scale);
+                nextView.x = x;
+                nextView.y = y;
+                nextView.scale = scale;
                 nextView.rotation = double.IsNaN(state.rotation) ? 0d : state.rotation;
             }
 
@@ -416,11 +438,19 @@ namespace FractalVisio.App
         /// <summary>Clamp the scale and derive the iteration budget: the one definition of both.</summary>
         private void Normalize(ref ViewState target)
         {
-            var scale = Math.Clamp(target.scale.AsDouble, quality.MinimumScale, MaximumScale);
+            var scale = Math.Clamp(target.scale.AsDouble, MinimumScale, MaximumScale);
             if (scale != target.scale.AsDouble)
             {
                 target.scale = HighPrecision.FromDouble(scale);
             }
+
+            // Keep the centre to what this scale can use - a pixel is about 2^-12 of the scale, so 80
+            // bits below it are 68 below a pixel. Panning adds digits on every frame; without this a
+            // shallow view would carry a thousand-bit centre into every comparison and saved file.
+            var fractionBits = Math.Max(64, (int)Math.Ceiling(-Math.Log(scale, 2d)) + 80);
+            target.x = target.x.Quantize(fractionBits);
+            target.y = target.y.Quantize(fractionBits);
+            target.scale = target.scale.Quantize(fractionBits + 64);
 
             ApplyBudget(ref target);
         }
@@ -435,12 +465,12 @@ namespace FractalVisio.App
         // budget was visibly changing the image).
         private int ResolveIterations(double scale)
         {
-            var depth = Math.Max(0d, -Math.Log10(Math.Max(scale, 1e-28d)) - 3d);
+            var depth = Math.Max(0d, -Math.Log10(Math.Max(scale, 1e-300d)) - 3d);
             var depthBudget = depth * 96d + Math.Max(0d, depth - 6d) * 192d;
-            return Mathf.Clamp(
-                quality.SettledIterations + Mathf.RoundToInt((float)depthBudget),
-                16,
-                quality.MaximumIterations);
+            var cap = SupportsArbitraryDepth
+                ? Math.Max(quality.MaximumIterations, RenderQuality.ArbitraryMaximumIterations)
+                : quality.MaximumIterations;
+            return (int)Math.Clamp(quality.SettledIterations + Math.Round(depthBudget), 16d, cap);
         }
 
         private static bool Same(in ViewState a, in ViewState b)

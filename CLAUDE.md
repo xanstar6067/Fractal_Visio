@@ -114,11 +114,26 @@ Identify by `$env:COMPUTERNAME`, or by which project root exists.
   deep zoom is CPU-only.
 - Deep CPU renders (below `ExtendedPrecisionScale`) go through **perturbation**
   (`IPerturbationSampler`, `ICpuPassHost.RunPerturbed`), ported from the WPF project's
-  `MandelbrotFamilyRenderer.DeepZoom/Bla`: reference orbit in `DoubleDouble` stored as doubles,
-  fp64 offsets, Zhuoran rebasing + Pauldelbrot criterion, BLA for z^2+c. The `*SamplerDD` structs
+  `MandelbrotFamilyRenderer.DeepZoom/Bla`: reference orbit stored as doubles - computed in
+  `DoubleDouble`, or below |dc| 1e-22 in fixed-point limbs (`FixedPointOrbit`, the port of WPF's
+  `BigFloat` orbit) - fp64 offsets, Zhuoran rebasing + Pauldelbrot criterion, BLA for z^2+c. The `*SamplerDD` structs
   stay as the exact reference to check perturbation against (`docs\ARCHITECTURE.md` §4.8). A folded
   map (Burning Ship, anything with per-component `abs`) must rebase **per component**
   (`|z_r| < |d_r|` or `|z_i| < |d_i|`); the modulus test alone left up to half the frame wrong at 1e-23.
+- **Deep zoom past 1e-24** (docs\ARCHITECTURE.md §5.11). The view's centre and scale are
+  `HighPrecision`: a 1152-bit binary float on `BigInteger`, not `decimal` (28 digits, which stopped
+  the zoom near 1e-24). It allocates on every operation - fine for gestures and once-per-request
+  conversions, never for a per-pixel or per-iteration loop; reference orbits use `FixedPointOrbit`,
+  which allocates nothing per step. A definition that builds its orbit at the precision the depth
+  asks for declares `PrecisionTier.Arbitrary` (Mandelbrot, Julia) and may zoom to
+  `RenderQuality.ArbitraryMinimumScale` (1e-280, where fp64 pixel offsets run out); the others stop
+  at `RenderQuality.MinimumScale`. Read limits through `FractalSession.MinimumScale`. The session
+  quantises the centre to its scale (80 bits below it) in `Normalize`, so a shallow view never
+  carries a thousand-bit tail. The renderer reuses a reference orbit across requests while it fits
+  (`TryReuse`: same fractal, enough iterations, no more than 2^16 deeper, within two frame radii) and
+  feeds pixels the offset from it - deep in, one orbit is hundreds of milliseconds and a gesture
+  restarts the render several times a second. BLA radii are lengths, not squares: a square
+  underflows past 1e-154.
 - A Julia set's reference starts at the view centre, so its pixels rebase onto the **critical
   orbit** - the orbit of 0 at the same C, kept in `ReferenceOrbit.Secondary` - with `d = z`, never
   onto their own `Z_0` with `d = z - Z_0` (the WPF way): near the critical point that difference
@@ -359,8 +374,10 @@ any feature that is not a bug fix, and update it when a design decision changes.
 - Inertia stops on any touch of the picture (`FractalGestureFrame.Touching`) and on any view change
   it did not make. After a pinch ends with a fling, the finger left on the glass is ignored until it
   lifts. On mobile `targetFrameRate` follows the panel's refresh rate.
-- Saved state (`FractalStateDto`) stores centre/scale as `decimal` strings and parameters by
-  string key, with a `version` field. Never serialise the centre as `double`. Every number goes
+- Saved state (`FractalStateDto`) stores centre/scale as invariant decimal strings
+  (`HighPrecision.ToInvariantString`, scientific below 1e-6; old files' `decimal` text parses the
+  same) and parameters by string key, with a `version` field. Never serialise the centre as
+  `double` or `decimal`. Every number goes
   through `StateCodec` in the invariant culture, and restoring goes through
   `FractalSession.Apply`, which shares `Normalize` with `SetView`.
 - A module that offers something to the rest of the app declares the interface in `App`

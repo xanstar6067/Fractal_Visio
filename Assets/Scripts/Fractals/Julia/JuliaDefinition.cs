@@ -71,7 +71,8 @@ namespace FractalVisio.Fractals
         public IReadOnlyList<FractalParameterDescriptor> Parameters => ParameterList;
 
         public PrecisionTier SupportedPrecision =>
-            PrecisionTier.Float | PrecisionTier.Double | PrecisionTier.DoubleDouble | PrecisionTier.Perturbation;
+            PrecisionTier.Float | PrecisionTier.Double | PrecisionTier.DoubleDouble | PrecisionTier.Perturbation |
+            PrecisionTier.Arbitrary;
 
         public string ShaderName => "FractalVisio/Julia";
 

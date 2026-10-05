@@ -162,21 +162,39 @@ namespace FractalVisio.Fractals
             this.constantY = constantY;
         }
 
-        public void BuildReference(ReferenceOrbit orbit, in DoubleDouble cx, in DoubleDouble cy, int maxIterations, double maxDeltaC)
+        public void BuildReference(
+            ReferenceOrbit orbit, in HighPrecision cx, in HighPrecision cy, int maxIterations, double maxDeltaC,
+            CancellationToken token)
         {
-            var constantReal = new DoubleDouble(constantX);
-            var constantImaginary = new DoubleDouble(constantY);
+            var constantReal = HighPrecision.FromDouble(constantX);
+            var constantImaginary = HighPrecision.FromDouble(constantY);
 
             // Pixels differ only in where they start, never in c: no dc term, so the BLA radii owe
-            // nothing to one.
-            QuadraticOrbit.Build(orbit, cx, cy, constantReal, constantImaginary, maxIterations, ReferenceEscape);
+            // nothing to one. maxDeltaC still sets the orbit's digits - it is the pixel spacing.
+            if (!QuadraticOrbit.Build(
+                    orbit, cx, cy, constantReal, constantImaginary, maxIterations, ReferenceEscape, maxDeltaC, token))
+            {
+                return;
+            }
+
             orbit.BuildQuadraticBla(MandelbrotSamplerD.Bailout, 0d);
 
+            // The orbit of 0 is the same for every view of this set: a fixed c, a fixed start. It is
+            // rebuilt only when it is shorter than the budget asks and has not escaped.
             var critical = orbit.Secondary;
+            if (critical.BuiltFor is double[] built && built[0] == constantX && built[1] == constantY &&
+                critical.BuiltIterations >= maxIterations)
+            {
+                return;
+            }
+
+            // Its precision is that of c, a double: double-double carries it exactly.
             QuadraticOrbit.Build(
-                critical, new DoubleDouble(0d), new DoubleDouble(0d), constantReal, constantImaginary,
-                maxIterations, ReferenceEscape);
+                critical, new DoubleDouble(0d), new DoubleDouble(0d),
+                new DoubleDouble(constantX), new DoubleDouble(constantY), maxIterations, ReferenceEscape);
             critical.BuildQuadraticBla(MandelbrotSamplerD.Bailout, 0d);
+            critical.BuiltFor = new[] { constantX, constantY };
+            critical.BuiltIterations = maxIterations;
         }
 
         public float Sample(ReferenceOrbit orbit, double deltaX, double deltaY, int maxIterations, CancellationToken token)
@@ -200,7 +218,7 @@ namespace FractalVisio.Fractals
                 }
 
                 if (bla != null &&
-                    bla.TryLookup(referenceIndex, dx * dx + dy * dy, maxIterations - iteration,
+                    bla.TryLookup(referenceIndex, ComplexBlaTable.Magnitude(dx, dy), maxIterations - iteration,
                         out var aX, out var aY, out _, out _, out var steps))
                 {
                     // d <- A d, skipping `steps` iterations at once.
@@ -281,7 +299,7 @@ namespace FractalVisio.Fractals
                 }
 
                 if (bla != null &&
-                    bla.TryLookup(referenceIndex, dx * dx + dy * dy, maxIterations - iteration,
+                    bla.TryLookup(referenceIndex, ComplexBlaTable.Magnitude(dx, dy), maxIterations - iteration,
                         out var aX, out var aY, out _, out _, out var steps))
                 {
                     var skippedX = aX * dx - aY * dy;

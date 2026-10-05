@@ -11,17 +11,14 @@ namespace FractalVisio.Core
     public static class ViewNavigator
     {
         /// <summary>Fractal-plane point under a pixel of the given viewport.</summary>
-        public static (decimal x, decimal y) ScreenToFractal(in ViewState view, in Viewport viewport, Vector2 point)
+        public static (HighPrecision x, HighPrecision y) ScreenToFractal(in ViewState view, in Viewport viewport, Vector2 point)
         {
             var aspect = viewport.Aspect;
             var nx = ((double)point.x / viewport.Width - 0.5d) * aspect;
             var ny = (double)point.y / viewport.Height - 0.5d;
             var (rx, ry) = Rotate(nx, ny, view.rotation);
 
-            var scale = view.scale.AsDecimal;
-            return (
-                view.x.AsDecimal + (decimal)rx * scale,
-                view.y.AsDecimal + (decimal)ry * scale);
+            return (view.x + view.scale * rx, view.y + view.scale * ry);
         }
 
         /// <summary>Drag by a screen-space delta, turned into view space by the current rotation.</summary>
@@ -32,9 +29,8 @@ namespace FractalVisio.Core
             var ndy = -(double)deltaPixels.y / viewport.Height;
             var (rx, ry) = Rotate(ndx, ndy, view.rotation);
 
-            var scale = view.scale.AsDecimal;
-            view.x = new HighPrecision(view.x.AsDecimal + (decimal)rx * scale);
-            view.y = new HighPrecision(view.y.AsDecimal + (decimal)ry * scale);
+            view.x += view.scale * rx;
+            view.y += view.scale * ry;
         }
 
         /// <summary>
@@ -64,15 +60,15 @@ namespace FractalVisio.Core
 
             // With a rotation-aware mapping, re-anchoring also turns the view about the pivot.
             var moved = ScreenToFractal(view, viewport, currentPivot);
-            view.x = new HighPrecision(view.x.AsDecimal + anchor.x - moved.x);
-            view.y = new HighPrecision(view.y.AsDecimal + anchor.y - moved.y);
+            view.x += anchor.x - moved.x;
+            view.y += anchor.y - moved.y;
         }
 
         /// <summary>
         /// The view a buffer must draw so that its visible sub-rectangle shows exactly
         /// <paramref name="view"/>. A viewport with overscan covers a wider field, so the span
         /// grows by its vertical field scale; the horizontal side follows from the buffer aspect.
-        /// The widening is done in decimal so deep-zoom precision survives it.
+        /// The widening is done at full precision so deep-zoom digits survive it.
         /// </summary>
         public static ViewState ForViewport(in ViewState view, in Viewport viewport)
         {
@@ -82,7 +78,7 @@ namespace FractalVisio.Core
             }
 
             var widened = view;
-            widened.scale = new HighPrecision(view.scale.AsDecimal * (decimal)viewport.FieldScaleY);
+            widened.scale = view.scale * viewport.FieldScaleY;
             return widened;
         }
 

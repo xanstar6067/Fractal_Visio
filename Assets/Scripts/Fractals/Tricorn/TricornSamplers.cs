@@ -129,8 +129,13 @@ namespace FractalVisio.Fractals
         private const double ReferenceEscape = 1e18d;
         private const double GlitchToleranceSquared = 1e-6d;
 
-        public void BuildReference(ReferenceOrbit orbit, in DoubleDouble cx, in DoubleDouble cy, int maxIterations, double maxDeltaC)
+        public void BuildReference(
+            ReferenceOrbit orbit, in HighPrecision centerX, in HighPrecision centerY, int maxIterations, double maxDeltaC,
+            CancellationToken token)
         {
+            // Double-double is as deep as this fractal goes (PrecisionTier.Arbitrary is not declared).
+            var cx = DoubleDouble.FromHighPrecision(centerX);
+            var cy = DoubleDouble.FromHighPrecision(centerY);
             orbit.Begin(maxIterations);
 
             var zx = new DoubleDouble(0d);

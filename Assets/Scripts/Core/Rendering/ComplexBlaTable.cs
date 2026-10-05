@@ -27,11 +27,31 @@ namespace FractalVisio.Core
 
         private const int MaximumLevels = 30;
 
+        /// <summary>
+        /// |x + iy| without squaring the parts. Radii and offsets are kept as lengths, not squared
+        /// lengths, for the deep zoom: past about 1e-154 a square is below the double range, a table
+        /// of squared radii turned to zeros - every skip refused - and a squared offset to zero, which
+        /// would have let any skip through.
+        /// </summary>
+        public static double Magnitude(double x, double y)
+        {
+            x = Math.Abs(x);
+            y = Math.Abs(y);
+            var larger = Math.Max(x, y);
+            if (!(larger > 0d))
+            {
+                return larger;
+            }
+
+            var ratio = Math.Min(x, y) / larger;
+            return larger * Math.Sqrt(1d + ratio * ratio);
+        }
+
         private double[] ax = Array.Empty<double>();
         private double[] ay = Array.Empty<double>();
         private double[] bx = Array.Empty<double>();
         private double[] by = Array.Empty<double>();
-        private double[] r2 = Array.Empty<double>();
+        private double[] radius = Array.Empty<double>();
         private readonly int[] levelOffset = new int[MaximumLevels];
         private readonly int[] levelCount = new int[MaximumLevels];
         private int levels;
@@ -84,15 +104,7 @@ namespace FractalVisio.Core
                 var next = re[n + 1] * re[n + 1] + im[n + 1] * im[n + 1];
 
                 // A skip may not jump over the pixel's escape: that step has to be taken for real.
-                if (magnitude > escapeSquared || next > escapeSquared)
-                {
-                    r2[n] = 0d;
-                }
-                else
-                {
-                    var r = Tolerance * Math.Sqrt(magnitude);
-                    r2[n] = r * r;
-                }
+                radius[n] = magnitude > escapeSquared || next > escapeSquared ? 0d : Tolerance * Magnitude(zr, zi);
             }
 
             // Higher levels: merge neighbours, x applied first and then y.
@@ -115,12 +127,12 @@ namespace FractalVisio.Core
                         ay[target] = ay[left];
                         bx[target] = bx[left];
                         by[target] = by[left];
-                        r2[target] = r2[left];
+                        radius[target] = radius[left];
                         continue;
                     }
 
-                    double xAx = ax[left], xAy = ay[left], xBx = bx[left], xBy = by[left], xR2 = r2[left];
-                    double yAx = ax[right], yAy = ay[right], yBx = bx[right], yBy = by[right], yR2 = r2[right];
+                    double xAx = ax[left], xAy = ay[left], xBx = bx[left], xBy = by[left], rx = radius[left];
+                    double yAx = ax[right], yAy = ay[right], yBx = bx[right], yBy = by[right], ry = radius[right];
 
                     // A_z = A_y A_x ; B_z = A_y B_x + B_y  (complex)
                     var zAx = yAx * xAx - yAy * xAy;
@@ -128,33 +140,30 @@ namespace FractalVisio.Core
                     var zBx = yAx * xBx - yAy * xBy + yBx;
                     var zBy = yAx * xBy + yAy * xBx + yBy;
 
-                    double zR2;
-                    if (xR2 <= 0d || yR2 <= 0d ||
+                    double rz;
+                    if (rx <= 0d || ry <= 0d ||
                         double.IsNaN(zAx) || double.IsInfinity(zAx) ||
                         double.IsNaN(zAy) || double.IsInfinity(zAy) ||
                         double.IsNaN(zBx) || double.IsInfinity(zBx) ||
                         double.IsNaN(zBy) || double.IsInfinity(zBy))
                     {
-                        zR2 = 0d;
+                        rz = 0d;
                     }
                     else
                     {
                         // |d_in| <= r_x and |A_x d_in + B_x dc| <= r_y
                         //   =>  r_z = min(r_x, max(0, (r_y - |B_x| dcmax) / |A_x|))
-                        var xA = Math.Sqrt(xAx * xAx + xAy * xAy);
-                        var xB = Math.Sqrt(xBx * xBx + xBy * xBy);
-                        var rx = Math.Sqrt(xR2);
-                        var ry = Math.Sqrt(yR2);
+                        var xA = Magnitude(xAx, xAy);
+                        var xB = Magnitude(xBx, xBy);
                         var bound = xA > 0d ? (ry - xB * maxDeltaC) / xA : 0d;
-                        var rz = Math.Min(rx, Math.Max(0d, bound));
-                        zR2 = rz * rz;
+                        rz = Math.Min(rx, Math.Max(0d, bound));
                     }
 
                     ax[target] = zAx;
                     ay[target] = zAy;
                     bx[target] = zBx;
                     by[target] = zBy;
-                    r2[target] = zR2;
+                    radius[target] = rz;
                 }
             }
 
@@ -163,13 +172,14 @@ namespace FractalVisio.Core
         }
 
         /// <summary>
-        /// Longest valid skip from <paramref name="referenceIndex"/> for an offset of squared size
-        /// <paramref name="deltaMagnitudeSquared"/>, no longer than <paramref name="iterationBudget"/>.
+        /// Longest valid skip from <paramref name="referenceIndex"/> for an offset of size
+        /// <paramref name="deltaMagnitude"/> (<see cref="Magnitude"/>), no longer than
+        /// <paramref name="iterationBudget"/>.
         /// False when only a single step would apply - that is cheaper taken for real.
         /// </summary>
         public bool TryLookup(
             int referenceIndex,
-            double deltaMagnitudeSquared,
+            double deltaMagnitude,
             int iterationBudget,
             out double aX,
             out double aY,
@@ -198,8 +208,8 @@ namespace FractalVisio.Core
                 }
 
                 var index = levelOffset[k] + j;
-                var radiusSquared = r2[index];
-                if (radiusSquared <= 0d || deltaMagnitudeSquared >= radiusSquared ||
+                var limit = radius[index];
+                if (limit <= 0d || deltaMagnitude >= limit ||
                     span > iterationBudget || referenceIndex + span > maxReferenceIndex)
                 {
                     break;
@@ -226,7 +236,7 @@ namespace FractalVisio.Core
             ay = new double[total];
             bx = new double[total];
             by = new double[total];
-            r2 = new double[total];
+            radius = new double[total];
         }
     }
 }

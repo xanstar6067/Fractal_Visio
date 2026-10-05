@@ -145,7 +145,7 @@ namespace FractalVisio.Rendering
             }
 
             var wideView = view;
-            wideView.scale = new HighPrecision(view.scale.AsDecimal * (decimal)Math.Max(1d, fieldFactor));
+            wideView.scale = view.scale * Math.Max(1d, fieldFactor);
 
             requestedFieldFactor = Math.Max(1d, fieldFactor);
             lastRequestTime = Time.realtimeSinceStartupAsDouble;

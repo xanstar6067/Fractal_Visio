@@ -12,7 +12,7 @@ namespace FractalVisio.Core
     /// difference between resampling the original once per displayed frame (here) and resampling
     /// an already-resampled buffer over and over (what an in-place reprojection does).
     ///
-    /// The map is exact for pan, zoom and rotation together, and it is built in decimal for the
+    /// The map is exact for pan, zoom and rotation together, and it is built at full precision for the
     /// centre difference so deep-zoom precision survives the subtraction.
     /// </summary>
     public readonly struct FramePlacement
@@ -76,11 +76,10 @@ namespace FractalVisio.Core
             var mCos = Math.Cos(delta) * k;
             var mSin = Math.Sin(delta) * k;
 
-            // Subtract in decimal, divide in double. The subtraction is where deep-zoom precision
-            // is won or lost; the quotient is a screen-sized offset, so double carries it fine -
-            // and dividing a large difference by a 1e-24 scale in decimal would overflow.
-            var gx = (double)(currentView.x.AsDecimal - frameView.x.AsDecimal) / frameScale;
-            var gy = (double)(currentView.y.AsDecimal - frameView.y.AsDecimal) / frameScale;
+            // Subtract at full precision, divide in double. The subtraction is where deep-zoom
+            // precision is won or lost; the quotient is a screen-sized offset, so double carries it.
+            var gx = (currentView.x - frameView.x).AsDouble / frameScale;
+            var gy = (currentView.y - frameView.y).AsDouble / frameScale;
             var fCos = Math.Cos(-frameView.rotation);
             var fSin = Math.Sin(-frameView.rotation);
             var bx = gx * fCos - gy * fSin;

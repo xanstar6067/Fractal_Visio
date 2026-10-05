@@ -33,9 +33,14 @@ namespace FractalVisio.Core
         /// Fill <paramref name="orbit"/> with the reference orbit of the point (<paramref name="cx"/>,
         /// <paramref name="cy"/>), up to <paramref name="maxIterations"/> steps.
         /// <paramref name="maxDeltaC"/> bounds how far any pixel of this render lies from that
-        /// point; a sampler that builds a <see cref="ComplexBlaTable"/> needs it.
+        /// point; a sampler that builds a <see cref="ComplexBlaTable"/> needs it, and it also says
+        /// how many digits the orbit needs (<see cref="FixedPointOrbit.FractionBitsFor"/>). A sampler limited to
+        /// double-double converts the point with <see cref="DoubleDouble.FromHighPrecision"/>.
+        /// Returning early on <paramref name="token"/> is allowed; the renderer then discards the orbit.
         /// </summary>
-        void BuildReference(ReferenceOrbit orbit, in DoubleDouble cx, in DoubleDouble cy, int maxIterations, double maxDeltaC);
+        void BuildReference(
+            ReferenceOrbit orbit, in HighPrecision cx, in HighPrecision cy, int maxIterations, double maxDeltaC,
+            CancellationToken token);
 
         /// <summary>Escape value for the pixel at offset (<paramref name="deltaCx"/>, <paramref name="deltaCy"/>) from the reference.</summary>
         float Sample(ReferenceOrbit orbit, double deltaCx, double deltaCy, int maxIterations, CancellationToken token);
@@ -118,6 +123,42 @@ namespace FractalVisio.Core
         public void BuildQuadraticBla(double escapeSquared, double maxDeltaC)
         {
             HasBla = Bla.Build(this, escapeSquared, maxDeltaC);
+            blaEscapeSquared = escapeSquared;
+            BlaMaxDeltaC = maxDeltaC;
         }
+
+        private double blaEscapeSquared;
+
+        /// <summary>The |dc| bound the BLA table was built for; 0 when the orbit takes no dc (a Julia set).</summary>
+        public double BlaMaxDeltaC { get; private set; }
+
+        /// <summary>
+        /// Rebuild the BLA table if a render reusing this orbit reaches further from it than the
+        /// table was built for: its radii shrink with |dc|, so a table built for a smaller |dc|
+        /// would let skips run where they are no longer valid. The orbit itself stays.
+        /// </summary>
+        public void EnsureBlaCovers(double maxDeltaC)
+        {
+            if (HasBla && BlaMaxDeltaC > 0d && maxDeltaC > BlaMaxDeltaC)
+            {
+                BuildQuadraticBla(blaEscapeSquared, maxDeltaC);
+            }
+        }
+
+        // ---- What the renderer needs to reuse an orbit across requests (see FractalCpuRenderer).
+
+        /// <summary>The point this orbit belongs to: pixel offsets are measured from here.</summary>
+        public HighPrecision CenterX { get; set; }
+
+        public HighPrecision CenterY { get; set; }
+
+        /// <summary>Scale of the view it was built for: its digits are sized for that depth.</summary>
+        public double BuiltScale { get; set; }
+
+        /// <summary>Iteration budget it was built with.</summary>
+        public int BuiltIterations { get; set; }
+
+        /// <summary>Fractal and parameters it was built for; null while it is not usable.</summary>
+        public object BuiltFor { get; set; }
     }
 }

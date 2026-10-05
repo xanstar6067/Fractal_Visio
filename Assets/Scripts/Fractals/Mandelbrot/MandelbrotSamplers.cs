@@ -152,9 +152,16 @@ namespace FractalVisio.Fractals
         /// <summary>Pauldelbrot's criterion: |z|^2 below this fraction of |Z|^2 means rebase.</summary>
         private const double GlitchToleranceSquared = 1e-6d;
 
-        public void BuildReference(ReferenceOrbit orbit, in DoubleDouble cx, in DoubleDouble cy, int maxIterations, double maxDeltaC)
+        public void BuildReference(
+            ReferenceOrbit orbit, in HighPrecision cx, in HighPrecision cy, int maxIterations, double maxDeltaC,
+            CancellationToken token)
         {
-            QuadraticOrbit.Build(orbit, new DoubleDouble(0d), new DoubleDouble(0d), cx, cy, maxIterations, ReferenceEscape);
+            if (!QuadraticOrbit.Build(
+                    orbit, HighPrecision.Zero, HighPrecision.Zero, cx, cy, maxIterations, ReferenceEscape, maxDeltaC, token))
+            {
+                return;
+            }
+
             orbit.BuildQuadraticBla(MandelbrotSamplerD.Bailout, maxDeltaC);
         }
 
@@ -178,7 +185,7 @@ namespace FractalVisio.Fractals
                 }
 
                 if (bla != null &&
-                    bla.TryLookup(referenceIndex, dx * dx + dy * dy, maxIterations - iteration,
+                    bla.TryLookup(referenceIndex, ComplexBlaTable.Magnitude(dx, dy), maxIterations - iteration,
                         out var aX, out var aY, out var bX, out var bY, out var steps))
                 {
                     // d <- A d + B dc, skipping `steps` iterations at once.
@@ -254,7 +261,7 @@ namespace FractalVisio.Fractals
                 }
 
                 if (bla != null &&
-                    bla.TryLookup(referenceIndex, dx * dx + dy * dy, maxIterations - iteration,
+                    bla.TryLookup(referenceIndex, ComplexBlaTable.Magnitude(dx, dy), maxIterations - iteration,
                         out var aX, out var aY, out var bX, out var bY, out var steps))
                 {
                     var skippedX = aX * dx - aY * dy + bX * deltaCx - bY * deltaCy;
@@ -322,6 +329,38 @@ namespace FractalVisio.Fractals
     /// </summary>
     internal static class QuadraticOrbit
     {
+        /// <summary>
+        /// Below this |dc| a pixel offset needs more digits than double-double's ~32: the orbit
+        /// is built in fixed point instead (<see cref="FixedPointOrbit"/>). Double-double is several
+        /// times faster, and down to here it is the path that was verified against exact samplers.
+        /// </summary>
+        public const double DoubleDoubleLimit = 1e-22d;
+
+        /// <summary>
+        /// The orbit at whatever precision <paramref name="maxDeltaC"/> calls for. Returns false if
+        /// cancelled part-way.
+        /// </summary>
+        public static bool Build(
+            ReferenceOrbit orbit,
+            in HighPrecision startX, in HighPrecision startY,
+            in HighPrecision cx, in HighPrecision cy,
+            int maxIterations, double referenceEscape, double maxDeltaC, CancellationToken token)
+        {
+            if (maxDeltaC >= DoubleDoubleLimit)
+            {
+                Build(
+                    orbit,
+                    DoubleDouble.FromHighPrecision(startX), DoubleDouble.FromHighPrecision(startY),
+                    DoubleDouble.FromHighPrecision(cx), DoubleDouble.FromHighPrecision(cy),
+                    maxIterations, referenceEscape);
+                return true;
+            }
+
+            return FixedPointOrbit.BuildQuadratic(
+                orbit, startX, startY, cx, cy, maxIterations, referenceEscape,
+                FixedPointOrbit.FractionBitsFor(maxDeltaC, maxIterations), token);
+        }
+
         /// <summary>
         /// Fill <paramref name="orbit"/> with the orbit of (<paramref name="startX"/>,
         /// <paramref name="startY"/>) under z^2 + (<paramref name="cx"/>, <paramref name="cy"/>),

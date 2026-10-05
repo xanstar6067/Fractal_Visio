@@ -286,7 +286,7 @@ namespace FractalVisio.App
                 var result = screen;
                 if (outputAspect > displayAspect)
                 {
-                    result.scale = new HighPrecision(screen.scale.AsDecimal * (decimal)(displayAspect / outputAspect));
+                    result.scale = screen.scale * (displayAspect / outputAspect);
                 }
 
                 return result;
@@ -306,9 +306,9 @@ namespace FractalVisio.App
                     (tile.y + tile.height * 0.5f) * samples);
                 var (x, y) = ViewNavigator.ScreenToFractal(view, whole, middle);
                 var result = view;
-                result.x = new HighPrecision(x);
-                result.y = new HighPrecision(y);
-                result.scale = new HighPrecision(view.scale.AsDecimal * (tile.height * samples) / sampleHeight);
+                result.x = x;
+                result.y = y;
+                result.scale = view.scale * ((double)(tile.height * samples) / sampleHeight);
                 return result;
             }
 
