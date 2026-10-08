@@ -750,11 +750,11 @@ PlayerSettings:
   activeInputHandler: 0
   windowsGamepadBackendHint: 0
   enableDirectStorage: 0
-  cloudProjectId: bdcaa89d-91a9-435e-baee-18e103787e16
+  cloudProjectId:
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: Fractal_Manager2D
-  organizationId: workuser2021ppt
+  projectName:
+  organizationId:
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
   hmiLoadingImage: {fileID: 0}
