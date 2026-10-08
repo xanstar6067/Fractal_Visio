@@ -35,7 +35,7 @@ namespace FractalVisio.Fractals
 
         private static ParameterValue Power(int power) => new(PowerKey, power);
 
-        private static readonly int PowerId = Shader.PropertyToID("_Power");
+        internal static readonly int PowerId = Shader.PropertyToID("_Power");
 
         public string Id => "multibrot";
 
@@ -60,7 +60,9 @@ namespace FractalVisio.Fractals
 
         public void BindMaterial(Material material, in FractalParameterSet parameters)
         {
+            // The shader is shared with the Multijulia: switch its Julia form off explicitly.
             material.SetFloat(PowerId, PowerOf(parameters));
+            material.SetVector(JuliaDefinition.ConstantId, Vector4.zero);
         }
 
         public void RunCpuPass(ICpuPassHost host, in FractalParameterSet parameters, bool extendedPrecision)
@@ -104,7 +106,7 @@ namespace FractalVisio.Fractals
             }
         }
 
-        private static int PowerOf(in FractalParameterSet parameters) =>
+        internal static int PowerOf(in FractalParameterSet parameters) =>
             ClampPower((int)System.Math.Round(parameters.Get(PowerKey, MinimumPower)));
     }
 }

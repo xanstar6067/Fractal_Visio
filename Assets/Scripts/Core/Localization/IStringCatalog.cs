@@ -86,6 +86,12 @@ namespace FractalVisio.Core
             return string.IsNullOrEmpty(sectionId) ? string.Empty : strings.GetOr("section." + sectionId, sectionId);
         }
 
+        /// <summary><c>folder.&lt;id&gt;</c>, else the id itself, as for a section.</summary>
+        public static string FolderName(this IStringCatalog strings, string folderId)
+        {
+            return string.IsNullOrEmpty(folderId) ? string.Empty : strings.GetOr("folder." + folderId, folderId);
+        }
+
         /// <summary><c>fractal.&lt;id&gt;.&lt;key&gt;</c>, else the descriptor's own label.</summary>
         public static string ParameterLabel(
             this IStringCatalog strings, IFractalDefinition definition, in FractalParameterDescriptor descriptor)
@@ -95,20 +101,24 @@ namespace FractalVisio.Core
                 : strings.GetOr("fractal." + definition.Id + "." + descriptor.Key, descriptor.Label);
         }
 
-        /// <summary><c>fractal.&lt;id&gt;.place.&lt;place id&gt;</c>, else the place id.</summary>
+        /// <summary>
+        /// <c>fractal.&lt;id&gt;.place.&lt;place id&gt;</c>, else <c>place.&lt;place id&gt;</c> - a name
+        /// shared by a family whose members all have the same kind of place - else the place id.
+        /// </summary>
         public static string PlaceName(this IStringCatalog strings, IFractalDefinition definition, in PlaceOfInterest place)
         {
-            return definition == null
-                ? place.Id
-                : strings.GetOr("fractal." + definition.Id + ".place." + place.Id, place.Id);
+            var shared = strings.GetOr("place." + place.Id, place.Id);
+            return definition == null ? shared : strings.GetOr("fractal." + definition.Id + ".place." + place.Id, shared);
         }
 
-        /// <summary><c>fractal.&lt;id&gt;.preset.&lt;preset id&gt;</c>, else the preset id.</summary>
+        /// <summary>
+        /// <c>fractal.&lt;id&gt;.preset.&lt;preset id&gt;</c>, else <c>preset.&lt;preset id&gt;</c> (shared
+        /// across a family, as for places), else the preset id.
+        /// </summary>
         public static string PresetName(this IStringCatalog strings, IFractalDefinition definition, in PlanePreset preset)
         {
-            return definition == null
-                ? preset.Id
-                : strings.GetOr("fractal." + definition.Id + ".preset." + preset.Id, preset.Id);
+            var shared = strings.GetOr("preset." + preset.Id, preset.Id);
+            return definition == null ? shared : strings.GetOr("fractal." + definition.Id + ".preset." + preset.Id, shared);
         }
 
         /// <summary>

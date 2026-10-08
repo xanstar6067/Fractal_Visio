@@ -1,8 +1,8 @@
 namespace FractalVisio.Core
 {
     /// <summary>
-    /// One tile of the gallery: which fractal, the section it is filed under, and the view its
-    /// preview shows.
+    /// One tile of the gallery: which fractal, the section and folder it is filed under, and the view
+    /// its preview shows.
     ///
     /// Placement is the catalog's business rather than the fractal's, so it sits beside the
     /// definition instead of inside it: the same definition could be filed twice, or moved, without
@@ -11,10 +11,11 @@ namespace FractalVisio.Core
     /// </summary>
     public readonly struct CatalogEntry
     {
-        public CatalogEntry(IFractalDefinition definition, string section, ViewState? preview = null)
+        public CatalogEntry(IFractalDefinition definition, string section, string folder = null, ViewState? preview = null)
         {
             Definition = definition;
             Section = section ?? string.Empty;
+            Folder = folder ?? string.Empty;
             PreviewView = preview ?? (definition != null ? definition.DefaultView : default);
         }
 
@@ -22,6 +23,13 @@ namespace FractalVisio.Core
 
         /// <summary>Stable id the gallery groups by. Shown as the string <c>section.&lt;id&gt;</c>.</summary>
         public string Section { get; }
+
+        /// <summary>
+        /// Stable id of the folder inside the section - a group the gallery opens and closes, for a
+        /// section with too many cards to scroll through (the Mandelbrot family has sixty). Shown as
+        /// <c>folder.&lt;id&gt;</c>. Empty: the card sits in the section itself.
+        /// </summary>
+        public string Folder { get; }
 
         /// <summary>What the preview tile shows: the definition's default view unless the catalog frames it better.</summary>
         public ViewState PreviewView { get; }

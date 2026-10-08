@@ -118,6 +118,7 @@ namespace FractalVisio.UI
 
             var plane = (IParameterPlane)definition;
             var parameters = services.Session.Parameters;
+            map.ShareParameters(parameters);
             map.Tick(thumbnails, parameters.Get(plane.RealKey), parameters.Get(plane.ImaginaryKey));
 
             var active = isActive != null && isActive();

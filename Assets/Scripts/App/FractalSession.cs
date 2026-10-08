@@ -145,12 +145,19 @@ namespace FractalVisio.App
 
         /// <summary>
         /// Furthest in a view may go: <see cref="RenderQuality.ArbitraryMinimumScale"/> for a fractal whose
-        /// reference orbit takes any number of digits (<see cref="PrecisionTier.Arbitrary"/>), else
-        /// <see cref="RenderQuality.MinimumScale"/>, where double-double runs out. Gestures clamp to this too.
+        /// reference orbit takes any number of digits (<see cref="PrecisionTier.Arbitrary"/>),
+        /// <see cref="RenderQuality.MinimumScale"/>, where double-double runs out, for one with a deep
+        /// kernel, else <see cref="RenderQuality.ExtendedPrecisionScale"/>: an fp64-only fractal (the
+        /// Simonobrot) turns to blocks of equal pixels below it. Gestures clamp to this too.
         /// </summary>
-        public double MinimumScale => SupportsArbitraryDepth ? RenderQuality.ArbitraryMinimumScale : quality.MinimumScale;
+        public double MinimumScale => SupportsArbitraryDepth
+            ? RenderQuality.ArbitraryMinimumScale
+            : SupportsExtendedDepth ? quality.MinimumScale : quality.ExtendedPrecisionScale;
 
         private bool SupportsArbitraryDepth => (definition.SupportedPrecision & PrecisionTier.Arbitrary) != 0;
+
+        private bool SupportsExtendedDepth =>
+            (definition.SupportedPrecision & (PrecisionTier.DoubleDouble | PrecisionTier.Perturbation)) != 0;
 
         /// <summary>
         /// Width over height of the screen the picture is shown on. A definition's default view is

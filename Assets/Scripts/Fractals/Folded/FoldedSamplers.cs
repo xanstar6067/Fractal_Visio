@@ -4,31 +4,28 @@ using FractalVisio.Core;
 namespace FractalVisio.Fractals
 {
     /// <summary>
-    /// The Multibrot: z -> z^p + c for a whole power p, on the parameter plane or - with a constant -
-    /// as its Julia sets (<see cref="MultijuliaDefinition"/>). The power is a field rather than a type
-    /// parameter; one integer loop per iteration costs nothing next to the multiplications it runs.
+    /// A <see cref="FoldedFormula"/> iterated in fp64, either way round: on the parameter plane
+    /// (z_0 = 0, c = the pixel) or as a Julia set (z_0 = the pixel, c fixed). One struct for both:
+    /// the choice is a field read once per pixel, and both forms share every line of the loop.
     /// </summary>
-    public readonly struct MultibrotSamplerD : IEscapeSamplerD
+    public readonly struct FoldedSamplerD : IEscapeSamplerD
     {
-        /// <summary>Bailout on the squared modulus, as for the Mandelbrot and for the same reason.</summary>
-        public const double Bailout = 65536d;
-
-        private readonly int power;
+        private readonly FoldedFormula formula;
         private readonly bool julia;
         private readonly double constantX;
         private readonly double constantY;
 
-        public MultibrotSamplerD(int power)
+        public FoldedSamplerD(in FoldedFormula formula)
         {
-            this.power = MultibrotDefinition.ClampPower(power);
+            this.formula = formula;
             julia = false;
             constantX = 0d;
             constantY = 0d;
         }
 
-        public MultibrotSamplerD(int power, double constantX, double constantY)
+        public FoldedSamplerD(in FoldedFormula formula, double constantX, double constantY)
         {
-            this.power = MultibrotDefinition.ClampPower(power);
+            this.formula = formula;
             julia = true;
             this.constantX = constantX;
             this.constantY = constantY;
@@ -49,23 +46,15 @@ namespace FractalVisio.Fractals
                     return EscapeMath.Interior;
                 }
 
-                var px = zx;
-                var py = zy;
-                for (var k = 1; k < power; k++)
-                {
-                    var next = px * zx - py * zy;
-                    py = px * zy + py * zx;
-                    px = next;
-                }
-
-                zx = px + cx;
-                zy = py + cy;
+                formula.Step(zx, zy, out var re, out var im);
+                zx = re + cx;
+                zy = im + cy;
                 iteration++;
 
                 var squared = zx * zx + zy * zy;
-                if (squared > Bailout)
+                if (squared > MandelbrotSamplerD.Bailout)
                 {
-                    return EscapeMath.Smooth(iteration, squared, Bailout, power);
+                    return EscapeMath.Smooth(iteration, squared, MandelbrotSamplerD.Bailout, formula.Degree);
                 }
             }
 
@@ -83,10 +72,12 @@ namespace FractalVisio.Fractals
             var cx = julia ? constantX : x;
             var cy = julia ? constantY : y;
 
-            // dz/dc (dz_0 = 0, plus 1 per step) or dz/dz_0 for a Julia set (dz_0 = 1).
-            var dx = julia ? 1d : 0d;
-            var dy = 0d;
+            // With respect to c (J_0 = 0, plus I per step) or to the start (J_0 = I).
             var identity = julia ? 0d : 1d;
+            var j00 = julia ? 1d : 0d;
+            var j01 = 0d;
+            var j10 = 0d;
+            var j11 = j00;
             var iteration = 0;
 
             while (iteration < maxIterations)
@@ -96,24 +87,17 @@ namespace FractalVisio.Fractals
                     return EscapeMath.Interior;
                 }
 
-                // w = z^(p-1): the derivative needs it, and z^p is one more product.
-                MultibrotDefinition.PowerMinusOne(zx, zy, power, out var wx, out var wy);
-
-                // dz <- p z^(p-1) dz + 1
-                var nextDx = power * (wx * dx - wy * dy) + identity;
-                dy = power * (wx * dy + wy * dx);
-                dx = nextDx;
-
-                var nextX = wx * zx - wy * zy + cx;
-                zy = wx * zy + wy * zx + cy;
-                zx = nextX;
+                formula.JacobianStep(zx, zy, identity, ref j00, ref j01, ref j10, ref j11);
+                formula.Step(zx, zy, out var re, out var im);
+                zx = re + cx;
+                zy = im + cy;
                 iteration++;
 
                 var squared = zx * zx + zy * zy;
-                if (squared > Bailout)
+                if (squared > MandelbrotSamplerD.Bailout)
                 {
-                    EscapeMath.HolomorphicSlope(zx, zy, dx, dy, out slopeX, out slopeY);
-                    return EscapeMath.Smooth(iteration, squared, Bailout, power);
+                    EscapeMath.JacobianSlope(zx, zy, j00, j01, j10, j11, out slopeX, out slopeY);
+                    return EscapeMath.Smooth(iteration, squared, MandelbrotSamplerD.Bailout, formula.Degree);
                 }
             }
 
@@ -121,20 +105,36 @@ namespace FractalVisio.Fractals
         }
     }
 
-    /// <summary>Same iteration in double-double: the reference the perturbation sampler is checked against.</summary>
-    public readonly struct MultibrotSamplerDD : IEscapeSamplerDD
+    /// <summary>The same iteration in double-double: the exact reference the perturbation sampler is checked against.</summary>
+    public readonly struct FoldedSamplerDD : IEscapeSamplerDD
     {
-        private readonly int power;
+        private readonly FoldedFormula formula;
+        private readonly bool julia;
+        private readonly DoubleDouble constantX;
+        private readonly DoubleDouble constantY;
 
-        public MultibrotSamplerDD(int power)
+        public FoldedSamplerDD(in FoldedFormula formula)
         {
-            this.power = MultibrotDefinition.ClampPower(power);
+            this.formula = formula;
+            julia = false;
+            constantX = default;
+            constantY = default;
         }
 
-        public float Sample(in DoubleDouble cx, in DoubleDouble cy, int maxIterations, CancellationToken token)
+        public FoldedSamplerDD(in FoldedFormula formula, double constantX, double constantY)
         {
-            var zx = new DoubleDouble(0d);
-            var zy = new DoubleDouble(0d);
+            this.formula = formula;
+            julia = true;
+            this.constantX = new DoubleDouble(constantX);
+            this.constantY = new DoubleDouble(constantY);
+        }
+
+        public float Sample(in DoubleDouble x, in DoubleDouble y, int maxIterations, CancellationToken token)
+        {
+            var zx = julia ? x : new DoubleDouble(0d);
+            var zy = julia ? y : new DoubleDouble(0d);
+            var cx = julia ? constantX : x;
+            var cy = julia ? constantY : y;
             var iteration = 0;
 
             while (iteration < maxIterations)
@@ -144,15 +144,16 @@ namespace FractalVisio.Fractals
                     return EscapeMath.Interior;
                 }
 
+                // Tested before the step, unlike the fp64 samplers: compare with one more iteration.
                 var squared = DoubleDouble.Add(DoubleDouble.Square(zx), DoubleDouble.Square(zy)).ToDouble();
-                if (squared > MultibrotSamplerD.Bailout)
+                if (squared > MandelbrotSamplerD.Bailout)
                 {
-                    return EscapeMath.Smooth(iteration, squared, MultibrotSamplerD.Bailout, power);
+                    return EscapeMath.Smooth(iteration, squared, MandelbrotSamplerD.Bailout, formula.Degree);
                 }
 
-                MultibrotDefinition.Power(zx, zy, power, out var px, out var py);
-                zx = DoubleDouble.Add(px, cx);
-                zy = DoubleDouble.Add(py, cy);
+                formula.Step(zx, zy, out var re, out var im);
+                zx = DoubleDouble.Add(re, cx);
+                zy = DoubleDouble.Add(im, cy);
                 iteration++;
             }
 
@@ -161,39 +162,35 @@ namespace FractalVisio.Fractals
     }
 
     /// <summary>
-    /// Deep zoom by perturbation. With z = Z + d the offset steps as
-    /// <c>d' = z^p - Z^p + dc = d * T + dc</c>, where <c>T = sum z^j Z^(p-1-j)</c> over
-    /// j = 0..p-1. T is summed directly from the pixel's z = Z + d: its terms all point the same
-    /// way while d is small, so it carries no cancellation, and its relative error of one rounding
-    /// survives the multiplication by d - which is all perturbation needs. Where that stops being
-    /// true (z small next to d) the usual rebasing takes over.
+    /// Deep zoom by perturbation for every <see cref="FoldedFormula"/>, on the parameter plane or as
+    /// a Julia set. The offset steps through <see cref="FoldedFormula.Perturb"/>; rebasing is per
+    /// component, as for the Burning Ship - a fold acts on x and y separately, so a real part near
+    /// zero next to a larger real offset glitches the next fold even when |z| is large. A Julia set
+    /// rebases onto the orbit of 0 at the same C (<see cref="ReferenceOrbit.Secondary"/>), as
+    /// <see cref="JuliaBurningShipPerturbationSampler"/> does. No BLA: the linear part of a folded
+    /// step is a real 2x2 map, and like the ship these run at fp64 cost through rebasing alone.
     /// </summary>
-    public readonly struct MultibrotPerturbationSampler : IPerturbationSampler
+    public readonly struct FoldedPerturbationSampler : IPerturbationSampler
     {
         private const double ReferenceEscape = 1e18d;
         private const double GlitchToleranceSquared = 1e-6d;
 
-        private readonly int power;
+        private readonly FoldedFormula formula;
         private readonly bool julia;
         private readonly double constantX;
         private readonly double constantY;
 
-        public MultibrotPerturbationSampler(int power)
+        public FoldedPerturbationSampler(in FoldedFormula formula)
         {
-            this.power = MultibrotDefinition.ClampPower(power);
+            this.formula = formula;
             julia = false;
             constantX = 0d;
             constantY = 0d;
         }
 
-        /// <summary>
-        /// The Julia form: d_0 is the pixel's offset, nothing is added per step, and a pixel rebases
-        /// onto the orbit of 0 at the same C (<see cref="ReferenceOrbit.Secondary"/>), as
-        /// <see cref="JuliaPerturbationSampler"/> explains.
-        /// </summary>
-        public MultibrotPerturbationSampler(int power, double constantX, double constantY)
+        public FoldedPerturbationSampler(in FoldedFormula formula, double constantX, double constantY)
         {
-            this.power = MultibrotDefinition.ClampPower(power);
+            this.formula = formula;
             julia = true;
             this.constantX = constantX;
             this.constantY = constantY;
@@ -203,29 +200,36 @@ namespace FractalVisio.Fractals
             ReferenceOrbit orbit, in HighPrecision centerX, in HighPrecision centerY, int maxIterations, double maxDeltaC,
             CancellationToken token)
         {
-            // Double-double is as deep as this fractal goes (PrecisionTier.Arbitrary is not declared).
+            // Double-double is as deep as these go (PrecisionTier.Arbitrary is not declared).
             var x = DoubleDouble.FromHighPrecision(centerX);
             var y = DoubleDouble.FromHighPrecision(centerY);
             var zero = new DoubleDouble(0d);
+
             if (!julia)
             {
-                BuildOrbit(orbit, zero, zero, x, y, maxIterations);
+                BuildOrbit(orbit, zero, zero, x, y, maxIterations, token);
                 return;
             }
 
             var cx = new DoubleDouble(constantX);
             var cy = new DoubleDouble(constantY);
-            BuildOrbit(orbit, x, y, cx, cy, maxIterations);
-            BuildOrbit(orbit.Secondary, zero, zero, cx, cy, maxIterations);
+            BuildOrbit(orbit, x, y, cx, cy, maxIterations, token);
+            BuildOrbit(orbit.Secondary, zero, zero, cx, cy, maxIterations, token);
         }
 
         private void BuildOrbit(
-            ReferenceOrbit orbit, DoubleDouble zx, DoubleDouble zy, in DoubleDouble cx, in DoubleDouble cy, int maxIterations)
+            ReferenceOrbit orbit, DoubleDouble zx, DoubleDouble zy, in DoubleDouble cx, in DoubleDouble cy,
+            int maxIterations, CancellationToken token)
         {
             orbit.Begin(maxIterations);
 
             for (var index = 0; index <= maxIterations; index++)
             {
+                if ((index & 255) == 255 && token.IsCancellationRequested)
+                {
+                    return;
+                }
+
                 var real = zx.ToDouble();
                 var imaginary = zy.ToDouble();
                 if (!orbit.Append(real, imaginary))
@@ -239,17 +243,19 @@ namespace FractalVisio.Fractals
                     break;
                 }
 
-                MultibrotDefinition.Power(zx, zy, power, out var px, out var py);
-                zx = DoubleDouble.Add(px, cx);
-                zy = DoubleDouble.Add(py, cy);
+                formula.Step(zx, zy, out var re, out var im);
+                zx = DoubleDouble.Add(re, cx);
+                zy = DoubleDouble.Add(im, cy);
             }
         }
 
         public float Sample(ReferenceOrbit orbit, double deltaX, double deltaY, int maxIterations, CancellationToken token)
         {
+            // Parameter plane: d_0 = 0 and dc is added every step. Julia set: d_0 is the offset and
+            // nothing is added.
             var rebaseOrbit = julia ? orbit.Secondary : orbit;
-            var deltaCx = julia ? 0d : deltaX;
-            var deltaCy = julia ? 0d : deltaY;
+            var addX = julia ? 0d : deltaX;
+            var addY = julia ? 0d : deltaY;
             var re = orbit.Re;
             var im = orbit.Im;
             var length = orbit.Length;
@@ -266,32 +272,9 @@ namespace FractalVisio.Fractals
                     return EscapeMath.Interior;
                 }
 
-                var zr = re[referenceIndex];
-                var zi = im[referenceIndex];
-                var fx = zr + dx;
-                var fy = zi + dy;
-
-                // T_m = Z^m + z T_(m-1), T_0 = 1: after p-1 steps T = sum z^j Z^(p-1-j).
-                var tx = 1d;
-                var ty = 0d;
-                var wx = 1d;
-                var wy = 0d;
-                for (var m = 1; m < power; m++)
-                {
-                    var nextWx = wx * zr - wy * zi;
-                    wy = wx * zi + wy * zr;
-                    wx = nextWx;
-
-                    var productX = fx * tx - fy * ty;
-                    var productY = fx * ty + fy * tx;
-                    tx = wx + productX;
-                    ty = wy + productY;
-                }
-
-                var nextX = dx * tx - dy * ty + deltaCx;
-                var nextY = dx * ty + dy * tx + deltaCy;
-                dx = nextX;
-                dy = nextY;
+                formula.Perturb(re[referenceIndex], im[referenceIndex], dx, dy, out var nextX, out var nextY);
+                dx = nextX + addX;
+                dy = nextY + addY;
                 referenceIndex++;
                 iteration++;
 
@@ -301,13 +284,15 @@ namespace FractalVisio.Fractals
                 var fullY = referenceY + dy;
                 var magnitude = fullX * fullX + fullY * fullY;
 
-                if (magnitude > MultibrotSamplerD.Bailout)
+                if (magnitude > MandelbrotSamplerD.Bailout)
                 {
-                    return EscapeMath.Smooth(iteration, magnitude, MultibrotSamplerD.Bailout, power);
+                    return EscapeMath.Smooth(iteration, magnitude, MandelbrotSamplerD.Bailout, formula.Degree);
                 }
 
                 if (referenceIndex >= length - 1 ||
                     magnitude < dx * dx + dy * dy ||
+                    System.Math.Abs(fullX) < System.Math.Abs(dx) ||
+                    System.Math.Abs(fullY) < System.Math.Abs(dy) ||
                     magnitude < GlitchToleranceSquared * (referenceX * referenceX + referenceY * referenceY))
                 {
                     re = rebaseOrbit.Re;
@@ -330,17 +315,19 @@ namespace FractalVisio.Fractals
             slopeY = 0d;
 
             var rebaseOrbit = julia ? orbit.Secondary : orbit;
-            var deltaCx = julia ? 0d : deltaX;
-            var deltaCy = julia ? 0d : deltaY;
+            var addX = julia ? 0d : deltaX;
+            var addY = julia ? 0d : deltaY;
             var re = orbit.Re;
             var im = orbit.Im;
             var length = orbit.Length;
 
             var dx = julia ? deltaX : 0d;
             var dy = julia ? deltaY : 0d;
-            var derX = julia ? 1d : 0d;
-            var derY = 0d;
             var identity = julia ? 0d : 1d;
+            var j00 = julia ? 1d : 0d;
+            var j01 = 0d;
+            var j10 = 0d;
+            var j11 = j00;
             var referenceIndex = 0;
             var iteration = 0;
 
@@ -353,35 +340,11 @@ namespace FractalVisio.Fractals
 
                 var zr = re[referenceIndex];
                 var zi = im[referenceIndex];
-                var fx = zr + dx;
-                var fy = zi + dy;
+                formula.JacobianStep(zr + dx, zi + dy, identity, ref j00, ref j01, ref j10, ref j11);
 
-                // dz <- p z^(p-1) dz + 1 with the pixel's own z.
-                MultibrotDefinition.PowerMinusOne(fx, fy, power, out var px, out var py);
-                var nextDerX = power * (px * derX - py * derY) + identity;
-                derY = power * (px * derY + py * derX);
-                derX = nextDerX;
-
-                var tx = 1d;
-                var ty = 0d;
-                var wx = 1d;
-                var wy = 0d;
-                for (var m = 1; m < power; m++)
-                {
-                    var nextWx = wx * zr - wy * zi;
-                    wy = wx * zi + wy * zr;
-                    wx = nextWx;
-
-                    var productX = fx * tx - fy * ty;
-                    var productY = fx * ty + fy * tx;
-                    tx = wx + productX;
-                    ty = wy + productY;
-                }
-
-                var nextX = dx * tx - dy * ty + deltaCx;
-                var nextY = dx * ty + dy * tx + deltaCy;
-                dx = nextX;
-                dy = nextY;
+                formula.Perturb(zr, zi, dx, dy, out var nextX, out var nextY);
+                dx = nextX + addX;
+                dy = nextY + addY;
                 referenceIndex++;
                 iteration++;
 
@@ -391,14 +354,16 @@ namespace FractalVisio.Fractals
                 var fullY = referenceY + dy;
                 var magnitude = fullX * fullX + fullY * fullY;
 
-                if (magnitude > MultibrotSamplerD.Bailout)
+                if (magnitude > MandelbrotSamplerD.Bailout)
                 {
-                    EscapeMath.HolomorphicSlope(fullX, fullY, derX, derY, out slopeX, out slopeY);
-                    return EscapeMath.Smooth(iteration, magnitude, MultibrotSamplerD.Bailout, power);
+                    EscapeMath.JacobianSlope(fullX, fullY, j00, j01, j10, j11, out slopeX, out slopeY);
+                    return EscapeMath.Smooth(iteration, magnitude, MandelbrotSamplerD.Bailout, formula.Degree);
                 }
 
                 if (referenceIndex >= length - 1 ||
                     magnitude < dx * dx + dy * dy ||
+                    System.Math.Abs(fullX) < System.Math.Abs(dx) ||
+                    System.Math.Abs(fullY) < System.Math.Abs(dy) ||
                     magnitude < GlitchToleranceSquared * (referenceX * referenceX + referenceY * referenceY))
                 {
                     re = rebaseOrbit.Re;

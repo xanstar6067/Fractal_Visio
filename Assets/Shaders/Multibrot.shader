@@ -8,6 +8,7 @@ Shader "FractalVisio/Multibrot"
         _Rotation ("Rotation", Float) = 0
         _Iterations ("Iterations", Int) = 128
         _Power ("Power", Float) = 3
+        _JuliaC ("C, Julia", Vector) = (0, 0, 0, 0)
         _PaletteTex ("Palette", 2D) = "white" {}
         _ColorCycle ("Iterations per palette sweep", Float) = 48
         _ColorOffset ("Palette offset", Float) = 0
@@ -31,26 +32,31 @@ Shader "FractalVisio/Multibrot"
             #pragma fragment Frag
             #pragma multi_compile_local __ FRACTAL_RELIEF
 
-            // Uniforms of this fractal, folded into the shared constant buffer.
-            #define FRACTAL_EXTRA_UNIFORMS float _Power;
+            // Uniforms of this fractal, folded into the shared constant buffer. _JuliaC.z set makes
+            // it the Multijulia: z starts at the pixel and c is _JuliaC.xy.
+            #define FRACTAL_EXTRA_UNIFORMS float _Power; float4 _JuliaC;
             #include "Common/FractalCommon.hlsl"
 
             half4 Frag(Varyings input) : SV_Target
             {
-                float2 c = FractalPlanePoint(input.uv);
+                float2 pixel = FractalPlanePoint(input.uv);
+                bool julia = _JuliaC.z > 0.5;
+                float2 c = julia ? _JuliaC.xy : pixel;
 
                 // Matches MultibrotSamplerD.Bailout and MultibrotDefinition.ClampPower.
                 const float bailout = 65536.0;
                 int power = clamp((int)round(_Power), 2, 8);
 
-                float2 z = 0.0;
+                float2 z = julia ? pixel : 0.0;
                 int maxIterations = FractalMaxIterations();
                 int iteration = 0;
                 float squared = 0.0;
                 bool escaped = false;
 
 #if defined(FRACTAL_RELIEF)
-                float2 dz = 0.0;
+                // dz/dc, or dz/dz_0 for a Julia set.
+                float2 dz = julia ? float2(1.0, 0.0) : 0.0;
+                float2 dc = julia ? 0.0 : float2(1.0, 0.0);
 #endif
 
                 [loop]
@@ -76,7 +82,7 @@ Shader "FractalVisio/Multibrot"
                     }
 
 #if defined(FRACTAL_RELIEF)
-                    dz = power * float2(w.x * dz.x - w.y * dz.y, w.x * dz.y + w.y * dz.x) + float2(1.0, 0.0);
+                    dz = power * float2(w.x * dz.x - w.y * dz.y, w.x * dz.y + w.y * dz.x) + dc;
 #endif
                     z = float2(w.x * z.x - w.y * z.y, w.x * z.y + w.y * z.x) + c;
                     iteration = i + 1;

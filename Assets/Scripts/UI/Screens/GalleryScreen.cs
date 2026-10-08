@@ -24,6 +24,11 @@ namespace FractalVisio.UI
     ///
     /// "Saved" lists the bookmarks as cards of the same shape, each with the preview taken when it
     /// was saved: tap to go there, "more" for rename and delete (<see cref="BookmarkActionsScreen"/>).
+    ///
+    /// A section with folders (<see cref="CatalogEntry.Folder"/>) shows each as a row that opens and
+    /// closes it - the Mandelbrot and Julia families have sixty cards each. The first folder of a
+    /// section starts open, and so does the one holding the fractal on screen. Only cards near the
+    /// visible part of the grid ask for their preview, so a long list draws what is looked at.
     /// </summary>
     public sealed class GalleryScreen : UiScreen
     {
@@ -42,6 +47,10 @@ namespace FractalVisio.UI
         private readonly List<SavedCardView> savedCards = new();
         private readonly List<ChipView> chips = new();
         private readonly List<string> sections = new();
+
+        // Open folders, as "section/folder". Kept on the screen object like the filter.
+        private readonly HashSet<string> openFolders = new();
+        private bool foldersInitialized;
 
         private IGalleryPreferences preferences;
         private IFractalThumbnails thumbnails;
@@ -111,6 +120,7 @@ namespace FractalVisio.UI
             }
 
             CollectSections();
+            InitializeFolders();
 
             // Full screen, square corners: the screen's own corners are the panel's.
             Panel = GlassPanel.Create("Gallery", parent, 0f, UiTheme.GalleryTint, Color.clear);
@@ -166,10 +176,17 @@ namespace FractalVisio.UI
             }
 
             // Previews are asked for every frame the gallery is on screen: that is what keeps them
-            // wanted, and what picks up a redraw after a palette change or a new card size.
+            // wanted, and what picks up a redraw after a palette change or a new card size. Only for
+            // cards within a card's height of the visible part: the rest are not drawn until scrolled to.
+            var scrollTop = gridContent != null ? gridContent.anchoredPosition.y : 0f;
+            var scrollBottom = scrollTop + gridViewportHeight;
             for (var i = 0; i < cards.Count; i++)
             {
-                cards[i].RefreshThumbnail(thumbnails);
+                var card = cards[i];
+                if (card.Top < scrollBottom + cardHeight && card.Top + cardHeight > scrollTop - cardHeight)
+                {
+                    card.RefreshThumbnail(thumbnails);
+                }
             }
 
             for (var i = 0; i < savedCards.Count; i++)
@@ -403,8 +420,9 @@ namespace FractalVisio.UI
             columns = Mathf.Clamp(Mathf.FloorToInt((gridWidth + spacing) / (minimum + spacing)), 1, UiTheme.CardMaximumColumns);
             cardWidth = (gridWidth - spacing * (columns - 1)) / columns;
 
-            // A square preview, then the name and three lines of description.
-            cardHeight = cardWidth + UiTheme.Px(84f);
+            // A square preview, then the name and three lines of description - or a name long enough
+            // for two lines ("Quartic Celtic Partial Burning Ship Real Mandelbar") and two of them.
+            cardHeight = cardWidth + UiTheme.Px(88f);
         }
 
         /// <summary>
@@ -471,12 +489,16 @@ namespace FractalVisio.UI
                     }
 
                     cursor = AddSectionHeader(Strings.SectionName(sections[s]), cursor);
-                    cursor = AddCards(inSection, cursor) - UiTheme.Px(20f);
+                    cursor = AddFoldered(sections[s], inSection, cursor) - UiTheme.Px(20f);
                 }
             }
             else if (entries.Count == 0)
             {
                 cursor = AddEmptyState(cursor);
+            }
+            else if (filter == Filter.Section)
+            {
+                cursor = AddFoldered(filterSection, entries, cursor);
             }
             else
             {
@@ -534,6 +556,132 @@ namespace FractalVisio.UI
             return result;
         }
 
+        /// <summary>
+        /// Open the first folder of every section and the one holding the fractal on screen - once,
+        /// when the gallery is first built; after that the folders stay as the user left them.
+        /// </summary>
+        private void InitializeFolders()
+        {
+            if (foldersInitialized)
+            {
+                return;
+            }
+
+            foldersInitialized = true;
+            var gallery = Services.Gallery;
+            var seenSections = new HashSet<string>();
+            for (var i = 0; i < gallery.Count; i++)
+            {
+                var entry = gallery[i];
+                if (string.IsNullOrEmpty(entry.Folder))
+                {
+                    continue;
+                }
+
+                if (seenSections.Add(entry.Section) || ReferenceEquals(entry.Definition, Services.Session.Definition))
+                {
+                    openFolders.Add(FolderKey(entry.Section, entry.Folder));
+                }
+            }
+        }
+
+        private static string FolderKey(string section, string folder) => section + "/" + folder;
+
+        /// <summary>
+        /// The cards of one section: those without a folder first, then each folder as a row that
+        /// opens and closes it, followed by its cards when open. Folders appear in catalog order.
+        /// </summary>
+        private float AddFoldered(string section, List<CatalogEntry> entries, float cursor)
+        {
+            var loose = new List<CatalogEntry>();
+            var folders = new List<string>();
+            for (var i = 0; i < entries.Count; i++)
+            {
+                var folder = entries[i].Folder;
+                if (string.IsNullOrEmpty(folder))
+                {
+                    loose.Add(entries[i]);
+                }
+                else if (!folders.Contains(folder))
+                {
+                    folders.Add(folder);
+                }
+            }
+
+            if (loose.Count > 0)
+            {
+                cursor = AddCards(loose, cursor) - spacing;
+            }
+
+            var inFolder = new List<CatalogEntry>();
+            for (var f = 0; f < folders.Count; f++)
+            {
+                inFolder.Clear();
+                for (var i = 0; i < entries.Count; i++)
+                {
+                    if (entries[i].Folder == folders[f])
+                    {
+                        inFolder.Add(entries[i]);
+                    }
+                }
+
+                var key = FolderKey(section, folders[f]);
+                var open = openFolders.Contains(key);
+                cursor = AddFolderRow(key, Strings.FolderName(folders[f]), inFolder.Count, open, cursor);
+                if (open)
+                {
+                    cursor = AddCards(inFolder, cursor) - spacing;
+                }
+            }
+
+            return cursor + spacing;
+        }
+
+        /// <summary>A folder: a full-width row with its name, how many cards it holds and a chevron; a tap opens or closes it.</summary>
+        private float AddFolderRow(string key, string title, int count, bool open, float cursor)
+        {
+            var height = UiTheme.Px(UiTheme.SegmentHeight);
+            var radius = UiTheme.PxInt(UiTheme.SegmentRadius);
+            var row = UiFactory.CreateImage("Folder_" + key, gridContent, UiSprites.Rounded(radius), UiTheme.CardFill);
+            row.raycastTarget = true;
+            Place(row.rectTransform, left, cursor, gridWidth, height);
+            AttachButton(row, () => ToggleFolder(key));
+
+            var padding = UiTheme.Px(14f);
+            var chevronSize = Mathf.Round(UiTheme.Px(22f));
+            var chevron = UiFactory.CreateImage("Chevron", row.transform, null, UiTheme.Text);
+            chevron.sprite = UiSprites.Chevron(Mathf.RoundToInt(chevronSize));
+            chevron.type = Image.Type.Simple;
+            UiFactory.Anchor(
+                chevron.rectTransform, new Vector2(0f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(padding + chevronSize * 0.5f, 0f), new Vector2(chevronSize, chevronSize));
+            chevron.rectTransform.localEulerAngles = new Vector3(0f, 0f, open ? -90f : 0f);
+
+            var countWidth = UiTheme.Px(48f);
+            var label = UiFactory.CreateText(
+                "Title", row.transform, title, UiTheme.SegmentFontSize - 1, UiTheme.Text, TextAnchor.MiddleLeft, fitToRect: true);
+            label.fontStyle = open ? FontStyle.Bold : FontStyle.Normal;
+            var labelLeft = padding * 2f + chevronSize;
+            Place(label.rectTransform, labelLeft, 0f, gridWidth - labelLeft - countWidth - padding, height);
+
+            var number = UiFactory.CreateText(
+                "Count", row.transform, count.ToString(CultureInfo.InvariantCulture), UiTheme.SegmentFontSize - 2,
+                UiTheme.TextMuted, TextAnchor.MiddleRight, fitToRect: true);
+            Place(number.rectTransform, gridWidth - countWidth - padding, 0f, countWidth, height);
+
+            return cursor - height - spacing;
+        }
+
+        private void ToggleFolder(string key)
+        {
+            if (!openFolders.Remove(key))
+            {
+                openFolders.Add(key);
+            }
+
+            RebuildGrid(true);
+        }
+
         private float AddSectionHeader(string text, float cursor)
         {
             var height = UiTheme.Px(34f);
@@ -569,7 +717,9 @@ namespace FractalVisio.UI
                 var row = i / columns;
                 var x = left + column * (cardWidth + spacing);
                 var y = cursor - row * (cardHeight + spacing);
-                cards.Add(BuildCard(entries[i], x, y));
+                var card = BuildCard(entries[i], x, y);
+                card.Top = -y;
+                cards.Add(card);
             }
 
             var rows = (entries.Count + columns - 1) / columns;
@@ -597,16 +747,21 @@ namespace FractalVisio.UI
             UiFactory.Stretch(preview.rectTransform);
             preview.enabled = false;
 
+            var textWidth = cardWidth - padding * 2f;
             var name = UiFactory.CreateText(
                 "Name", card.transform, Strings.FractalName(definition), UiTheme.CardTitleFontSize, UiTheme.Text,
-                TextAnchor.MiddleLeft, fitToRect: true);
+                TextAnchor.UpperLeft);
             name.fontStyle = FontStyle.Bold;
-            Place(name.rectTransform, padding, -(cardWidth + UiTheme.Px(6f)), cardWidth - padding * 2f, UiTheme.Px(24f));
+            var twoLines = name.preferredWidth > textWidth;
+            UiFactory.FitToRect(name);
+            var nameHeight = UiTheme.Px(twoLines ? 42f : 22f);
+            Place(name.rectTransform, padding, -(cardWidth + UiTheme.Px(6f)), textWidth, nameHeight);
 
+            var aboutTop = cardWidth + UiTheme.Px(10f) + nameHeight;
             var about = UiFactory.CreateText(
                 "About", card.transform, Strings.FractalDescription(definition), UiTheme.CardDetailFontSize, UiTheme.TextMuted,
                 TextAnchor.UpperLeft, fitToRect: true);
-            Place(about.rectTransform, padding, -(cardWidth + UiTheme.Px(30f)), cardWidth - padding * 2f, UiTheme.Px(48f));
+            Place(about.rectTransform, padding, -aboutTop, textWidth, cardHeight - aboutTop - UiTheme.Px(6f));
 
             if (ReferenceEquals(definition, Services.Session.Definition))
             {
@@ -935,6 +1090,9 @@ namespace FractalVisio.UI
                 this.star = star;
                 this.pixelSize = pixelSize;
             }
+
+            /// <summary>Distance of the card's top edge below the top of the grid's content.</summary>
+            public float Top { get; set; }
 
             public void RefreshThumbnail(IFractalThumbnails thumbnails)
             {

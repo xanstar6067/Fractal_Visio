@@ -54,6 +54,12 @@ gallery.exit_hint = Нажмите «Назад» ещё раз, чтобы вы
 # Разделы галереи
 section.mandelbrot-family = Семейство Мандельброта
 section.julia-family = Семейство Жюлиа
+# Папки галереи внутри раздела: folder.<id>, id из FoldedFamily.Folders
+folder.classic = Классические
+folder.perpendicular = Перпендикулярные и Mandelbar
+folder.cubic = Кубические
+folder.quartic = Четвёртой степени
+folder.quintic = Пятой степени
 
 # Панель инструментов: одно короткое слово под значком
 toolbar.fractal = Фрактал
@@ -192,6 +198,268 @@ fractal.julia-burning-ship.preset.crystal-axis = Кристальная ось
 fractal.julia-burning-ship.preset.violet-flame = Фиолетовое пламя
 fractal.julia-burning-ship.preset.pulsar-ruby = Пульсарный рубин
 fractal.julia-burning-ship.preset.psychonaut = Психонавт
+
+# The folded polynomial family (Fractals/Folded/FoldedFamily.cs). Formula names are the Kalles
+# Fraktaler ones, in English in every language, as in the WPF version.
+fractal.perpendicular-mandelbrot = Перпендикулярный Мандельброт
+fractal.perpendicular-mandelbrot.about = Квадрат с модулем только вещественной части и сопряжением: Re = x² − y², Im = −2·|x|·y + c.
+fractal.perpendicular-burning-ship = Перпендикулярный горящий корабль
+fractal.perpendicular-burning-ship.about = Квадрат с модулем только мнимой части и сопряжением: Re = x² − y², Im = −2·x·|y| + c.
+fractal.perpendicular-celtic = Перпендикулярный Celtic
+fractal.perpendicular-celtic.about = Перпендикулярный Мандельброт с модулем вещественной части квадрата: Re = |x² − y²|, Im = −2·|x|·y + c.
+fractal.perpendicular-buffalo = Перпендикулярный Buffalo
+fractal.perpendicular-buffalo.about = Перпендикулярный горящий корабль с модулем вещественной части квадрата: Re = |x² − y²|, Im = −2·x·|y| + c.
+fractal.celtic-mandelbar = Celtic Mandelbar
+fractal.celtic-mandelbar.about = Кельтский Трикорн: квадрат сопряжённого z, вещественная часть по модулю: Re = |x² − y²|, Im = −2·x·y + c.
+fractal.cubic-quasi-burning-ship = Кубический Quasi Burning Ship
+fractal.cubic-quasi-burning-ship.about = Куб (|x| + iy), затем отрицательный модуль мнимой части: Re = |x|·A, Im = −|y|·|C| + c.
+fractal.cubic-flying-squirrel = Кубическая летящая белка
+fractal.cubic-flying-squirrel.about = Куб z с модулем мнимой части результата: Re = x·A, Im = |y|·|C| + c.
+fractal.cubic-burning-ship = Cubic Burning Ship
+fractal.cubic-burning-ship.about = Куб с модулями множителей: Re = |x|·A, Im = |y|·C, где z³ = x·A + i·y·C. Затем + c.
+fractal.cubic-buffalo = Cubic Buffalo
+fractal.cubic-buffalo.about = Куб с модулями множителей: Re = |x|·|A|, Im = |y|·|C|, где z³ = x·A + i·y·C. Затем + c.
+fractal.cubic-celtic = Cubic Celtic
+fractal.cubic-celtic.about = Куб с модулями множителей: Re = |x|·|A|, Im = y·C, где z³ = x·A + i·y·C. Затем + c.
+fractal.cubic-mandelbar = Cubic Mandelbar
+fractal.cubic-mandelbar.about = Куб с модулями множителей: Re = x·A, Im = −y·C, где z³ = x·A + i·y·C. Затем + c.
+fractal.cubic-partial-burning-ship-real = Cubic Partial Burning Ship Real
+fractal.cubic-partial-burning-ship-real.about = Куб с модулями множителей: Re = |x|·A, Im = y·C, где z³ = x·A + i·y·C. Затем + c.
+fractal.cubic-partial-burning-ship-imag = Cubic Partial Burning Ship Imag
+fractal.cubic-partial-burning-ship-imag.about = Куб с модулями множителей: Re = x·A, Im = |y|·C, где z³ = x·A + i·y·C. Затем + c.
+fractal.cubic-quasi-perpendicular = Cubic Quasi Perpendicular
+fractal.cubic-quasi-perpendicular.about = Куб с модулями множителей: Re = |x|·A, Im = −y·|C|, где z³ = x·A + i·y·C. Затем + c.
+fractal.cubic-celtic-quasi-perpendicular = Cubic Celtic Quasi Perpendicular
+fractal.cubic-celtic-quasi-perpendicular.about = Куб с модулями множителей: Re = |x|·|A|, Im = −y·|C|, где z³ = x·A + i·y·C. Затем + c.
+fractal.cubic-quasi-perpendicular-burning-ship = Cubic Quasi Perpendicular Burning Ship
+fractal.cubic-quasi-perpendicular-burning-ship.about = Куб с модулями множителей: Re = |y|·C, Im = −x·|A|, где z³ = x·A + i·y·C. Затем + c.
+fractal.cubic-quasi-perpendicular-buffalo = Cubic Quasi Perpendicular Buffalo
+fractal.cubic-quasi-perpendicular-buffalo.about = Куб с модулями множителей: Re = |y|·|C|, Im = −x·|A|, где z³ = x·A + i·y·C. Затем + c.
+fractal.quartic-burning-ship = Quartic Burning Ship
+fractal.quartic-burning-ship.about = Четвёртая степень с модулями множителей: Re = A, Im = 4·|x|·|y|·C, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-buffalo = Quartic Buffalo
+fractal.quartic-buffalo.about = Четвёртая степень с модулями множителей: Re = |A|, Im = 4·|x|·|y|·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-celtic = Quartic Celtic
+fractal.quartic-celtic.about = Четвёртая степень с модулями множителей: Re = |A|, Im = 4·x·y·C, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-mandelbar = Quartic Mandelbar
+fractal.quartic-mandelbar.about = Четвёртая степень с модулями множителей: Re = A, Im = −4·x·y·C, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-partial-burning-ship-imag = Quartic Partial Burning Ship Imag
+fractal.quartic-partial-burning-ship-imag.about = Четвёртая степень с модулями множителей: Re = A, Im = 4·x·|y|·C, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-partial-burning-ship-real = Quartic Partial Burning Ship Real
+fractal.quartic-partial-burning-ship-real.about = Четвёртая степень с модулями множителей: Re = A, Im = 4·|x|·y·C, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-partial-burning-ship-real-mandelbar = Quartic Partial Burning Ship Real Mandelbar
+fractal.quartic-partial-burning-ship-real-mandelbar.about = Четвёртая степень с модулями множителей: Re = A, Im = −4·|x|·y·C, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-celtic-partial-burning-ship-imag = Quartic Celtic Partial Burning Ship Imag
+fractal.quartic-celtic-partial-burning-ship-imag.about = Четвёртая степень с модулями множителей: Re = |A|, Im = 4·x·|y|·C, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-celtic-partial-burning-ship-real = Quartic Celtic Partial Burning Ship Real
+fractal.quartic-celtic-partial-burning-ship-real.about = Четвёртая степень с модулями множителей: Re = |A|, Im = 4·|x|·y·C, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-celtic-partial-burning-ship-real-mandelbar = Quartic Celtic Partial Burning Ship Real Mandelbar
+fractal.quartic-celtic-partial-burning-ship-real-mandelbar.about = Четвёртая степень с модулями множителей: Re = |A|, Im = −4·|x|·y·C, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-buffalo-partial-imag = Quartic Buffalo Partial Imag
+fractal.quartic-buffalo-partial-imag.about = Четвёртая степень с модулями множителей: Re = A, Im = 4·|x|·|y|·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-celtic-mandelbar = Quartic Celtic Mandelbar
+fractal.quartic-celtic-mandelbar.about = Четвёртая степень с модулями множителей: Re = |A|, Im = −4·x·y·C, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-false-quasi-perpendicular = Quartic False Quasi Perpendicular
+fractal.quartic-false-quasi-perpendicular.about = Четвёртая степень с модулями множителей: Re = A, Im = −4·x·y·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-false-quasi-heart = Quartic False Quasi Heart
+fractal.quartic-false-quasi-heart.about = Четвёртая степень с модулями множителей: Re = A, Im = 4·x·y·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-celtic-false-quasi-perpendicular = Quartic Celtic False Quasi Perpendicular
+fractal.quartic-celtic-false-quasi-perpendicular.about = Четвёртая степень с модулями множителей: Re = |A|, Im = −4·x·y·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-celtic-false-quasi-heart = Quartic Celtic False Quasi Heart
+fractal.quartic-celtic-false-quasi-heart.about = Четвёртая степень с модулями множителей: Re = |A|, Im = 4·x·y·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-imag-quasi = Quartic Imag Quasi
+fractal.quartic-imag-quasi.about = Четвёртая степень с модулями множителей: Re = A, Im = 4·x·|y|·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-real-quasi-perpendicular = Quartic Real Quasi Perpendicular
+fractal.quartic-real-quasi-perpendicular.about = Четвёртая степень с модулями множителей: Re = A, Im = −4·|x|·y·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-real-quasi-heart = Quartic Real Quasi Heart
+fractal.quartic-real-quasi-heart.about = Четвёртая степень с модулями множителей: Re = A, Im = 4·|x|·y·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-celtic-imag-quasi = Quartic Celtic Imag Quasi
+fractal.quartic-celtic-imag-quasi.about = Четвёртая степень с модулями множителей: Re = |A|, Im = 4·x·|y|·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-celtic-real-quasi-perpendicular = Quartic Celtic Real Quasi Perpendicular
+fractal.quartic-celtic-real-quasi-perpendicular.about = Четвёртая степень с модулями множителей: Re = |A|, Im = −4·|x|·y·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quartic-celtic-real-quasi-heart = Quartic Celtic Real Quasi Heart
+fractal.quartic-celtic-real-quasi-heart.about = Четвёртая степень с модулями множителей: Re = |A|, Im = 4·|x|·y·|C|, где z⁴ = A + i·4xy·C. Затем + c.
+fractal.quintic-burning-ship = Quintic Burning Ship
+fractal.quintic-burning-ship.about = Пятая степень с модулями множителей: Re = |x|·A, Im = |y|·C, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-buffalo = Quintic Buffalo
+fractal.quintic-buffalo.about = Пятая степень с модулями множителей: Re = |x|·|A|, Im = |y|·|C|, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-celtic = Quintic Celtic
+fractal.quintic-celtic.about = Пятая степень с модулями множителей: Re = |x|·|A|, Im = y·C, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-mandelbar = Quintic Mandelbar
+fractal.quintic-mandelbar.about = Пятая степень с модулями множителей: Re = x·A, Im = −y·C, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-partial-burning-ship-real = Quintic Partial Burning Ship Real
+fractal.quintic-partial-burning-ship-real.about = Пятая степень с модулями множителей: Re = |x|·A, Im = y·C, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-partial-burning-ship-real-mandelbar = Quintic Partial Burning Ship Real Mandelbar
+fractal.quintic-partial-burning-ship-real-mandelbar.about = Пятая степень с модулями множителей: Re = |x|·A, Im = −y·C, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-celtic-mandelbar = Quintic Celtic Mandelbar
+fractal.quintic-celtic-mandelbar.about = Пятая степень с модулями множителей: Re = |x|·|A|, Im = −y·C, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-quasi-burning-ship = Quintic Quasi Burning Ship
+fractal.quintic-quasi-burning-ship.about = Пятая степень с модулями множителей: Re = |x|·A, Im = −|y|·|C|, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-quasi-perpendicular = Quintic Quasi Perpendicular
+fractal.quintic-quasi-perpendicular.about = Пятая степень с модулями множителей: Re = |x|·A, Im = −y·|C|, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-quasi-heart = Quintic Quasi Heart
+fractal.quintic-quasi-heart.about = Пятая степень с модулями множителей: Re = |x|·A, Im = y·|C|, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-quasi-perpendicular-burning-ship = Quintic Quasi Perpendicular Burning Ship
+fractal.quintic-quasi-perpendicular-burning-ship.about = Пятая степень с модулями множителей: Re = |y|·C, Im = −x·|A|, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-quasi-perpendicular-buffalo = Quintic Quasi Perpendicular Buffalo
+fractal.quintic-quasi-perpendicular-buffalo.about = Пятая степень с модулями множителей: Re = |y|·|C|, Im = −|x|·|A|, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-celtic-quasi-perpendicular = Quintic Celtic Quasi Perpendicular
+fractal.quintic-celtic-quasi-perpendicular.about = Пятая степень с модулями множителей: Re = |x|·|A|, Im = −y·|C|, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.quintic-celtic-quasi-heart = Quintic Celtic Quasi Heart
+fractal.quintic-celtic-quasi-heart.about = Пятая степень с модулями множителей: Re = |x|·|A|, Im = y·|C|, где z⁵ = x·A + i·y·C. Затем + c.
+fractal.julia-perpendicular-mandelbrot = Перпендикулярный Мандельброт (Жюлиа)
+fractal.julia-perpendicular-mandelbrot.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Перпендикулярный Мандельброт».
+fractal.julia-perpendicular-burning-ship = Перпендикулярный горящий корабль (Жюлиа)
+fractal.julia-perpendicular-burning-ship.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Перпендикулярный горящий корабль».
+fractal.julia-perpendicular-celtic = Перпендикулярный Celtic (Жюлиа)
+fractal.julia-perpendicular-celtic.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Перпендикулярный Celtic».
+fractal.julia-perpendicular-buffalo = Перпендикулярный Buffalo (Жюлиа)
+fractal.julia-perpendicular-buffalo.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Перпендикулярный Buffalo».
+fractal.julia-celtic-mandelbar = Celtic Mandelbar (Жюлиа)
+fractal.julia-celtic-mandelbar.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Celtic Mandelbar».
+fractal.julia-cubic-quasi-burning-ship = Кубический Quasi Burning Ship (Жюлиа)
+fractal.julia-cubic-quasi-burning-ship.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Кубический Quasi Burning Ship».
+fractal.julia-cubic-flying-squirrel = Кубическая летящая белка (Жюлиа)
+fractal.julia-cubic-flying-squirrel.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Кубическая летящая белка».
+fractal.julia-cubic-burning-ship = Cubic Burning Ship (Жюлиа)
+fractal.julia-cubic-burning-ship.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Cubic Burning Ship».
+fractal.julia-cubic-buffalo = Cubic Buffalo (Жюлиа)
+fractal.julia-cubic-buffalo.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Cubic Buffalo».
+fractal.julia-cubic-celtic = Cubic Celtic (Жюлиа)
+fractal.julia-cubic-celtic.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Cubic Celtic».
+fractal.julia-cubic-mandelbar = Cubic Mandelbar (Жюлиа)
+fractal.julia-cubic-mandelbar.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Cubic Mandelbar».
+fractal.julia-cubic-partial-burning-ship-real = Cubic Partial Burning Ship Real (Жюлиа)
+fractal.julia-cubic-partial-burning-ship-real.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Cubic Partial Burning Ship Real».
+fractal.julia-cubic-partial-burning-ship-imag = Cubic Partial Burning Ship Imag (Жюлиа)
+fractal.julia-cubic-partial-burning-ship-imag.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Cubic Partial Burning Ship Imag».
+fractal.julia-cubic-quasi-perpendicular = Cubic Quasi Perpendicular (Жюлиа)
+fractal.julia-cubic-quasi-perpendicular.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Cubic Quasi Perpendicular».
+fractal.julia-cubic-celtic-quasi-perpendicular = Cubic Celtic Quasi Perpendicular (Жюлиа)
+fractal.julia-cubic-celtic-quasi-perpendicular.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Cubic Celtic Quasi Perpendicular».
+fractal.julia-cubic-quasi-perpendicular-burning-ship = Cubic Quasi Perpendicular Burning Ship (Жюлиа)
+fractal.julia-cubic-quasi-perpendicular-burning-ship.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Cubic Quasi Perpendicular Burning Ship».
+fractal.julia-cubic-quasi-perpendicular-buffalo = Cubic Quasi Perpendicular Buffalo (Жюлиа)
+fractal.julia-cubic-quasi-perpendicular-buffalo.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Cubic Quasi Perpendicular Buffalo».
+fractal.julia-quartic-burning-ship = Quartic Burning Ship (Жюлиа)
+fractal.julia-quartic-burning-ship.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Burning Ship».
+fractal.julia-quartic-buffalo = Quartic Buffalo (Жюлиа)
+fractal.julia-quartic-buffalo.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Buffalo».
+fractal.julia-quartic-celtic = Quartic Celtic (Жюлиа)
+fractal.julia-quartic-celtic.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Celtic».
+fractal.julia-quartic-mandelbar = Quartic Mandelbar (Жюлиа)
+fractal.julia-quartic-mandelbar.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Mandelbar».
+fractal.julia-quartic-partial-burning-ship-imag = Quartic Partial Burning Ship Imag (Жюлиа)
+fractal.julia-quartic-partial-burning-ship-imag.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Partial Burning Ship Imag».
+fractal.julia-quartic-partial-burning-ship-real = Quartic Partial Burning Ship Real (Жюлиа)
+fractal.julia-quartic-partial-burning-ship-real.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Partial Burning Ship Real».
+fractal.julia-quartic-partial-burning-ship-real-mandelbar = Quartic Partial Burning Ship Real Mandelbar (Жюлиа)
+fractal.julia-quartic-partial-burning-ship-real-mandelbar.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Partial Burning Ship Real Mandelbar».
+fractal.julia-quartic-celtic-partial-burning-ship-imag = Quartic Celtic Partial Burning Ship Imag (Жюлиа)
+fractal.julia-quartic-celtic-partial-burning-ship-imag.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Celtic Partial Burning Ship Imag».
+fractal.julia-quartic-celtic-partial-burning-ship-real = Quartic Celtic Partial Burning Ship Real (Жюлиа)
+fractal.julia-quartic-celtic-partial-burning-ship-real.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Celtic Partial Burning Ship Real».
+fractal.julia-quartic-celtic-partial-burning-ship-real-mandelbar = Quartic Celtic Partial Burning Ship Real Mandelbar (Жюлиа)
+fractal.julia-quartic-celtic-partial-burning-ship-real-mandelbar.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Celtic Partial Burning Ship Real Mandelbar».
+fractal.julia-quartic-buffalo-partial-imag = Quartic Buffalo Partial Imag (Жюлиа)
+fractal.julia-quartic-buffalo-partial-imag.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Buffalo Partial Imag».
+fractal.julia-quartic-celtic-mandelbar = Quartic Celtic Mandelbar (Жюлиа)
+fractal.julia-quartic-celtic-mandelbar.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Celtic Mandelbar».
+fractal.julia-quartic-false-quasi-perpendicular = Quartic False Quasi Perpendicular (Жюлиа)
+fractal.julia-quartic-false-quasi-perpendicular.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic False Quasi Perpendicular».
+fractal.julia-quartic-false-quasi-heart = Quartic False Quasi Heart (Жюлиа)
+fractal.julia-quartic-false-quasi-heart.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic False Quasi Heart».
+fractal.julia-quartic-celtic-false-quasi-perpendicular = Quartic Celtic False Quasi Perpendicular (Жюлиа)
+fractal.julia-quartic-celtic-false-quasi-perpendicular.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Celtic False Quasi Perpendicular».
+fractal.julia-quartic-celtic-false-quasi-heart = Quartic Celtic False Quasi Heart (Жюлиа)
+fractal.julia-quartic-celtic-false-quasi-heart.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Celtic False Quasi Heart».
+fractal.julia-quartic-imag-quasi = Quartic Imag Quasi (Жюлиа)
+fractal.julia-quartic-imag-quasi.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Imag Quasi».
+fractal.julia-quartic-real-quasi-perpendicular = Quartic Real Quasi Perpendicular (Жюлиа)
+fractal.julia-quartic-real-quasi-perpendicular.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Real Quasi Perpendicular».
+fractal.julia-quartic-real-quasi-heart = Quartic Real Quasi Heart (Жюлиа)
+fractal.julia-quartic-real-quasi-heart.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Real Quasi Heart».
+fractal.julia-quartic-celtic-imag-quasi = Quartic Celtic Imag Quasi (Жюлиа)
+fractal.julia-quartic-celtic-imag-quasi.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Celtic Imag Quasi».
+fractal.julia-quartic-celtic-real-quasi-perpendicular = Quartic Celtic Real Quasi Perpendicular (Жюлиа)
+fractal.julia-quartic-celtic-real-quasi-perpendicular.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Celtic Real Quasi Perpendicular».
+fractal.julia-quartic-celtic-real-quasi-heart = Quartic Celtic Real Quasi Heart (Жюлиа)
+fractal.julia-quartic-celtic-real-quasi-heart.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quartic Celtic Real Quasi Heart».
+fractal.julia-quintic-burning-ship = Quintic Burning Ship (Жюлиа)
+fractal.julia-quintic-burning-ship.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Burning Ship».
+fractal.julia-quintic-buffalo = Quintic Buffalo (Жюлиа)
+fractal.julia-quintic-buffalo.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Buffalo».
+fractal.julia-quintic-celtic = Quintic Celtic (Жюлиа)
+fractal.julia-quintic-celtic.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Celtic».
+fractal.julia-quintic-mandelbar = Quintic Mandelbar (Жюлиа)
+fractal.julia-quintic-mandelbar.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Mandelbar».
+fractal.julia-quintic-partial-burning-ship-real = Quintic Partial Burning Ship Real (Жюлиа)
+fractal.julia-quintic-partial-burning-ship-real.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Partial Burning Ship Real».
+fractal.julia-quintic-partial-burning-ship-real-mandelbar = Quintic Partial Burning Ship Real Mandelbar (Жюлиа)
+fractal.julia-quintic-partial-burning-ship-real-mandelbar.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Partial Burning Ship Real Mandelbar».
+fractal.julia-quintic-celtic-mandelbar = Quintic Celtic Mandelbar (Жюлиа)
+fractal.julia-quintic-celtic-mandelbar.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Celtic Mandelbar».
+fractal.julia-quintic-quasi-burning-ship = Quintic Quasi Burning Ship (Жюлиа)
+fractal.julia-quintic-quasi-burning-ship.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Quasi Burning Ship».
+fractal.julia-quintic-quasi-perpendicular = Quintic Quasi Perpendicular (Жюлиа)
+fractal.julia-quintic-quasi-perpendicular.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Quasi Perpendicular».
+fractal.julia-quintic-quasi-heart = Quintic Quasi Heart (Жюлиа)
+fractal.julia-quintic-quasi-heart.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Quasi Heart».
+fractal.julia-quintic-quasi-perpendicular-burning-ship = Quintic Quasi Perpendicular Burning Ship (Жюлиа)
+fractal.julia-quintic-quasi-perpendicular-burning-ship.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Quasi Perpendicular Burning Ship».
+fractal.julia-quintic-quasi-perpendicular-buffalo = Quintic Quasi Perpendicular Buffalo (Жюлиа)
+fractal.julia-quintic-quasi-perpendicular-buffalo.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Quasi Perpendicular Buffalo».
+fractal.julia-quintic-celtic-quasi-perpendicular = Quintic Celtic Quasi Perpendicular (Жюлиа)
+fractal.julia-quintic-celtic-quasi-perpendicular.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Celtic Quasi Perpendicular».
+fractal.julia-quintic-celtic-quasi-heart = Quintic Celtic Quasi Heart (Жюлиа)
+fractal.julia-quintic-celtic-quasi-heart.about = Та же итерация из каждой точки, C постоянна и выбирается на карте «Quintic Celtic Quasi Heart».
+fractal.julia-tricorn = Трикорн (Жюлиа)
+fractal.julia-tricorn.about = Сопряжённый квадрат Трикорна из каждой точки, C выбирается на карте Трикорна: тройное кружево.
+fractal.julia-celtic = Кельтское Жюлиа
+fractal.julia-celtic.about = Кельтская итерация из каждой точки, |Re z²| + i Im z² + C, C выбирается на карте Кельтского Мандельброта.
+fractal.multijulia = Мультижюлиа
+fractal.multijulia.about = z = z^p + C из каждой точки, целая степень от 3 до 8. C выбирается на карте Мультиброта той же степени.
+fractal.multijulia.power = Степень
+fractal.simonobrot = Симоноброт
+fractal.simonobrot.about = z = z^p·|z|^p + c: Мультиброт с радиальным множителем. Отрицательная степень выворачивает его наизнанку, инверсия меняет знак вещественной части c.
+fractal.simonobrot.power = Степень
+fractal.simonobrot.inversion = Инверсия
+fractal.simonobrot.place.crystal-cave = Кристальная пещера (p = 5)
+fractal.simonobrot.place.star = Звезда (p = −2)
+fractal.simonobrot.place.thorn = Колючка (p = −3, инверсия)
+fractal.simonobrot.place.four-leaf = Четырёхлистник (p = 5)
+fractal.simonobrot.place.lilac-fjords = Лиловые фьорды (p = 2)
+fractal.simonobrot.place.turquoise-blades = Бирюзовые лезвия (p = 3)
+fractal.julia-simonobrot = Симоноброт (Жюлиа)
+fractal.julia-simonobrot.about = z^p·|z|^p + C из каждой точки, с той же степенью и инверсией, что и его карта Симоноброта.
+fractal.julia-simonobrot.power = Степень
+fractal.julia-simonobrot.inversion = Инверсия
+
+# Общие имена: preset.<id> для готовых C и place.<id> для мест, общих для целого семейства.
+preset.default = Основная
+preset.alternative = Другая
+preset.lace-cloud = Кружевное облако
+preset.ruby-lace = Рубиновое кружево
+preset.reflected-lace = Отражённое кружево
+preset.branched-form = Разветвлённая форма
+preset.celtic-reflected-lace = Кельтское отражённое кружево
+preset.celtic-branches = Кельтские ветви
+preset.cubic-ship-lace = Кубическое корабельное кружево
+preset.connected-cubic = Связное кубическое Жюлиа
+preset.cubic-wings = Кубические крылья
+preset.connected-wings = Связные крылья
+preset.conjugate-lace = Сопряжённое кружево
+preset.triple-branches = Тройные ветви
+preset.celtic-loops = Кельтские петли
+preset.celtic-antenna = Кельтская антенна
+preset.cubic-julia = Кубическое Жюлиа
+preset.four-rays = Четыре луча
+preset.radial-julia = Радиальное Жюлиа
+preset.radial-three-rays = Радиальные три луча
+preset.constant-inversion = Инверсия константы
+place.border-closeup = Граница крупным планом
+place.cubic-folds = Кубические складки
+place.wings-closeup = Крылья крупным планом
 
 # Встроенные палитры
 palette.aurora = Сияние

@@ -60,6 +60,12 @@ gallery.exit_hint = Press back again to leave
 # Gallery sections: section.<id>, the ids in FractalCatalog.Sections
 section.mandelbrot-family = Mandelbrot family
 section.julia-family = Julia family
+# Gallery folders inside a section: folder.<id>, the ids in FoldedFamily.Folders
+folder.classic = Classic
+folder.perpendicular = Perpendicular and Mandelbar
+folder.cubic = Cubic
+folder.quartic = Fourth power
+folder.quintic = Fifth power
 
 # Explorer toolbar: one short word under each icon
 toolbar.fractal = Fractal
@@ -212,6 +218,268 @@ fractal.julia-burning-ship.preset.crystal-axis = Crystal axis
 fractal.julia-burning-ship.preset.violet-flame = Violet flame
 fractal.julia-burning-ship.preset.pulsar-ruby = Pulsar ruby
 fractal.julia-burning-ship.preset.psychonaut = Psychonaut
+
+# The folded polynomial family (Fractals/Folded/FoldedFamily.cs). Formula names are the Kalles
+# Fraktaler ones, in English in every language, as in the WPF version.
+fractal.perpendicular-mandelbrot = Perpendicular Mandelbrot
+fractal.perpendicular-mandelbrot.about = The square with only the real part folded, and conjugated: Re = x² − y², Im = −2·|x|·y + c.
+fractal.perpendicular-burning-ship = Perpendicular Burning Ship
+fractal.perpendicular-burning-ship.about = The square with only the imaginary part folded, and conjugated: Re = x² − y², Im = −2·x·|y| + c.
+fractal.perpendicular-celtic = Perpendicular Celtic
+fractal.perpendicular-celtic.about = The perpendicular Mandelbrot with the square's real part folded: Re = |x² − y²|, Im = −2·|x|·y + c.
+fractal.perpendicular-buffalo = Perpendicular Buffalo
+fractal.perpendicular-buffalo.about = The perpendicular Burning Ship with the square's real part folded: Re = |x² − y²|, Im = −2·x·|y| + c.
+fractal.celtic-mandelbar = Celtic Mandelbar
+fractal.celtic-mandelbar.about = A Celtic Tricorn: the conjugate squared, its real part folded: Re = |x² − y²|, Im = −2·x·y + c.
+fractal.cubic-quasi-burning-ship = Cubic Quasi Burning Ship
+fractal.cubic-quasi-burning-ship.about = The cube of (|x| + iy), then the negative modulus of the imaginary part: Re = |x|·A, Im = −|y|·|C| + c.
+fractal.cubic-flying-squirrel = Cubic Flying Squirrel
+fractal.cubic-flying-squirrel.about = The cube of z with the imaginary part of the result folded: Re = x·A, Im = |y|·|C| + c.
+fractal.cubic-burning-ship = Cubic Burning Ship
+fractal.cubic-burning-ship.about = Cube with folded factors: Re = |x|·A, Im = |y|·C, where z³ = x·A + i·y·C. Then + c.
+fractal.cubic-buffalo = Cubic Buffalo
+fractal.cubic-buffalo.about = Cube with folded factors: Re = |x|·|A|, Im = |y|·|C|, where z³ = x·A + i·y·C. Then + c.
+fractal.cubic-celtic = Cubic Celtic
+fractal.cubic-celtic.about = Cube with folded factors: Re = |x|·|A|, Im = y·C, where z³ = x·A + i·y·C. Then + c.
+fractal.cubic-mandelbar = Cubic Mandelbar
+fractal.cubic-mandelbar.about = Cube with folded factors: Re = x·A, Im = −y·C, where z³ = x·A + i·y·C. Then + c.
+fractal.cubic-partial-burning-ship-real = Cubic Partial Burning Ship Real
+fractal.cubic-partial-burning-ship-real.about = Cube with folded factors: Re = |x|·A, Im = y·C, where z³ = x·A + i·y·C. Then + c.
+fractal.cubic-partial-burning-ship-imag = Cubic Partial Burning Ship Imag
+fractal.cubic-partial-burning-ship-imag.about = Cube with folded factors: Re = x·A, Im = |y|·C, where z³ = x·A + i·y·C. Then + c.
+fractal.cubic-quasi-perpendicular = Cubic Quasi Perpendicular
+fractal.cubic-quasi-perpendicular.about = Cube with folded factors: Re = |x|·A, Im = −y·|C|, where z³ = x·A + i·y·C. Then + c.
+fractal.cubic-celtic-quasi-perpendicular = Cubic Celtic Quasi Perpendicular
+fractal.cubic-celtic-quasi-perpendicular.about = Cube with folded factors: Re = |x|·|A|, Im = −y·|C|, where z³ = x·A + i·y·C. Then + c.
+fractal.cubic-quasi-perpendicular-burning-ship = Cubic Quasi Perpendicular Burning Ship
+fractal.cubic-quasi-perpendicular-burning-ship.about = Cube with folded factors: Re = |y|·C, Im = −x·|A|, where z³ = x·A + i·y·C. Then + c.
+fractal.cubic-quasi-perpendicular-buffalo = Cubic Quasi Perpendicular Buffalo
+fractal.cubic-quasi-perpendicular-buffalo.about = Cube with folded factors: Re = |y|·|C|, Im = −x·|A|, where z³ = x·A + i·y·C. Then + c.
+fractal.quartic-burning-ship = Quartic Burning Ship
+fractal.quartic-burning-ship.about = Fourth power with folded factors: Re = A, Im = 4·|x|·|y|·C, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-buffalo = Quartic Buffalo
+fractal.quartic-buffalo.about = Fourth power with folded factors: Re = |A|, Im = 4·|x|·|y|·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-celtic = Quartic Celtic
+fractal.quartic-celtic.about = Fourth power with folded factors: Re = |A|, Im = 4·x·y·C, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-mandelbar = Quartic Mandelbar
+fractal.quartic-mandelbar.about = Fourth power with folded factors: Re = A, Im = −4·x·y·C, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-partial-burning-ship-imag = Quartic Partial Burning Ship Imag
+fractal.quartic-partial-burning-ship-imag.about = Fourth power with folded factors: Re = A, Im = 4·x·|y|·C, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-partial-burning-ship-real = Quartic Partial Burning Ship Real
+fractal.quartic-partial-burning-ship-real.about = Fourth power with folded factors: Re = A, Im = 4·|x|·y·C, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-partial-burning-ship-real-mandelbar = Quartic Partial Burning Ship Real Mandelbar
+fractal.quartic-partial-burning-ship-real-mandelbar.about = Fourth power with folded factors: Re = A, Im = −4·|x|·y·C, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-celtic-partial-burning-ship-imag = Quartic Celtic Partial Burning Ship Imag
+fractal.quartic-celtic-partial-burning-ship-imag.about = Fourth power with folded factors: Re = |A|, Im = 4·x·|y|·C, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-celtic-partial-burning-ship-real = Quartic Celtic Partial Burning Ship Real
+fractal.quartic-celtic-partial-burning-ship-real.about = Fourth power with folded factors: Re = |A|, Im = 4·|x|·y·C, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-celtic-partial-burning-ship-real-mandelbar = Quartic Celtic Partial Burning Ship Real Mandelbar
+fractal.quartic-celtic-partial-burning-ship-real-mandelbar.about = Fourth power with folded factors: Re = |A|, Im = −4·|x|·y·C, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-buffalo-partial-imag = Quartic Buffalo Partial Imag
+fractal.quartic-buffalo-partial-imag.about = Fourth power with folded factors: Re = A, Im = 4·|x|·|y|·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-celtic-mandelbar = Quartic Celtic Mandelbar
+fractal.quartic-celtic-mandelbar.about = Fourth power with folded factors: Re = |A|, Im = −4·x·y·C, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-false-quasi-perpendicular = Quartic False Quasi Perpendicular
+fractal.quartic-false-quasi-perpendicular.about = Fourth power with folded factors: Re = A, Im = −4·x·y·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-false-quasi-heart = Quartic False Quasi Heart
+fractal.quartic-false-quasi-heart.about = Fourth power with folded factors: Re = A, Im = 4·x·y·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-celtic-false-quasi-perpendicular = Quartic Celtic False Quasi Perpendicular
+fractal.quartic-celtic-false-quasi-perpendicular.about = Fourth power with folded factors: Re = |A|, Im = −4·x·y·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-celtic-false-quasi-heart = Quartic Celtic False Quasi Heart
+fractal.quartic-celtic-false-quasi-heart.about = Fourth power with folded factors: Re = |A|, Im = 4·x·y·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-imag-quasi = Quartic Imag Quasi
+fractal.quartic-imag-quasi.about = Fourth power with folded factors: Re = A, Im = 4·x·|y|·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-real-quasi-perpendicular = Quartic Real Quasi Perpendicular
+fractal.quartic-real-quasi-perpendicular.about = Fourth power with folded factors: Re = A, Im = −4·|x|·y·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-real-quasi-heart = Quartic Real Quasi Heart
+fractal.quartic-real-quasi-heart.about = Fourth power with folded factors: Re = A, Im = 4·|x|·y·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-celtic-imag-quasi = Quartic Celtic Imag Quasi
+fractal.quartic-celtic-imag-quasi.about = Fourth power with folded factors: Re = |A|, Im = 4·x·|y|·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-celtic-real-quasi-perpendicular = Quartic Celtic Real Quasi Perpendicular
+fractal.quartic-celtic-real-quasi-perpendicular.about = Fourth power with folded factors: Re = |A|, Im = −4·|x|·y·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quartic-celtic-real-quasi-heart = Quartic Celtic Real Quasi Heart
+fractal.quartic-celtic-real-quasi-heart.about = Fourth power with folded factors: Re = |A|, Im = 4·|x|·y·|C|, where z⁴ = A + i·4xy·C. Then + c.
+fractal.quintic-burning-ship = Quintic Burning Ship
+fractal.quintic-burning-ship.about = Fifth power with folded factors: Re = |x|·A, Im = |y|·C, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-buffalo = Quintic Buffalo
+fractal.quintic-buffalo.about = Fifth power with folded factors: Re = |x|·|A|, Im = |y|·|C|, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-celtic = Quintic Celtic
+fractal.quintic-celtic.about = Fifth power with folded factors: Re = |x|·|A|, Im = y·C, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-mandelbar = Quintic Mandelbar
+fractal.quintic-mandelbar.about = Fifth power with folded factors: Re = x·A, Im = −y·C, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-partial-burning-ship-real = Quintic Partial Burning Ship Real
+fractal.quintic-partial-burning-ship-real.about = Fifth power with folded factors: Re = |x|·A, Im = y·C, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-partial-burning-ship-real-mandelbar = Quintic Partial Burning Ship Real Mandelbar
+fractal.quintic-partial-burning-ship-real-mandelbar.about = Fifth power with folded factors: Re = |x|·A, Im = −y·C, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-celtic-mandelbar = Quintic Celtic Mandelbar
+fractal.quintic-celtic-mandelbar.about = Fifth power with folded factors: Re = |x|·|A|, Im = −y·C, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-quasi-burning-ship = Quintic Quasi Burning Ship
+fractal.quintic-quasi-burning-ship.about = Fifth power with folded factors: Re = |x|·A, Im = −|y|·|C|, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-quasi-perpendicular = Quintic Quasi Perpendicular
+fractal.quintic-quasi-perpendicular.about = Fifth power with folded factors: Re = |x|·A, Im = −y·|C|, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-quasi-heart = Quintic Quasi Heart
+fractal.quintic-quasi-heart.about = Fifth power with folded factors: Re = |x|·A, Im = y·|C|, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-quasi-perpendicular-burning-ship = Quintic Quasi Perpendicular Burning Ship
+fractal.quintic-quasi-perpendicular-burning-ship.about = Fifth power with folded factors: Re = |y|·C, Im = −x·|A|, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-quasi-perpendicular-buffalo = Quintic Quasi Perpendicular Buffalo
+fractal.quintic-quasi-perpendicular-buffalo.about = Fifth power with folded factors: Re = |y|·|C|, Im = −|x|·|A|, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-celtic-quasi-perpendicular = Quintic Celtic Quasi Perpendicular
+fractal.quintic-celtic-quasi-perpendicular.about = Fifth power with folded factors: Re = |x|·|A|, Im = −y·|C|, where z⁵ = x·A + i·y·C. Then + c.
+fractal.quintic-celtic-quasi-heart = Quintic Celtic Quasi Heart
+fractal.quintic-celtic-quasi-heart.about = Fifth power with folded factors: Re = |x|·|A|, Im = y·|C|, where z⁵ = x·A + i·y·C. Then + c.
+fractal.julia-perpendicular-mandelbrot = Perpendicular Mandelbrot Julia
+fractal.julia-perpendicular-mandelbrot.about = The same map from every point, with C fixed and chosen on a map of Perpendicular Mandelbrot.
+fractal.julia-perpendicular-burning-ship = Perpendicular Burning Ship Julia
+fractal.julia-perpendicular-burning-ship.about = The same map from every point, with C fixed and chosen on a map of Perpendicular Burning Ship.
+fractal.julia-perpendicular-celtic = Perpendicular Celtic Julia
+fractal.julia-perpendicular-celtic.about = The same map from every point, with C fixed and chosen on a map of Perpendicular Celtic.
+fractal.julia-perpendicular-buffalo = Perpendicular Buffalo Julia
+fractal.julia-perpendicular-buffalo.about = The same map from every point, with C fixed and chosen on a map of Perpendicular Buffalo.
+fractal.julia-celtic-mandelbar = Celtic Mandelbar Julia
+fractal.julia-celtic-mandelbar.about = The same map from every point, with C fixed and chosen on a map of Celtic Mandelbar.
+fractal.julia-cubic-quasi-burning-ship = Cubic Quasi Burning Ship Julia
+fractal.julia-cubic-quasi-burning-ship.about = The same map from every point, with C fixed and chosen on a map of Cubic Quasi Burning Ship.
+fractal.julia-cubic-flying-squirrel = Cubic Flying Squirrel Julia
+fractal.julia-cubic-flying-squirrel.about = The same map from every point, with C fixed and chosen on a map of Cubic Flying Squirrel.
+fractal.julia-cubic-burning-ship = Cubic Burning Ship Julia
+fractal.julia-cubic-burning-ship.about = The same map from every point, with C fixed and chosen on a map of Cubic Burning Ship.
+fractal.julia-cubic-buffalo = Cubic Buffalo Julia
+fractal.julia-cubic-buffalo.about = The same map from every point, with C fixed and chosen on a map of Cubic Buffalo.
+fractal.julia-cubic-celtic = Cubic Celtic Julia
+fractal.julia-cubic-celtic.about = The same map from every point, with C fixed and chosen on a map of Cubic Celtic.
+fractal.julia-cubic-mandelbar = Cubic Mandelbar Julia
+fractal.julia-cubic-mandelbar.about = The same map from every point, with C fixed and chosen on a map of Cubic Mandelbar.
+fractal.julia-cubic-partial-burning-ship-real = Cubic Partial Burning Ship Real Julia
+fractal.julia-cubic-partial-burning-ship-real.about = The same map from every point, with C fixed and chosen on a map of Cubic Partial Burning Ship Real.
+fractal.julia-cubic-partial-burning-ship-imag = Cubic Partial Burning Ship Imag Julia
+fractal.julia-cubic-partial-burning-ship-imag.about = The same map from every point, with C fixed and chosen on a map of Cubic Partial Burning Ship Imag.
+fractal.julia-cubic-quasi-perpendicular = Cubic Quasi Perpendicular Julia
+fractal.julia-cubic-quasi-perpendicular.about = The same map from every point, with C fixed and chosen on a map of Cubic Quasi Perpendicular.
+fractal.julia-cubic-celtic-quasi-perpendicular = Cubic Celtic Quasi Perpendicular Julia
+fractal.julia-cubic-celtic-quasi-perpendicular.about = The same map from every point, with C fixed and chosen on a map of Cubic Celtic Quasi Perpendicular.
+fractal.julia-cubic-quasi-perpendicular-burning-ship = Cubic Quasi Perpendicular Burning Ship Julia
+fractal.julia-cubic-quasi-perpendicular-burning-ship.about = The same map from every point, with C fixed and chosen on a map of Cubic Quasi Perpendicular Burning Ship.
+fractal.julia-cubic-quasi-perpendicular-buffalo = Cubic Quasi Perpendicular Buffalo Julia
+fractal.julia-cubic-quasi-perpendicular-buffalo.about = The same map from every point, with C fixed and chosen on a map of Cubic Quasi Perpendicular Buffalo.
+fractal.julia-quartic-burning-ship = Quartic Burning Ship Julia
+fractal.julia-quartic-burning-ship.about = The same map from every point, with C fixed and chosen on a map of Quartic Burning Ship.
+fractal.julia-quartic-buffalo = Quartic Buffalo Julia
+fractal.julia-quartic-buffalo.about = The same map from every point, with C fixed and chosen on a map of Quartic Buffalo.
+fractal.julia-quartic-celtic = Quartic Celtic Julia
+fractal.julia-quartic-celtic.about = The same map from every point, with C fixed and chosen on a map of Quartic Celtic.
+fractal.julia-quartic-mandelbar = Quartic Mandelbar Julia
+fractal.julia-quartic-mandelbar.about = The same map from every point, with C fixed and chosen on a map of Quartic Mandelbar.
+fractal.julia-quartic-partial-burning-ship-imag = Quartic Partial Burning Ship Imag Julia
+fractal.julia-quartic-partial-burning-ship-imag.about = The same map from every point, with C fixed and chosen on a map of Quartic Partial Burning Ship Imag.
+fractal.julia-quartic-partial-burning-ship-real = Quartic Partial Burning Ship Real Julia
+fractal.julia-quartic-partial-burning-ship-real.about = The same map from every point, with C fixed and chosen on a map of Quartic Partial Burning Ship Real.
+fractal.julia-quartic-partial-burning-ship-real-mandelbar = Quartic Partial Burning Ship Real Mandelbar Julia
+fractal.julia-quartic-partial-burning-ship-real-mandelbar.about = The same map from every point, with C fixed and chosen on a map of Quartic Partial Burning Ship Real Mandelbar.
+fractal.julia-quartic-celtic-partial-burning-ship-imag = Quartic Celtic Partial Burning Ship Imag Julia
+fractal.julia-quartic-celtic-partial-burning-ship-imag.about = The same map from every point, with C fixed and chosen on a map of Quartic Celtic Partial Burning Ship Imag.
+fractal.julia-quartic-celtic-partial-burning-ship-real = Quartic Celtic Partial Burning Ship Real Julia
+fractal.julia-quartic-celtic-partial-burning-ship-real.about = The same map from every point, with C fixed and chosen on a map of Quartic Celtic Partial Burning Ship Real.
+fractal.julia-quartic-celtic-partial-burning-ship-real-mandelbar = Quartic Celtic Partial Burning Ship Real Mandelbar Julia
+fractal.julia-quartic-celtic-partial-burning-ship-real-mandelbar.about = The same map from every point, with C fixed and chosen on a map of Quartic Celtic Partial Burning Ship Real Mandelbar.
+fractal.julia-quartic-buffalo-partial-imag = Quartic Buffalo Partial Imag Julia
+fractal.julia-quartic-buffalo-partial-imag.about = The same map from every point, with C fixed and chosen on a map of Quartic Buffalo Partial Imag.
+fractal.julia-quartic-celtic-mandelbar = Quartic Celtic Mandelbar Julia
+fractal.julia-quartic-celtic-mandelbar.about = The same map from every point, with C fixed and chosen on a map of Quartic Celtic Mandelbar.
+fractal.julia-quartic-false-quasi-perpendicular = Quartic False Quasi Perpendicular Julia
+fractal.julia-quartic-false-quasi-perpendicular.about = The same map from every point, with C fixed and chosen on a map of Quartic False Quasi Perpendicular.
+fractal.julia-quartic-false-quasi-heart = Quartic False Quasi Heart Julia
+fractal.julia-quartic-false-quasi-heart.about = The same map from every point, with C fixed and chosen on a map of Quartic False Quasi Heart.
+fractal.julia-quartic-celtic-false-quasi-perpendicular = Quartic Celtic False Quasi Perpendicular Julia
+fractal.julia-quartic-celtic-false-quasi-perpendicular.about = The same map from every point, with C fixed and chosen on a map of Quartic Celtic False Quasi Perpendicular.
+fractal.julia-quartic-celtic-false-quasi-heart = Quartic Celtic False Quasi Heart Julia
+fractal.julia-quartic-celtic-false-quasi-heart.about = The same map from every point, with C fixed and chosen on a map of Quartic Celtic False Quasi Heart.
+fractal.julia-quartic-imag-quasi = Quartic Imag Quasi Julia
+fractal.julia-quartic-imag-quasi.about = The same map from every point, with C fixed and chosen on a map of Quartic Imag Quasi.
+fractal.julia-quartic-real-quasi-perpendicular = Quartic Real Quasi Perpendicular Julia
+fractal.julia-quartic-real-quasi-perpendicular.about = The same map from every point, with C fixed and chosen on a map of Quartic Real Quasi Perpendicular.
+fractal.julia-quartic-real-quasi-heart = Quartic Real Quasi Heart Julia
+fractal.julia-quartic-real-quasi-heart.about = The same map from every point, with C fixed and chosen on a map of Quartic Real Quasi Heart.
+fractal.julia-quartic-celtic-imag-quasi = Quartic Celtic Imag Quasi Julia
+fractal.julia-quartic-celtic-imag-quasi.about = The same map from every point, with C fixed and chosen on a map of Quartic Celtic Imag Quasi.
+fractal.julia-quartic-celtic-real-quasi-perpendicular = Quartic Celtic Real Quasi Perpendicular Julia
+fractal.julia-quartic-celtic-real-quasi-perpendicular.about = The same map from every point, with C fixed and chosen on a map of Quartic Celtic Real Quasi Perpendicular.
+fractal.julia-quartic-celtic-real-quasi-heart = Quartic Celtic Real Quasi Heart Julia
+fractal.julia-quartic-celtic-real-quasi-heart.about = The same map from every point, with C fixed and chosen on a map of Quartic Celtic Real Quasi Heart.
+fractal.julia-quintic-burning-ship = Quintic Burning Ship Julia
+fractal.julia-quintic-burning-ship.about = The same map from every point, with C fixed and chosen on a map of Quintic Burning Ship.
+fractal.julia-quintic-buffalo = Quintic Buffalo Julia
+fractal.julia-quintic-buffalo.about = The same map from every point, with C fixed and chosen on a map of Quintic Buffalo.
+fractal.julia-quintic-celtic = Quintic Celtic Julia
+fractal.julia-quintic-celtic.about = The same map from every point, with C fixed and chosen on a map of Quintic Celtic.
+fractal.julia-quintic-mandelbar = Quintic Mandelbar Julia
+fractal.julia-quintic-mandelbar.about = The same map from every point, with C fixed and chosen on a map of Quintic Mandelbar.
+fractal.julia-quintic-partial-burning-ship-real = Quintic Partial Burning Ship Real Julia
+fractal.julia-quintic-partial-burning-ship-real.about = The same map from every point, with C fixed and chosen on a map of Quintic Partial Burning Ship Real.
+fractal.julia-quintic-partial-burning-ship-real-mandelbar = Quintic Partial Burning Ship Real Mandelbar Julia
+fractal.julia-quintic-partial-burning-ship-real-mandelbar.about = The same map from every point, with C fixed and chosen on a map of Quintic Partial Burning Ship Real Mandelbar.
+fractal.julia-quintic-celtic-mandelbar = Quintic Celtic Mandelbar Julia
+fractal.julia-quintic-celtic-mandelbar.about = The same map from every point, with C fixed and chosen on a map of Quintic Celtic Mandelbar.
+fractal.julia-quintic-quasi-burning-ship = Quintic Quasi Burning Ship Julia
+fractal.julia-quintic-quasi-burning-ship.about = The same map from every point, with C fixed and chosen on a map of Quintic Quasi Burning Ship.
+fractal.julia-quintic-quasi-perpendicular = Quintic Quasi Perpendicular Julia
+fractal.julia-quintic-quasi-perpendicular.about = The same map from every point, with C fixed and chosen on a map of Quintic Quasi Perpendicular.
+fractal.julia-quintic-quasi-heart = Quintic Quasi Heart Julia
+fractal.julia-quintic-quasi-heart.about = The same map from every point, with C fixed and chosen on a map of Quintic Quasi Heart.
+fractal.julia-quintic-quasi-perpendicular-burning-ship = Quintic Quasi Perpendicular Burning Ship Julia
+fractal.julia-quintic-quasi-perpendicular-burning-ship.about = The same map from every point, with C fixed and chosen on a map of Quintic Quasi Perpendicular Burning Ship.
+fractal.julia-quintic-quasi-perpendicular-buffalo = Quintic Quasi Perpendicular Buffalo Julia
+fractal.julia-quintic-quasi-perpendicular-buffalo.about = The same map from every point, with C fixed and chosen on a map of Quintic Quasi Perpendicular Buffalo.
+fractal.julia-quintic-celtic-quasi-perpendicular = Quintic Celtic Quasi Perpendicular Julia
+fractal.julia-quintic-celtic-quasi-perpendicular.about = The same map from every point, with C fixed and chosen on a map of Quintic Celtic Quasi Perpendicular.
+fractal.julia-quintic-celtic-quasi-heart = Quintic Celtic Quasi Heart Julia
+fractal.julia-quintic-celtic-quasi-heart.about = The same map from every point, with C fixed and chosen on a map of Quintic Celtic Quasi Heart.
+fractal.julia-tricorn = Tricorn Julia
+fractal.julia-tricorn.about = The Tricorn's conjugate square from every point, with C chosen on a map of the Tricorn: three-fold lace.
+fractal.julia-celtic = Celtic Julia
+fractal.julia-celtic.about = The Celtic iteration from every point, |Re z²| + i Im z² + C, with C chosen on a map of the Celtic Mandelbrot.
+fractal.multijulia = Multijulia
+fractal.multijulia.about = z = z^p + C from every point, for a whole power from 3 to 8. C is chosen on a map of the Multibrot of the same power.
+fractal.multijulia.power = Power
+fractal.simonobrot = Simonobrot
+fractal.simonobrot.about = z = z^p·|z|^p + c: the Multibrot with a radial factor. A negative power turns it inside out; the inversion flips c's real part.
+fractal.simonobrot.power = Power
+fractal.simonobrot.inversion = Inversion
+fractal.simonobrot.place.crystal-cave = Crystal cave (p = 5)
+fractal.simonobrot.place.star = Star (p = −2)
+fractal.simonobrot.place.thorn = Thorn (p = −3, inversion)
+fractal.simonobrot.place.four-leaf = Four-leaf (p = 5)
+fractal.simonobrot.place.lilac-fjords = Lilac fjords (p = 2)
+fractal.simonobrot.place.turquoise-blades = Turquoise blades (p = 3)
+fractal.julia-simonobrot = Simonobrot Julia
+fractal.julia-simonobrot.about = z^p·|z|^p + C from every point, at the same power and inversion as its map of the Simonobrot.
+fractal.julia-simonobrot.power = Power
+fractal.julia-simonobrot.inversion = Inversion
+
+# Shared names: preset.<id> for C presets and place.<id> for places that a whole family has.
+preset.default = Main
+preset.alternative = Alternative
+preset.lace-cloud = Lace cloud
+preset.ruby-lace = Ruby lace
+preset.reflected-lace = Reflected lace
+preset.branched-form = Branched form
+preset.celtic-reflected-lace = Celtic reflected lace
+preset.celtic-branches = Celtic branches
+preset.cubic-ship-lace = Cubic ship lace
+preset.connected-cubic = Connected cubic Julia
+preset.cubic-wings = Cubic wings
+preset.connected-wings = Connected wings
+preset.conjugate-lace = Conjugate lace
+preset.triple-branches = Triple branches
+preset.celtic-loops = Celtic loops
+preset.celtic-antenna = Celtic antenna
+preset.cubic-julia = Cubic Julia
+preset.four-rays = Four rays
+preset.radial-julia = Radial Julia
+preset.radial-three-rays = Radial three rays
+preset.constant-inversion = Inverted constant
+place.border-closeup = Border close up
+place.cubic-folds = Cubic folds
+place.wings-closeup = Wings close up
 
 # Built-in palettes: palette.<id>. Optional, like fractals. User palettes keep the name they were saved with.
 palette.aurora = Aurora

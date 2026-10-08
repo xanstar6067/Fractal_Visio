@@ -81,11 +81,7 @@ namespace FractalVisio.UI
 
             if (fitToRect)
             {
-                text.resizeTextForBestFit = true;
-                text.resizeTextMaxSize = size;
-                text.resizeTextMinSize = Mathf.Max(8, Mathf.RoundToInt(size * 0.45f));
-                text.horizontalOverflow = HorizontalWrapMode.Wrap;
-                text.verticalOverflow = VerticalWrapMode.Truncate;
+                FitToRect(text);
             }
             else
             {
@@ -94,6 +90,19 @@ namespace FractalVisio.UI
             }
 
             return text;
+        }
+
+        /// <summary>
+        /// Shrink the text to fit its rectangle, wrapping, down to 45% of its size. Separate from
+        /// <see cref="CreateText"/> so a caller can measure the text at full size first.
+        /// </summary>
+        public static void FitToRect(Text text)
+        {
+            text.resizeTextForBestFit = true;
+            text.resizeTextMaxSize = text.fontSize;
+            text.resizeTextMinSize = Mathf.Max(8, Mathf.RoundToInt(text.fontSize * 0.45f));
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Truncate;
         }
 
         /// <summary>Fill the parent rectangle completely.</summary>

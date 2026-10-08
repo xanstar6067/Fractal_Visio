@@ -30,7 +30,15 @@ namespace FractalVisio.App
         /// <summary>A preview asked for within this long counts as on screen; others wait.</summary>
         private const float WantedSeconds = 1f;
 
+        /// <summary>
+        /// Previews kept drawn. The gallery has well over a hundred cards; those scrolled away longest
+        /// give their texture back first (a 512 px tile is a megabyte) and redraw when they return.
+        /// </summary>
+        private const int MaximumTextures = 48;
+
         private readonly Dictionary<string, Slot> slots = new();
+        private readonly List<Slot> evictable = new();
+        private int textureCount;
         private AppServices services;
         private FractalGpuRenderer renderer;
         private bool coloringDirty = true;
@@ -81,6 +89,32 @@ namespace FractalVisio.App
                 Draw(slot);
                 budget--;
             }
+
+            if (textureCount > MaximumTextures)
+            {
+                Evict(now);
+            }
+        }
+
+        /// <summary>Release the textures of the previews wanted least recently, down to the cap.</summary>
+        private void Evict(float now)
+        {
+            evictable.Clear();
+            foreach (var slot in slots.Values)
+            {
+                if (slot.Texture != null && now - slot.RequestedAt > WantedSeconds)
+                {
+                    evictable.Add(slot);
+                }
+            }
+
+            evictable.Sort((a, b) => a.RequestedAt.CompareTo(b.RequestedAt));
+            for (var i = 0; i < evictable.Count && textureCount > MaximumTextures; i++)
+            {
+                Release(evictable[i]);
+            }
+
+            evictable.Clear();
         }
 
         public void Shutdown()
@@ -96,6 +130,7 @@ namespace FractalVisio.App
             }
 
             slots.Clear();
+            textureCount = 0;
             renderer?.Dispose();
             renderer = null;
             services = null;
@@ -176,6 +211,7 @@ namespace FractalVisio.App
             {
                 Release(slot);
                 slot.Texture = CreateTarget(slot.Size, slot.Entry.Id);
+                textureCount++;
             }
 
             var view = slot.Entry.PreviewView;
@@ -210,7 +246,7 @@ namespace FractalVisio.App
             return texture;
         }
 
-        private static void Release(Slot slot)
+        private void Release(Slot slot)
         {
             if (slot.Texture == null)
             {
@@ -220,6 +256,7 @@ namespace FractalVisio.App
             slot.Texture.Release();
             Object.Destroy(slot.Texture);
             slot.Texture = null;
+            textureCount--;
         }
 
         private sealed class Slot

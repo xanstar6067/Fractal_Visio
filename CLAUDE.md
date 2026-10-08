@@ -187,6 +187,16 @@ any feature that is not a bug fix, and update it when a design decision changes.
   sampler against its `*SamplerDD` on grids around boundary points; the DD samplers test z
   before each step, the others after, so give DD one more iteration when comparing. If a change to `CpuProgressiveRenderer`, `FractalPresenter`, `FractalScreen` or
   `GalleryScreen` is needed, the abstraction leaked — fix it there, not with a special case.
+- **The folded polynomial family** (`Fractals/Folded`, docs\ARCHITECTURE.md §5.12) is data, not
+  types: 54 of WPF's formulas (perpendicular, Celtic Mandelbar, the Kalles Fraktaler cubic, quartic
+  and quintic ones) are one `FoldedFormula` - degree 2-5, which of the factors x, y, A, C are taken
+  by absolute value, the imaginary sign, a swap - with one sampler set and one shader
+  (`Shaders/Folded.shader`, formula as uniforms). A formula of that shape is a line in
+  `FoldedFamily`, plane and Julia set both; it is not the three-file recipe. A material is cached
+  per shader name and shared by every definition using that shader (the folded members,
+  Multibrot/Multijulia, the Simonobrot pair), so each `BindMaterial` sets every uniform the shader
+  reads, Julia mode included. WPF's classic Buffalo is deliberately absent: it is the Burning Ship
+  upside down.
 - All mutable state belongs to `FractalSession`; UI and modules read it and call its
   setters, never the renderers directly. Clamping and the iteration budget live in
   `FractalSession.SetView` alone - do not recompute either at a call site.
@@ -285,9 +295,11 @@ any feature that is not a bug fix, and update it when a design decision changes.
   type, add the widget in `UI/Widgets` and a block for it - do not hand-lay-out rows in a screen.
 - **The gallery is the main menu** (`GalleryScreen`, docs\ARCHITECTURE.md §5.7). The app opens on
   it; the explorer's top-left button returns to it. Cards come from `AppServices.Gallery`
-  (`CatalogEntry`: definition + section + preview view, listed in `FractalCatalog`), never from a
-  list in the UI. Section names are `section.<id>`, descriptions `fractal.<id>.about`, both
-  optional in the locales. Previews are drawn live on the GPU by `IFractalThumbnails`
+  (`CatalogEntry`: definition + section + folder + preview view, listed in `FractalCatalog`), never
+  from a list in the UI. A section with folders shows each as a row that opens and closes it
+  (`folder.<id>` in the locales); only cards near the visible part of the grid ask for a preview,
+  and `ThumbnailModule` keeps at most 48 preview textures - the families have 59 cards each.
+  Section names are `section.<id>`, descriptions `fractal.<id>.about`, both optional in the locales. Previews are drawn live on the GPU by `IFractalThumbnails`
   (`ThumbnailModule`, in App because it needs a renderer) in the session's palette - do not ship
   preview images. Favourites and recents are `IGalleryPreferences`; "recent" is recorded from the
   session's definition changes, not from gallery taps.

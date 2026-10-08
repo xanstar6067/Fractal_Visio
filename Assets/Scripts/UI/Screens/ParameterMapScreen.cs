@@ -220,6 +220,7 @@ namespace FractalVisio.UI
                 pointY = parameters.Get(plane.ImaginaryKey);
             }
 
+            map.ShareParameters(Services.Session.Parameters);
             map.Tick(thumbnails, pointX, pointY);
             RememberMapView();
             RefreshReadout();

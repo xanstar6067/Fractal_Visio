@@ -77,6 +77,43 @@ namespace FractalVisio.Core
             return new FractalParameterSet(descriptors, copy);
         }
 
+        /// <summary>
+        /// Copy with every parameter <paramref name="source"/> also has taken from it - how a Julia
+        /// set and the map of its C agree on a power both carry. Keys only one side has are left alone.
+        /// </summary>
+        public FractalParameterSet Adopt(in FractalParameterSet source)
+        {
+            var result = this;
+            for (var i = 0; i < Count; i++)
+            {
+                if (source.TryGet(descriptors[i].Key, out var value))
+                {
+                    result = result.With(descriptors[i].Key, value);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>Same descriptors and the same values.</summary>
+        public bool SameValues(in FractalParameterSet other)
+        {
+            if (!ReferenceEquals(descriptors, other.descriptors) || Count != other.Count)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < Count; i++)
+            {
+                if (!values[i].Equals(other.values[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         public int IndexOf(string key)
         {
             if (descriptors == null || string.IsNullOrEmpty(key))

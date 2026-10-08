@@ -163,8 +163,21 @@ namespace FractalVisio.UI
             var x = session.View.x.AsDouble;
             var y = session.View.y.AsDouble;
             var target = (IParameterPlane)julia;
+            var shared = session.Parameters;
 
             session.SetDefinition(julia);
+
+            // A power or an inversion the plane has carries over: it is the same map.
+            var adopted = FractalParameterSet.Defaults(julia.Parameters).Adopt(shared);
+            for (var i = 0; i < adopted.Count; i++)
+            {
+                var key = adopted.Descriptors[i].Key;
+                if (key != target.RealKey && key != target.ImaginaryKey && shared.TryGet(key, out _))
+                {
+                    session.SetParameter(key, adopted[i]);
+                }
+            }
+
             session.SetParameter(target.RealKey, x);
             session.SetParameter(target.ImaginaryKey, y);
             Close();

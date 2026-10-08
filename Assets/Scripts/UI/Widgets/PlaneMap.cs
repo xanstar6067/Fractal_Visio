@@ -30,6 +30,7 @@ namespace FractalVisio.UI
         private RenderTexture texture;
         private IFractalDefinition definition;
         private FractalParameterSet parameters = FractalParameterSet.Empty;
+        private FractalParameterSet sharedSource = FractalParameterSet.Empty;
         private double centerX;
         private double centerY;
         private double scale = 1d;
@@ -93,8 +94,30 @@ namespace FractalVisio.UI
 
             definition = value;
             parameters = value != null ? FractalParameterSet.Defaults(value.Parameters) : FractalParameterSet.Empty;
+            sharedSource = FractalParameterSet.Empty;
             supported = true;
             dirty = true;
+        }
+
+        /// <summary>
+        /// Draw the plane with the parameters it shares with <paramref name="source"/> - the Julia
+        /// set's own power, say - and its defaults for the rest. Asked every frame; redraws only when
+        /// a shared value changed.
+        /// </summary>
+        public void ShareParameters(in FractalParameterSet source)
+        {
+            if (definition == null || source.SameValues(sharedSource))
+            {
+                return;
+            }
+
+            sharedSource = source;
+            var shared = FractalParameterSet.Defaults(definition.Parameters).Adopt(source);
+            if (!shared.SameValues(parameters))
+            {
+                parameters = shared;
+                dirty = true;
+            }
         }
 
         public void SetView(double x, double y, double height)
