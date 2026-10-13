@@ -37,9 +37,19 @@ settings.interface_size = РАЗМЕР ИНТЕРФЕЙСА
 settings.language = ЯЗЫК
 settings.language.system = Как в системе
 settings.debug_info = ОТЛАДОЧНАЯ ИНФОРМАЦИЯ
+settings.gesture_hint = Подсказка по жестам
+
+gestures.title = Как управлять картинкой
+gestures.one_finger = Один палец — двигать
+gestures.two_fingers = Два пальца — приближать, отдалять и поворачивать
+gestures.three_fingers = Три пальца — вернуть начальный вид
+gestures.tap = Касание — спрятать или показать кнопки
+gestures.got_it = Понятно
 
 # Галерея - главное меню
 gallery.title = Фракталы
+gallery.search = Поиск по названию
+gallery.search_none = Ничего не нашлось
 gallery.continue = ПРОДОЛЖИТЬ
 gallery.continue_detail = {0}   ×{1}
 gallery.filter.all = Все
@@ -76,6 +86,14 @@ fractal_panel.pick_on_map = Выбрать C на карте
 fractal_panel.presets = ИЗВЕСТНЫЕ C
 fractal_panel.julia_here = Жюлиа для центра экрана
 fractal_panel.places = ИНТЕРЕСНЫЕ МЕСТА
+sequence.title = ПОСЛЕДОВАТЕЛЬНОСТЬ ШАГОВ
+sequence.add = Добавить шаг
+sequence.full = Больше шагов не поместится
+sequence.cycle = Шагов в цикле: {0} из {1}
+sequence.removed = Шаг удалён: {0}
+sequence.step_title = Шаг {0}
+sequence.move_up = Переставить выше
+sequence.move_down = Переставить ниже
 
 # Карта C: кнопка в углу экрана и панель, которую она открывает
 plane.button = Карта C
@@ -434,6 +452,20 @@ fractal.julia-simonobrot = Симоноброт (Жюлиа)
 fractal.julia-simonobrot.about = z^p·|z|^p + C из каждой точки, с той же степенью и инверсией, что и его карта Симоноброта.
 fractal.julia-simonobrot.power = Степень
 fractal.julia-simonobrot.inversion = Инверсия
+fractal.hybrid = Конструктор гибридов
+fractal.hybrid.about = Формулы по очереди: шаг — формула, степень и число повторов, затем цикл сначала. Свой гибрид собирается в панели «Фрактал».
+fractal.hybrid.place.celtic-mandelbar = Celtic × Mandelbar
+fractal.hybrid.place.ship-and-bulb = Корабль и куб
+fractal.hybrid.place.perpendicular-weave = Перпендикулярное плетение
+fractal.hybrid.place.quartic-heart = Сердце четвёртой степени
+fractal.julia-hybrid = Конструктор гибридов (Жюлиа)
+fractal.julia-hybrid.about = Та же последовательность формул из каждой точки; C выбирается на карте гибрида с этой последовательностью.
+fractal.julia-hybrid.preset.lace = Кружево
+fractal.julia-hybrid.preset.twin-isles = Два острова
+fractal.julia-hybrid.preset.ribbons = Ленты
+fractal.julia-hybrid.preset.cloud-island = Облачный остров
+fractal.julia-hybrid.preset.diamond = Ромб
+fractal.buffalo = Буффало
 
 # Общие имена: preset.<id> для готовых C и place.<id> для мест, общих для целого семейства.
 preset.default = Основная

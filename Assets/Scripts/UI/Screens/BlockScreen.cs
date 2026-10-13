@@ -19,6 +19,21 @@ namespace FractalVisio.UI
         /// <summary>Most columns to split into. Past three the rows get too narrow to read.</summary>
         protected virtual int MaximumColumns => 3;
 
+        private RectTransform scrollContent;
+
+        // Scroll offset to restore on the next build, or negative for "start at the top".
+        private float keptScroll = -1f;
+
+        /// <summary>
+        /// Rebuild with the list where it is - for a panel whose content changes shape under the
+        /// finger, like a hybrid's rows, rather than one that now shows something else.
+        /// </summary>
+        protected void RebuildKeepingScroll()
+        {
+            keptScroll = scrollContent != null ? scrollContent.anchoredPosition.y : 0f;
+            NeedsRebuild = true;
+        }
+
         /// <summary>Title at the top of the panel, read while building.</summary>
         protected abstract string BuildTitle();
 
@@ -62,6 +77,13 @@ namespace FractalVisio.UI
             var contentHeight = tallest - sectionGap + padding;
             var content = CreateScrollingPanel(parent, GetType().Name, width, contentHeight);
             AddTitle(content, BuildTitle(), padding, width);
+            scrollContent = content;
+            if (keptScroll >= 0f)
+            {
+                var range = Mathf.Max(0f, contentHeight - Mathf.Min(contentHeight, UiTheme.AvailablePanelHeight));
+                content.anchoredPosition = new Vector2(0f, Mathf.Clamp(keptScroll, 0f, range));
+                keptScroll = -1f;
+            }
 
             for (var i = 0; i < columns; i++)
             {

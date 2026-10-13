@@ -42,9 +42,22 @@ settings.interface_size = INTERFACE SIZE
 settings.language = LANGUAGE
 settings.language.system = Device
 settings.debug_info = DEBUG INFO
+# Opens the gesture hint again
+settings.gesture_hint = How to move the picture
+
+# Gesture hint: shown the first time the picture is on screen, and from Settings
+gestures.title = Moving the picture
+gestures.one_finger = One finger moves it
+gestures.two_fingers = Two fingers zoom in and out and turn it
+gestures.three_fingers = Three fingers bring back the starting view
+gestures.tap = A tap hides the buttons or brings them back
+gestures.got_it = Got it
 
 # Gallery - the main menu
 gallery.title = Fractals
+# Search in the gallery: the field's placeholder, and the message when nothing matches
+gallery.search = Search by name
+gallery.search_none = Nothing by that name
 gallery.continue = CONTINUE
 # {0} is the fractal's name, {1} how far in it is zoomed
 gallery.continue_detail = {0}   ×{1}
@@ -85,6 +98,18 @@ fractal_panel.presets = WELL-KNOWN C
 fractal_panel.julia_here = Julia set of the centre
 # Built-in views of the fractal (the WPF version's points of interest)
 fractal_panel.places = PLACES OF INTEREST
+# A hybrid: its sequence of steps, each row a formula, its power and its repeats
+sequence.title = STEP SEQUENCE
+sequence.add = Add step
+sequence.full = No room for another step
+# {0} steps in one turn of the cycle, of at most {1}
+sequence.cycle = Steps in the cycle: {0} of {1}
+# Toast after a step is removed; {0} is its formula
+sequence.removed = Step removed: {0}
+# Title of one step's sheet; {0} is its number
+sequence.step_title = Step {0}
+sequence.move_up = Move up
+sequence.move_down = Move down
 
 # C map: the explorer's button (a thumbnail and these words) and the panel it opens
 plane.button = C map
@@ -454,6 +479,21 @@ fractal.julia-simonobrot = Simonobrot Julia
 fractal.julia-simonobrot.about = z^p·|z|^p + C from every point, at the same power and inversion as its map of the Simonobrot.
 fractal.julia-simonobrot.power = Power
 fractal.julia-simonobrot.inversion = Inversion
+fractal.hybrid = Hybrid constructor
+fractal.hybrid.about = Formulas in turn: each step a formula, its power and its repeats, then the cycle starts over. Build your own in the Fractal panel.
+fractal.hybrid.place.celtic-mandelbar = Celtic × Mandelbar
+fractal.hybrid.place.ship-and-bulb = Ship and cube
+fractal.hybrid.place.perpendicular-weave = Perpendicular weave
+fractal.hybrid.place.quartic-heart = Quartic heart
+fractal.julia-hybrid = Hybrid constructor Julia
+fractal.julia-hybrid.about = The same sequence of formulas from every point; C is picked on a map of the hybrid with that sequence.
+fractal.julia-hybrid.preset.lace = Lace
+fractal.julia-hybrid.preset.twin-isles = Twin isles
+fractal.julia-hybrid.preset.ribbons = Ribbons
+fractal.julia-hybrid.preset.cloud-island = Cloud island
+fractal.julia-hybrid.preset.diamond = Diamond
+# A hybrid step with no fractal of its own: WPF's classic Buffalo, (|x| + i|y|)^p
+fractal.buffalo = Buffalo
 
 # Shared names: preset.<id> for C presets and place.<id> for places that a whole family has.
 preset.default = Main

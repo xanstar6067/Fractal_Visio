@@ -48,12 +48,14 @@ namespace FractalVisio.UI
         private ExplorerChrome chrome;
         private GalleryScreen gallery;
         private FractalScreen fractalPanel;
+        private StepScreen stepSheet;
         private ParameterMapScreen planeMap;
         private ColorScreen colorPanel;
         private SettingsScreen settings;
         private BookmarksScreen bookmarks;
         private BookmarkActionsScreen bookmarkActions;
         private PaletteEditorScreen paletteEditor;
+        private GestureHintScreen gestureHint;
         private IScreenshotService screenshots;
         private IBookmarkService bookmarkService;
         private Image panelShield;
@@ -96,18 +98,21 @@ namespace FractalVisio.UI
             // the gallery keeps its filter.
             bookmarkService = services.Get<IBookmarkService>();
             gallery = new GalleryScreen(() => ToggleExclusive(settings), bookmark => ShowBookmarkActions(bookmark, false));
-            fractalPanel = new FractalScreen(OpenGallery, () => OpenExclusive(planeMap));
+            fractalPanel = new FractalScreen(OpenGallery, () => OpenExclusive(planeMap), OpenStep, ShowUndo);
+            stepSheet = new StepScreen(() => OpenExclusive(fractalPanel));
             planeMap = new ParameterMapScreen();
             colorPanel = new ColorScreen(OpenPaletteEditor, CreatePalette);
-            settings = new SettingsScreen();
+            settings = new SettingsScreen(ShowGestureHint);
             bookmarks = new BookmarksScreen(bookmark => ShowBookmarkActions(bookmark, true));
             bookmarkActions = new BookmarkActionsScreen(OpenBookmark, ShowUndo);
             paletteEditor = new PaletteEditorScreen();
+            gestureHint = new GestureHintScreen(MarkGestureHintSeen);
 
             // Build order is draw order: the gallery under the panels, so settings opened from the
             // gallery appear on top of it.
             screens.Add(gallery);
             panels.Add(fractalPanel);
+            panels.Add(stepSheet);
             panels.Add(planeMap);
             panels.Add(colorPanel);
             panels.Add(bookmarks);
@@ -115,6 +120,9 @@ namespace FractalVisio.UI
             panels.Add(settings);
             panels.Add(paletteEditor);
             screens.AddRange(panels);
+
+            // Over the panels, under the toast.
+            screens.Add(gestureHint);
 
             screenshots = services.Get<IScreenshotService>();
             if (screenshots != null)
@@ -161,6 +169,12 @@ namespace FractalVisio.UI
             if (Input.GetKeyDown(KeyCode.Escape))
             {
                 HandleBack();
+            }
+
+            // The first time the picture is on screen, how to move it.
+            if (!gallery.IsOpen && !gestureHint.IsOpen && !services.Session.Interface.GestureHintSeen)
+            {
+                gestureHint.Open();
             }
 
             // The C map belongs to a fractal with a plane; another fractal has nothing to pick on.
@@ -265,6 +279,12 @@ namespace FractalVisio.UI
 
         private void HandleBack()
         {
+            if (gestureHint.IsOpen)
+            {
+                gestureHint.Dismiss();
+                return;
+            }
+
             if (paletteEditor.IsOpen)
             {
                 // Closing the editor without saving puts the palette back; the colour panel it
@@ -274,9 +294,21 @@ namespace FractalVisio.UI
                 return;
             }
 
+            if (stepSheet.IsOpen)
+            {
+                // A step's sheet is a page of the fractal panel: back is back to it.
+                stepSheet.GoBack();
+                return;
+            }
+
             if (AnyPanelOpen())
             {
                 CloseAllPanels();
+                return;
+            }
+
+            if (gallery.IsOpen && gallery.EndSearch())
+            {
                 return;
             }
 
@@ -349,6 +381,30 @@ namespace FractalVisio.UI
             {
                 ToggleExclusive(screen);
             }
+        }
+
+        /// <summary>The gesture hint again, from Settings: over everything, the panel out of its way.</summary>
+        private void ShowGestureHint()
+        {
+            CloseAllPanels();
+            gestureHint.Open();
+        }
+
+        private void MarkGestureHintSeen()
+        {
+            var settings = services.Session.Interface;
+            if (!settings.GestureHintSeen)
+            {
+                settings.GestureHintSeen = true;
+                services.Session.SetInterface(settings);
+            }
+        }
+
+        /// <summary>The sheet of one row of a hybrid's sequence, in place of the fractal panel.</summary>
+        private void OpenStep(int row)
+        {
+            stepSheet.Show(row);
+            OpenExclusive(stepSheet);
         }
 
         /// <summary>
@@ -432,6 +488,7 @@ namespace FractalVisio.UI
                 BuildScreen(panels[i]);
             }
 
+            BuildScreen(gestureHint);
             BuildToast();
         }
 
@@ -480,7 +537,8 @@ namespace FractalVisio.UI
         {
             var items = new List<ExplorerChrome.Item>
             {
-                new("toolbar.fractal", UiSprites.Sliders, () => ToggleExclusive(fractalPanel), () => fractalPanel.IsOpen),
+                new("toolbar.fractal", UiSprites.Sliders, () => ToggleExclusive(fractalPanel),
+                    () => fractalPanel.IsOpen || stepSheet.IsOpen),
                 new("toolbar.colour", UiSprites.Palette, () => ToggleExclusive(colorPanel),
                     () => colorPanel.IsOpen || paletteEditor.IsOpen)
             };

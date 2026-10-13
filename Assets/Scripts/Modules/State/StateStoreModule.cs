@@ -95,6 +95,7 @@ namespace FractalVisio.Modules
                 interfaceSettings.ScreenshotHeight = settings.screenshotHeight;
                 interfaceSettings.ScreenshotSupersampling = settings.screenshotSupersampling;
                 interfaceSettings.ScreenshotJpeg = settings.screenshotJpeg;
+                interfaceSettings.GestureHintSeen = settings.gestureHintSeen;
                 services.Session.SetInterface(interfaceSettings);
             }
 
@@ -127,7 +128,8 @@ namespace FractalVisio.Modules
                 screenshotWidth = session.Interface.ScreenshotWidth,
                 screenshotHeight = session.Interface.ScreenshotHeight,
                 screenshotSupersampling = session.Interface.ScreenshotSupersampling,
-                screenshotJpeg = session.Interface.ScreenshotJpeg
+                screenshotJpeg = session.Interface.ScreenshotJpeg,
+                gestureHintSeen = session.Interface.GestureHintSeen
             }));
         }
 
@@ -152,6 +154,9 @@ namespace FractalVisio.Modules
             /// <summary>Files from before supersampling read as off.</summary>
             public int screenshotSupersampling = 1;
             public bool screenshotJpeg;
+
+            /// <summary>Files from before the hint read as not seen: everyone sees it once.</summary>
+            public bool gestureHintSeen;
         }
     }
 }

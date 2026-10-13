@@ -73,6 +73,7 @@ namespace FractalVisio.Fractals
             Plane(new CelticDefinition(), classic);
             Plane(new MultibrotDefinition(), classic);
             Plane(new SimonobrotDefinition(), classic);
+            Plane(new HybridDefinition(), classic);
             foreach (var folder in FoldedFolders)
             {
                 foreach (var member in FoldedFamily.In(folder))
@@ -91,6 +92,7 @@ namespace FractalVisio.Fractals
             Julia(FoldedFamily.JuliaCeltic(), classic);
             Julia(new MultijuliaDefinition(), classic);
             Julia(new JuliaSimonobrotDefinition(), classic);
+            Julia(new HybridJuliaDefinition(), classic);
             foreach (var folder in FoldedFolders)
             {
                 foreach (var member in FoldedFamily.In(folder))

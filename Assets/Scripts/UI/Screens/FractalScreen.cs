@@ -21,6 +21,11 @@ namespace FractalVisio.UI
     /// point in the middle of the screen: the link between the two, as a button rather than a
     /// gesture nobody would guess. A fractal with places of interest (<see cref="IPlacesOfInterest"/>)
     /// lists them; choosing one goes there and closes the panel.
+    ///
+    /// A fractal whose parameters are a sequence of steps (<see cref="IStepSequence"/>, a hybrid)
+    /// gets them as rows to edit - formula, power, repeats - instead of a slider per parameter. A
+    /// row's formula and its place in the order are changed on the step's own sheet
+    /// (<see cref="StepScreen"/>); a removed row comes back through Undo.
     /// </summary>
     public sealed class FractalScreen : BlockScreen
     {
@@ -28,19 +33,27 @@ namespace FractalVisio.UI
 
         private readonly Action openGallery;
         private readonly Action openPlaneMap;
+        private readonly Action<int> openStep;
+        private readonly Action<string, Action> showUndo;
         private readonly List<ParameterControl> parameterControls = new();
         private IFractalDefinition builtFor;
         private IParameterPlane plane;
         private IReadOnlyList<PlaceOfInterest> places;
+        private IStepSequence sequence;
+        private SequenceBlock sequenceBlock;
         private Text constantText;
         private SettingsSection presetSection;
         private double shownReal = double.NaN;
         private double shownImaginary = double.NaN;
 
-        public FractalScreen(Action openGallery, Action openPlaneMap)
+        /// <param name="openStep">Opens the sheet of one row of a step sequence.</param>
+        /// <param name="showUndo">Shows a message with an Undo that runs the action.</param>
+        public FractalScreen(Action openGallery, Action openPlaneMap, Action<int> openStep, Action<string, Action> showUndo)
         {
             this.openGallery = openGallery;
             this.openPlaneMap = openPlaneMap;
+            this.openStep = openStep;
+            this.showUndo = showUndo;
         }
 
         /// <summary>Parameters read best one under another; a second column only splits a short list.</summary>
@@ -55,6 +68,7 @@ namespace FractalVisio.UI
             parameterControls.Clear();
             constantText = null;
             presetSection = null;
+            sequenceBlock = null;
             shownReal = double.NaN;
             shownImaginary = double.NaN;
 
@@ -81,6 +95,13 @@ namespace FractalVisio.UI
                     blocks.Add(new OptionsBlock(
                         Strings.Get("fractal_panel.presets"), names, ApplyPreset, section => presetSection = section));
                 }
+            }
+
+            sequence = definition as IStepSequence;
+            if (sequence != null)
+            {
+                sequenceBlock = new SequenceBlock(this, sequence);
+                blocks.Add(sequenceBlock);
             }
 
             places = (definition as IPlacesOfInterest)?.Places;
@@ -119,7 +140,7 @@ namespace FractalVisio.UI
             RefreshParameters();
         }
 
-        /// <summary>The descriptors that get a control of their own: all of them, less a plane's point.</summary>
+        /// <summary>The descriptors that get a control of their own: all of them, less a plane's point and a sequence's rows.</summary>
         private List<FractalParameterDescriptor> OwnParameters(IFractalDefinition definition)
         {
             var result = new List<FractalParameterDescriptor>();
@@ -132,10 +153,33 @@ namespace FractalVisio.UI
                     continue;
                 }
 
+                if (sequence != null && IsSequenceKey(key))
+                {
+                    continue;
+                }
+
                 result.Add(all[i]);
             }
 
             return result;
+        }
+
+        private bool IsSequenceKey(string key)
+        {
+            if (key == sequence.RowsKey)
+            {
+                return true;
+            }
+
+            for (var row = 0; row < sequence.MaximumRows; row++)
+            {
+                if (key == sequence.FormulaKey(row) || key == sequence.PowerKey(row) || key == sequence.RepeatsKey(row))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         /// <summary>The catalog's fractal whose plane is <paramref name="definition"/>: the Julia sets of the Mandelbrot set.</summary>
@@ -249,6 +293,8 @@ namespace FractalVisio.UI
                 parameterControls[i].Refresh(parameters);
             }
 
+            sequenceBlock?.Refresh(parameters);
+
             if (plane == null)
             {
                 return;
@@ -318,6 +364,155 @@ namespace FractalVisio.UI
                 ActionRow.Create(
                     content, owner.Strings.Get("fractal_panel.pick_on_map"), x, cursor, width, owner.openPlaneMap, ActionStyle.Accent);
             }
+        }
+
+        /// <summary>
+        /// A step sequence: a row per step, then "Add step" and how full the cycle is. Built for the
+        /// number of rows there is; a different number rebuilds the panel where it is scrolled to,
+        /// anything else only refreshes the rows.
+        /// </summary>
+        private sealed class SequenceBlock : Block
+        {
+            private readonly FractalScreen owner;
+            private readonly IStepSequence sequence;
+            private readonly List<StepRow> rows = new();
+            private readonly int rowCount;
+            private ActionRow addRow;
+            private Text cycleText;
+            private ParameterValue[] shown;
+
+            public SequenceBlock(FractalScreen owner, IStepSequence sequence)
+            {
+                this.owner = owner;
+                this.sequence = sequence;
+                rowCount = StepSequenceEdit.Rows(sequence, owner.Services.Session.Parameters);
+            }
+
+            private static float RowGap => UiTheme.PanelPx(UiTheme.RowSpacing) * 1.75f;
+
+            private static float NoteHeight => UiTheme.PanelPx(22f);
+
+            public override float Measure(float width)
+            {
+                var gap = UiTheme.PanelPx(UiTheme.RowSpacing);
+                return UiTheme.PanelPx(20f) + gap * 0.5f +
+                       rowCount * (StepRow.MeasureHeight() + RowGap) +
+                       ActionRow.MeasureHeight() + gap * 0.5f + NoteHeight;
+            }
+
+            public override void Build(RectTransform content, float x, float y, float width)
+            {
+                var gap = UiTheme.PanelPx(UiTheme.RowSpacing);
+                var strings = owner.Strings;
+                var session = owner.Services.Session;
+                var cursor = y - AddCaption(content, strings.Get("sequence.title"), x, y, width) - gap * 0.5f;
+
+                rows.Clear();
+                shown = null;
+                for (var i = 0; i < rowCount; i++)
+                {
+                    var row = i;
+                    rows.Add(StepRow.Create(
+                        content, x, cursor, width,
+                        open: () => owner.openStep?.Invoke(row),
+                        remove: rowCount > 1 ? () => owner.RemoveRow(row) : null,
+                        setPower: power => StepSequenceEdit.SetPower(session, sequence, row, power),
+                        changeRepeats: delta => StepSequenceEdit.ChangeRepeats(session, sequence, row, delta)));
+                    cursor -= StepRow.MeasureHeight() + RowGap;
+                }
+
+                addRow = ActionRow.Create(
+                    content, strings.Get("sequence.add"), x, cursor, width,
+                    () => StepSequenceEdit.AddRow(session, sequence), ActionStyle.Accent);
+                cursor -= ActionRow.MeasureHeight() + gap * 0.5f;
+
+                cycleText = UiFactory.CreateText(
+                    "Cycle", content, string.Empty, UiTheme.LabelFontSize, UiTheme.TextMuted,
+                    TextAnchor.MiddleLeft, fitToRect: true, panelScale: true);
+                Place(cycleText.rectTransform, x, cursor, width, NoteHeight);
+            }
+
+            /// <summary>Show the session's sequence; only what changed is touched.</summary>
+            public void Refresh(in FractalParameterSet parameters)
+            {
+                if (cycleText == null)
+                {
+                    return;
+                }
+
+                if (StepSequenceEdit.Rows(sequence, parameters) != rowCount)
+                {
+                    owner.RebuildKeepingScroll();
+                    return;
+                }
+
+                var snapshot = StepSequenceEdit.Snapshot(sequence, parameters);
+                if (shown != null && Same(snapshot, shown))
+                {
+                    return;
+                }
+
+                shown = snapshot;
+                var strings = owner.Strings;
+                var cycle = StepSequenceEdit.CycleLength(sequence, parameters);
+                var roomForMore = cycle < sequence.MaximumCycle;
+                for (var row = 0; row < rows.Count; row++)
+                {
+                    var choice = sequence.Choices[StepSequenceEdit.Formula(sequence, parameters, row)];
+                    var title = (row + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + ".  " +
+                                StepSequenceEdit.ChoiceName(strings, choice);
+                    rows[row].Show(
+                        title, StepSequenceEdit.Power(sequence, parameters, row), choice.FixedPower,
+                        StepSequenceEdit.Repeats(sequence, parameters, row), roomForMore);
+                }
+
+                addRow.Label = StepSequenceEdit.CanAddRow(sequence, parameters)
+                    ? strings.Get("sequence.add")
+                    : strings.Get("sequence.full");
+                cycleText.text = strings.Format("sequence.cycle", cycle, sequence.MaximumCycle);
+            }
+
+            private static bool Same(ParameterValue[] a, ParameterValue[] b)
+            {
+                if (a.Length != b.Length)
+                {
+                    return false;
+                }
+
+                for (var i = 0; i < a.Length; i++)
+                {
+                    if (!a[i].Value.Equals(b[i].Value))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        /// <summary>Remove a step at once; the toast's Undo puts the whole sequence back as it was.</summary>
+        private void RemoveRow(int row)
+        {
+            var session = Services.Session;
+            var formula = sequence.Choices[StepSequenceEdit.Formula(sequence, session.Parameters, row)];
+            var before = StepSequenceEdit.RemoveRow(session, sequence, row);
+            if (before == null)
+            {
+                return;
+            }
+
+            var definition = session.Definition;
+            showUndo?.Invoke(
+                Strings.Format("sequence.removed", StepSequenceEdit.ChoiceName(Strings, formula)),
+                () =>
+                {
+                    // Only onto the same fractal: after a switch these keys mean nothing.
+                    if (ReferenceEquals(session.Definition, definition))
+                    {
+                        session.SetParameters(before);
+                    }
+                });
         }
 
         /// <summary>Controls generated from the active fractal's parameter descriptors.</summary>

@@ -60,6 +60,9 @@ namespace FractalVisio.App
         /// <summary>Save as JPEG rather than PNG: a fraction of the size, at a small loss.</summary>
         public bool ScreenshotJpeg;
 
+        /// <summary>The gesture hint has been seen and put away: it no longer opens by itself.</summary>
+        public bool GestureHintSeen;
+
         public InterfaceSettings Sanitized()
         {
             var result = this;
@@ -88,6 +91,7 @@ namespace FractalVisio.App
             ScreenshotWidth == other.ScreenshotWidth &&
             ScreenshotHeight == other.ScreenshotHeight &&
             ScreenshotSupersampling == other.ScreenshotSupersampling &&
-            ScreenshotJpeg == other.ScreenshotJpeg;
+            ScreenshotJpeg == other.ScreenshotJpeg &&
+            GestureHintSeen == other.GestureHintSeen;
     }
 }

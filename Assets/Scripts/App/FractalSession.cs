@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using FractalVisio.Core;
 
@@ -199,6 +200,32 @@ namespace FractalVisio.App
 
             var next = parameters.With(key, value);
             if (next[index] == parameters[index])
+            {
+                return;
+            }
+
+            parameters = next;
+            Raise(SessionChange.Parameters);
+        }
+
+        /// <summary>
+        /// Several parameters as one change - a hybrid's rows swapped or removed - so nothing renders
+        /// or saves the half-applied set in between. Keys this fractal does not have are skipped.
+        /// </summary>
+        public void SetParameters(IReadOnlyList<ParameterValue> values)
+        {
+            if (values == null)
+            {
+                return;
+            }
+
+            var next = parameters;
+            for (var i = 0; i < values.Count; i++)
+            {
+                next = next.With(values[i].Key, values[i].Value);
+            }
+
+            if (next.SameValues(parameters))
             {
                 return;
             }

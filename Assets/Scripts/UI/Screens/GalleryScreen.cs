@@ -29,6 +29,11 @@ namespace FractalVisio.UI
     /// closes it - the Mandelbrot and Julia families have sixty cards each. The first folder of a
     /// section starts open, and so does the one holding the fractal on screen. Only cards near the
     /// visible part of the grid ask for their preview, so a long list draws what is looked at.
+    ///
+    /// The magnifier beside the settings button turns the title into a search field: the grid then
+    /// shows every fractal whose name - in the interface language or its own - folder or section
+    /// holds every word typed, across all sections and folders. The cross, a filter chip or Back
+    /// ends the search.
     /// </summary>
     public sealed class GalleryScreen : UiScreen
     {
@@ -70,6 +75,13 @@ namespace FractalVisio.UI
         private int preferencesVersion;
         private int shownPreferencesVersion;
         private IFractalDefinition shownCurrent;
+
+        // Search: whether the field is up, and what is in it. Kept like the filter.
+        private bool searching;
+        private string query = string.Empty;
+        private Text headerTitle;
+        private InputField searchInput;
+        private Image searchIcon;
 
         private RawImage continueFrame;
         private Text continueTitle;
@@ -215,6 +227,9 @@ namespace FractalVisio.UI
             gridContent = null;
             gridScroll = null;
             gridViewport = null;
+            headerTitle = null;
+            searchInput = null;
+            searchIcon = null;
             continueFrame = null;
             continueTitle = null;
             base.Dispose();
@@ -253,27 +268,178 @@ namespace FractalVisio.UI
 
         // ---------------------------------------------------------------- header and filters
 
+        /// <summary>The title - or, while searching, the search field - then the search and settings buttons.</summary>
         private void BuildHeader(RectTransform parent, float top, float right, float height)
         {
-            var title = UiFactory.CreateText(
+            var gap = UiTheme.Px(8f);
+            var textWidth = gridWidth - height * 2f - gap * 2f;
+
+            headerTitle = UiFactory.CreateText(
                 "Title", parent, Strings.Get("gallery.title"), UiTheme.TitleFontSize + 4, UiTheme.Text,
                 TextAnchor.MiddleLeft, fitToRect: true);
-            title.fontStyle = FontStyle.Bold;
-            Place(title.rectTransform, left, -top, gridWidth - height - UiTheme.Px(8f), height);
+            headerTitle.fontStyle = FontStyle.Bold;
+            Place(headerTitle.rectTransform, left, -top, textWidth, height);
 
+            searchInput = BuildSearchField(parent, left, -top, textWidth, height);
+
+            var search = HeaderButton(parent, "Search", -(right + height + gap), top, height, ToggleSearch);
+            searchIcon = search;
+            HeaderButton(parent, "Settings", -right, top, height, openSettings).sprite =
+                UiSprites.Gear(Mathf.RoundToInt(Mathf.Round(height * 0.5f)));
+
+            ShowSearchState();
+        }
+
+        /// <summary>A round header button at <paramref name="x"/> from the right edge. Returns its icon, for the caller to draw.</summary>
+        private static Image HeaderButton(RectTransform parent, string name, float x, float top, float height, Action onClick)
+        {
             var button = UiFactory.CreateImage(
-                "Settings", parent, UiSprites.Rounded(Mathf.Max(1, Mathf.RoundToInt(height * 0.5f))), UiTheme.CardFill);
+                name, parent, UiSprites.Rounded(Mathf.Max(1, Mathf.RoundToInt(height * 0.5f))), UiTheme.CardFill);
             button.raycastTarget = true;
             UiFactory.Anchor(
                 button.rectTransform, new Vector2(1f, 1f), new Vector2(1f, 1f),
-                new Vector2(-right, -top), new Vector2(height, height));
-            AttachButton(button, openSettings);
+                new Vector2(x, -top), new Vector2(height, height));
+            AttachButton(button, onClick);
 
             var iconSize = Mathf.Round(height * 0.5f);
             var icon = UiFactory.CreateImage("Icon", button.transform, null, UiTheme.Text);
-            icon.sprite = UiSprites.Gear(Mathf.RoundToInt(iconSize));
             icon.type = Image.Type.Simple;
             UiFactory.Anchor(icon.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(iconSize, iconSize));
+            return icon;
+        }
+
+        private InputField BuildSearchField(RectTransform parent, float x, float y, float width, float height)
+        {
+            var radius = Mathf.Max(1, Mathf.RoundToInt(height * 0.5f));
+            var background = UiFactory.CreateImage("SearchField", parent, UiSprites.Rounded(radius), UiTheme.CardFill);
+            background.raycastTarget = true;
+            Place(background.rectTransform, x, y, width, height);
+
+            var outline = UiFactory.CreateImage(
+                "Outline", background.transform, UiSprites.RoundedOutline(radius, Mathf.Max(1f, UiTheme.Px(1.5f))),
+                new Color(UiTheme.Accent.r, UiTheme.Accent.g, UiTheme.Accent.b, 0.55f));
+            UiFactory.Stretch(outline.rectTransform);
+
+            var inset = UiTheme.Px(18f);
+            var placeholder = UiFactory.CreateText(
+                "Placeholder", background.transform, Strings.Get("gallery.search"), UiTheme.SegmentFontSize - 1,
+                UiTheme.TextMuted, TextAnchor.MiddleLeft, fitToRect: true);
+            UiFactory.Stretch(placeholder.rectTransform, inset);
+
+            var label = UiFactory.CreateText(
+                "Text", background.transform, string.Empty, UiTheme.SegmentFontSize - 1, UiTheme.Text, TextAnchor.MiddleLeft);
+            label.supportRichText = false;
+            UiFactory.Stretch(label.rectTransform, inset);
+
+            var input = background.gameObject.AddComponent<InputField>();
+            input.targetGraphic = background;
+            input.textComponent = label;
+            input.placeholder = placeholder;
+            input.lineType = InputField.LineType.SingleLine;
+            input.characterLimit = 40;
+            input.caretColor = UiTheme.Text;
+            input.selectionColor = new Color(UiTheme.Accent.r, UiTheme.Accent.g, UiTheme.Accent.b, 0.4f);
+            input.text = query;
+            input.onValueChanged.AddListener(OnQueryChanged);
+            return input;
+        }
+
+        /// <summary>Title or field, magnifier or cross.</summary>
+        private void ShowSearchState()
+        {
+            if (headerTitle == null)
+            {
+                return;
+            }
+
+            headerTitle.gameObject.SetActive(!searching);
+            searchInput.gameObject.SetActive(searching);
+            searchIcon.sprite = searching
+                ? UiSprites.Cross(Mathf.RoundToInt(searchIcon.rectTransform.sizeDelta.x))
+                : UiSprites.Search(Mathf.RoundToInt(searchIcon.rectTransform.sizeDelta.x));
+        }
+
+        private void ToggleSearch()
+        {
+            if (searching)
+            {
+                EndSearch();
+                return;
+            }
+
+            searching = true;
+            query = string.Empty;
+            searchInput.SetTextWithoutNotify(string.Empty);
+            ShowSearchState();
+
+            // The keyboard comes up with the field: searching is typing.
+            searchInput.Select();
+            searchInput.ActivateInputField();
+        }
+
+        /// <summary>Leave the search, if one is open. True if it was: Back closes the search before the gallery.</summary>
+        public bool EndSearch()
+        {
+            if (!searching)
+            {
+                return false;
+            }
+
+            searching = false;
+            query = string.Empty;
+            if (searchInput != null)
+            {
+                searchInput.SetTextWithoutNotify(string.Empty);
+                searchInput.DeactivateInputField();
+            }
+
+            ShowSearchState();
+            RebuildGrid(false);
+            return true;
+        }
+
+        private void OnQueryChanged(string text)
+        {
+            query = text ?? string.Empty;
+            RebuildGrid(false);
+        }
+
+        private bool HasQuery => searching && query.Trim().Length > 0;
+
+        /// <summary>
+        /// Every fractal whose words hold every word of the query, in catalog order. Its words: its
+        /// name in the interface language and its own, its folder's and its section's, so "cubic"
+        /// lists the cubic folder and "julia" the Julia family. Case and ё/е do not matter.
+        /// </summary>
+        private List<CatalogEntry> SearchEntries()
+        {
+            var words = Normalize(query).Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            var result = new List<CatalogEntry>();
+            var gallery = Services.Gallery;
+            for (var i = 0; i < gallery.Count; i++)
+            {
+                var entry = gallery[i];
+                var haystack = Normalize(
+                    Strings.FractalName(entry.Definition) + " " + entry.Definition.DisplayName + " " +
+                    Strings.FolderName(entry.Folder) + " " + Strings.SectionName(entry.Section));
+                var all = true;
+                for (var w = 0; w < words.Length && all; w++)
+                {
+                    all = haystack.Contains(words[w]);
+                }
+
+                if (all)
+                {
+                    result.Add(entry);
+                }
+            }
+
+            return result;
+        }
+
+        private static string Normalize(string text)
+        {
+            return (text ?? string.Empty).ToLowerInvariant().Replace('\u0451', '\u0435');
         }
 
         /// <summary>
@@ -368,6 +534,12 @@ namespace FractalVisio.UI
 
         private void SelectFilter(Filter kind, string section)
         {
+            // A filter is another way of looking: the search ends.
+            if (EndSearch() && kind == filter && (kind != Filter.Section || section == filterSection))
+            {
+                return;
+            }
+
             if (kind == filter && (kind != Filter.Section || section == filterSection))
             {
                 return;
@@ -464,7 +636,13 @@ namespace FractalVisio.UI
             var cursor = -UiTheme.Px(4f);
             var entries = FilteredEntries();
 
-            if (filter == Filter.Saved)
+            if (HasQuery)
+            {
+                // Found fractals, flat: no folders to open, no sections to scroll past.
+                var found = SearchEntries();
+                cursor = found.Count == 0 ? AddEmptyState(cursor, "gallery.search_none") : AddCards(found, cursor);
+            }
+            else if (filter == Filter.Saved)
             {
                 var saved = bookmarks != null ? bookmarks.Items : Array.Empty<Bookmark>();
                 cursor = saved.Count == 0 ? AddEmptyState(cursor) : AddSavedCards(saved, cursor);
@@ -693,9 +871,9 @@ namespace FractalVisio.UI
             return cursor - height - UiTheme.Px(10f);
         }
 
-        private float AddEmptyState(float cursor)
+        private float AddEmptyState(float cursor, string message = null)
         {
-            var key = filter switch
+            var key = message ?? filter switch
             {
                 Filter.Favorites => "gallery.empty.favorites",
                 Filter.Saved => "gallery.empty.saved",

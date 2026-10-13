@@ -76,6 +76,23 @@ namespace FractalVisio.Core
         /// </summary>
         public ReferenceOrbit Secondary => secondary ??= new ReferenceOrbit();
 
+        private ReferenceOrbit[] extras = Array.Empty<ReferenceOrbit>();
+
+        /// <summary>
+        /// Further orbits, numbered, kept and created the same way as <see cref="Secondary"/>: a
+        /// hybrid's orbits of 0, one starting at each phase of its cycle - a pixel rebases onto the
+        /// one whose next step is its own, since starting a different step would change its orbit.
+        /// </summary>
+        public ReferenceOrbit Extra(int index)
+        {
+            if (index >= extras.Length)
+            {
+                Array.Resize(ref extras, index + 1);
+            }
+
+            return extras[index] ??= new ReferenceOrbit();
+        }
+
         /// <summary>Real parts of <c>Z_0 .. Z_(Length-1)</c>. May be longer than <see cref="Length"/>.</summary>
         public double[] Re => re;
 

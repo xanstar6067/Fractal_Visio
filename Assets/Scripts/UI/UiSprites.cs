@@ -45,6 +45,84 @@ namespace FractalVisio.UI
         /// <summary>Three dots in a row: "more" - the actions of one item.</summary>
         public static Sprite More(int size) => BuildIcon(9, size, MoreCoverage);
 
+        /// <summary>A magnifying glass: search.</summary>
+        public static Sprite Search(int size) => BuildIcon(14, size, SearchCoverage);
+
+        /// <summary>A cross: close, clear.</summary>
+        public static Sprite Cross(int size) => BuildIcon(15, size, CrossCoverage);
+
+        private static bool SearchCoverage(float x, float y)
+        {
+            var dx = x - 0.42f;
+            var dy = y - 0.58f;
+            var radius = Mathf.Sqrt(dx * dx + dy * dy);
+            return (radius > 0.2f && radius < 0.29f) || SegmentDistance(x, y, 0.62f, 0.38f, 0.84f, 0.16f) < 0.065f;
+        }
+
+        private static bool CrossCoverage(float x, float y)
+        {
+            return SegmentDistance(x, y, 0.22f, 0.22f, 0.78f, 0.78f) < 0.06f ||
+                   SegmentDistance(x, y, 0.22f, 0.78f, 0.78f, 0.22f) < 0.06f;
+        }
+
+        /// <summary>A fingertip with arrows four ways: drag with one finger.</summary>
+        public static Sprite FingerPan(int size) => BuildIcon(10, size, FingerPanCoverage);
+
+        /// <summary>Two fingertips moving apart along a diagonal: pinch and twist with two.</summary>
+        public static Sprite FingerPinch(int size) => BuildIcon(11, size, FingerPinchCoverage);
+
+        /// <summary>Three fingertips side by side: the three-finger touch.</summary>
+        public static Sprite FingerThree(int size) => BuildIcon(12, size, FingerThreeCoverage);
+
+        /// <summary>A fingertip inside a ring: a tap.</summary>
+        public static Sprite FingerTap(int size) => BuildIcon(13, size, FingerTapCoverage);
+
+        private const float ArrowStroke = 0.045f;
+
+        private static bool FingerPanCoverage(float x, float y)
+        {
+            if (Within(x, y, 0.5f, 0.5f, 0.13f))
+            {
+                return true;
+            }
+
+            // Arrowheads 0.4 out from the centre, one per direction.
+            return Arrowhead(x, y, 0.5f, 0.92f, 0f, 1f) || Arrowhead(x, y, 0.5f, 0.08f, 0f, -1f) ||
+                   Arrowhead(x, y, 0.92f, 0.5f, 1f, 0f) || Arrowhead(x, y, 0.08f, 0.5f, -1f, 0f);
+        }
+
+        private static bool FingerPinchCoverage(float x, float y)
+        {
+            const float diagonal = 0.70710678f;
+            return Within(x, y, 0.36f, 0.36f, 0.11f) || Within(x, y, 0.64f, 0.64f, 0.11f) ||
+                   Arrowhead(x, y, 0.88f, 0.88f, diagonal, diagonal) ||
+                   Arrowhead(x, y, 0.12f, 0.12f, -diagonal, -diagonal);
+        }
+
+        private static bool FingerThreeCoverage(float x, float y)
+        {
+            return Within(x, y, 0.2f, 0.44f, 0.11f) || Within(x, y, 0.5f, 0.56f, 0.11f) || Within(x, y, 0.8f, 0.44f, 0.11f);
+        }
+
+        private static bool FingerTapCoverage(float x, float y)
+        {
+            var dx = x - 0.5f;
+            var dy = y - 0.5f;
+            var radius = Mathf.Sqrt(dx * dx + dy * dy);
+            return radius < 0.14f || (radius > 0.3f && radius < 0.37f);
+        }
+
+        /// <summary>An open arrowhead: two strokes back from the tip, pointing along (dx, dy).</summary>
+        private static bool Arrowhead(float x, float y, float tipX, float tipY, float dx, float dy)
+        {
+            const float back = 0.13f;
+            const float spread = 0.11f;
+            var baseX = tipX - dx * back;
+            var baseY = tipY - dy * back;
+            return SegmentDistance(x, y, tipX, tipY, baseX - dy * spread, baseY + dx * spread) < ArrowStroke ||
+                   SegmentDistance(x, y, tipX, tipY, baseX + dy * spread, baseY - dx * spread) < ArrowStroke;
+        }
+
         private static bool MoreCoverage(float x, float y)
         {
             return Within(x, y, 0.2f, 0.5f, 0.09f) || Within(x, y, 0.5f, 0.5f, 0.09f) || Within(x, y, 0.8f, 0.5f, 0.09f);

@@ -197,6 +197,15 @@ any feature that is not a bug fix, and update it when a design decision changes.
   Multibrot/Multijulia, the Simonobrot pair), so each `BindMaterial` sets every uniform the shader
   reads, Julia mode included. WPF's classic Buffalo is deliberately absent: it is the Burning Ship
   upside down.
+- **The hybrid constructor** (`Fractals/Hybrid`, docs\ARCHITECTURE.md §5.13) cycles through rows of
+  (formula, power, repeats); every step is a `FoldedFormula` from `HybridSteps`, whose order is saved
+  as an index - append only. The sequence is plain parameters (`IStepSequence`: `rows`, `f0`, `p0`,
+  `r0`, ...) leading both hybrids' parameter lists - `HybridCycle` reads them by position - so
+  bookmarks, the C map and "Julia set of the centre" carry it by key. A rebase must land on an orbit
+  of 0 that starts at the pixel's own phase: the perturbation sampler keeps one per phase
+  (`ReferenceOrbit.Extra`), which is why a cycle is capped at 16 steps. The fractal panel edits the
+  rows (`SequenceBlock`, `StepRow`, the step sheet `StepScreen`); edits go through `StepSequenceEdit`
+  as one `FractalSession.SetParameters` change.
 - All mutable state belongs to `FractalSession`; UI and modules read it and call its
   setters, never the renderers directly. Clamping and the iteration budget live in
   `FractalSession.SetView` alone - do not recompute either at a call site.
@@ -299,7 +308,9 @@ any feature that is not a bug fix, and update it when a design decision changes.
   from a list in the UI. A section with folders shows each as a row that opens and closes it
   (`folder.<id>` in the locales); only cards near the visible part of the grid ask for a preview,
   and `ThumbnailModule` keeps at most 48 preview textures - the families have 59 cards each.
-  Section names are `section.<id>`, descriptions `fractal.<id>.about`, both optional in the locales. Previews are drawn live on the GPU by `IFractalThumbnails`
+  Section names are `section.<id>`, descriptions `fractal.<id>.about`, both optional in the locales.
+  The magnifier in the header searches every card by its name (both languages), folder and section;
+  Back, the cross or a filter chip ends the search. Previews are drawn live on the GPU by `IFractalThumbnails`
   (`ThumbnailModule`, in App because it needs a renderer) in the session's palette - do not ship
   preview images. Favourites and recents are `IGalleryPreferences`; "recent" is recorded from the
   session's definition changes, not from gallery taps.
@@ -344,6 +355,9 @@ any feature that is not a bug fix, and update it when a design decision changes.
   and `FractalSession.MaximumScale` is the zoom-out limit on the same terms. Resets, zoom readouts
   ("x1") and gesture/inertia clamps use these, never `Definition.DefaultView` or
   `Quality.MaximumScale` directly. Saved and restored views are never refit.
+- The gesture hint (`GestureHintScreen`) opens by itself once, the first time the gallery closes, and
+  again from Settings; `InterfaceSettings.GestureHintSeen` remembers it. It sits over the panels and
+  under the toast, and Back dismisses it first.
 - The debug HUD is off by default (`InterfaceSettings.ShowDebugInfo`, Settings > DEBUG INFO) and sits
   below the gallery button when on.
 - **One canvas unit is one device pixel.** `AppBootstrap.EnsureUi` forces the `CanvasScaler` to

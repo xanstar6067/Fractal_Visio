@@ -59,6 +59,14 @@ namespace FractalVisio.UI
         private SettingsSection formatSection;
         private InputField screenshotInput;
 
+        private readonly Action showGestureHint;
+
+        /// <param name="showGestureHint">Shows the gesture hint again.</param>
+        public SettingsScreen(Action showGestureHint)
+        {
+            this.showGestureHint = showGestureHint;
+        }
+
         protected override string BuildTitle() => Strings.Get("settings.title");
 
         protected override void CollectBlocks(List<Block> blocks)
@@ -78,6 +86,10 @@ namespace FractalVisio.UI
                 Strings.Get("settings.language"), LanguageNames(), SelectLanguage, s => languageSection = s));
             blocks.Add(new OptionsBlock(
                 Strings.Get("settings.debug_info"), Localize(BoolKeys), SelectDebugInfo, s => debugSection = s));
+            if (showGestureHint != null)
+            {
+                blocks.Add(new ActionBlock(Strings.Get("settings.gesture_hint"), showGestureHint));
+            }
         }
 
         protected override void OnBuild(Transform parent)
