@@ -63,6 +63,9 @@ namespace FractalVisio.App
         /// <summary>The gesture hint has been seen and put away: it no longer opens by itself.</summary>
         public bool GestureHintSeen;
 
+        /// <summary>The same for a 3D scene's gestures, which mean other things: shown the first time a scene opens.</summary>
+        public bool SceneHintSeen;
+
         public InterfaceSettings Sanitized()
         {
             var result = this;
@@ -92,6 +95,7 @@ namespace FractalVisio.App
             ScreenshotHeight == other.ScreenshotHeight &&
             ScreenshotSupersampling == other.ScreenshotSupersampling &&
             ScreenshotJpeg == other.ScreenshotJpeg &&
-            GestureHintSeen == other.GestureHintSeen;
+            GestureHintSeen == other.GestureHintSeen &&
+            SceneHintSeen == other.SceneHintSeen;
     }
 }

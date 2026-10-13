@@ -171,14 +171,17 @@ namespace FractalVisio.UI
                 HandleBack();
             }
 
-            // The first time the picture is on screen, how to move it.
-            if (!gallery.IsOpen && !gestureHint.IsOpen && !services.Session.Interface.GestureHintSeen)
+            // The first time the picture is on screen, how to move it - and the first time a 3D scene
+            // is, how to turn it, which fingers do differently.
+            var scene = services.Session.IsScene;
+            var hintSeen = scene ? services.Session.Interface.SceneHintSeen : services.Session.Interface.GestureHintSeen;
+            if (!gallery.IsOpen && !gestureHint.IsOpen && !hintSeen)
             {
-                gestureHint.Open();
+                gestureHint.Show(scene);
             }
 
-            // The C map belongs to a fractal with a plane; another fractal has nothing to pick on.
-            if (planeMap.IsOpen && ParameterMapScreen.FindPlane(services, services.Session.Definition) == null)
+            // The C map belongs to a fractal with a plane; another fractal, or a scene, has nothing to pick on.
+            if (planeMap.IsOpen && (scene || ParameterMapScreen.FindPlane(services, services.Session.Definition) == null))
             {
                 planeMap.Close();
             }
@@ -383,21 +386,31 @@ namespace FractalVisio.UI
             }
         }
 
-        /// <summary>The gesture hint again, from Settings: over everything, the panel out of its way.</summary>
+        /// <summary>The gesture hint again, from Settings - for what is on screen: over everything, the panel out of its way.</summary>
         private void ShowGestureHint()
         {
             CloseAllPanels();
-            gestureHint.Open();
+            gestureHint.Show(services.Session.IsScene);
         }
 
-        private void MarkGestureHintSeen()
+        private void MarkGestureHintSeen(bool scene)
         {
             var settings = services.Session.Interface;
-            if (!settings.GestureHintSeen)
+            if (scene ? settings.SceneHintSeen : settings.GestureHintSeen)
+            {
+                return;
+            }
+
+            if (scene)
+            {
+                settings.SceneHintSeen = true;
+            }
+            else
             {
                 settings.GestureHintSeen = true;
-                services.Session.SetInterface(settings);
             }
+
+            services.Session.SetInterface(settings);
         }
 
         /// <summary>The sheet of one row of a hybrid's sequence, in place of the fractal panel.</summary>

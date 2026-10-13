@@ -113,7 +113,23 @@ namespace FractalVisio.Modules
             var view = context.Session.View;
             var status = context.Render.Status;
 
-            if (scaleValueText != null)
+            if (scaleValueText != null && context.Session.IsScene)
+            {
+                // A scene's camera, in the WPF version's terms, so a view can be set up there too.
+                var camera = context.Session.Camera;
+                var (yaw, pitch, roll) = camera.Angles();
+                var target = camera.Target;
+                scaleValueText.text = string.Concat(
+                    "dist   ", camera.Distance.ToString("0.######", CultureInfo.InvariantCulture), "\n",
+                    "zoom   x", context.Session.Zoom.ToString("0.###", CultureInfo.InvariantCulture), "\n",
+                    "yaw ", yaw.ToString("0.0", CultureInfo.InvariantCulture),
+                    "  pitch ", pitch.ToString("0.0", CultureInfo.InvariantCulture),
+                    "  roll ", roll.ToString("0.0", CultureInfo.InvariantCulture), "\n",
+                    "target ", target.x.ToString("0.#####", CultureInfo.InvariantCulture), "; ",
+                    target.y.ToString("0.#####", CultureInfo.InvariantCulture), "; ",
+                    target.z.ToString("0.#####", CultureInfo.InvariantCulture));
+            }
+            else if (scaleValueText != null)
             {
                 var scale = view.scale.AsDouble;
                 var reference = context.Session.DefaultView.scale.AsDouble;
@@ -137,7 +153,16 @@ namespace FractalVisio.Modules
 
             string engineLine;
             string detailLine;
-            if (status.Backend == RenderBackend.GpuFloat)
+            if (context.Session.IsScene)
+            {
+                var size = context.Render is FractalPresenter presenter ? presenter.RenderSize : Vector2Int.zero;
+                engineLine = "GPU ray march  " + size.x.ToString(CultureInfo.InvariantCulture) + "x" +
+                             size.y.ToString(CultureInfo.InvariantCulture) + (status.Interacting ? "  draft" : string.Empty);
+                detailLine = status.IsBusy
+                    ? "full frame " + Mathf.RoundToInt(status.Progress * 100f).ToString(CultureInfo.InvariantCulture) + "%"
+                    : "full frame done";
+            }
+            else if (status.Backend == RenderBackend.GpuFloat)
             {
                 engineLine = "GPU fp32" + (status.Interacting ? "  interactive" : string.Empty);
                 detailLine = "iter " + status.Iterations;

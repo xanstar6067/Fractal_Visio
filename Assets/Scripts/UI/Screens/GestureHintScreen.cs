@@ -9,6 +9,9 @@ namespace FractalVisio.UI
     /// Settings. One card over the dimmed, blurred picture - one finger moves it, two zoom and turn
     /// it, three bring back the start, a tap hides the buttons - and "Got it". A tap beside the card
     /// closes it too; the picture underneath does not move while it is up.
+    ///
+    /// A 3D scene has a card of its own, shown the first time a scene opens: there one finger turns
+    /// the shape about the point under it and two approach that point, slide and roll.
     /// </summary>
     public sealed class GestureHintScreen : UiScreen
     {
@@ -17,23 +20,44 @@ namespace FractalVisio.UI
             "gestures.one_finger", "gestures.two_fingers", "gestures.three_fingers", "gestures.tap"
         };
 
-        private readonly Action dismissed;
+        private static readonly string[] SceneRowKeys =
+        {
+            "gestures.scene_one_finger", "gestures.scene_two_fingers", "gestures.three_fingers", "gestures.tap"
+        };
 
-        /// <param name="dismissed">Runs when the hint is put away: it has been seen.</param>
-        public GestureHintScreen(Action dismissed)
+        private readonly Action<bool> dismissed;
+        private bool forScene;
+        private bool builtForScene;
+
+        /// <param name="dismissed">Runs when the hint is put away, with whether it was the scene's: it has been seen.</param>
+        public GestureHintScreen(Action<bool> dismissed)
         {
             this.dismissed = dismissed;
+        }
+
+        /// <summary>Open the hint for a plane fractal's gestures, or a scene's.</summary>
+        public void Show(bool scene)
+        {
+            forScene = scene;
+            if (forScene != builtForScene)
+            {
+                NeedsRebuild = true;
+            }
+
+            Open();
         }
 
         /// <summary>Put the hint away, as "Got it" does.</summary>
         public void Dismiss()
         {
             Close();
-            dismissed?.Invoke();
+            dismissed?.Invoke(forScene);
         }
 
         protected override void OnBuild(Transform parent)
         {
+            builtForScene = forScene;
+            var rowKeys = forScene ? SceneRowKeys : RowKeys;
             Panel = GlassPanel.Create("GestureHint", parent, 0f, new Color(0.02f, 0.025f, 0.045f, 0.55f), Color.clear);
             UiFactory.Stretch(Panel.Root);
 
@@ -55,8 +79,8 @@ namespace FractalVisio.UI
             var fixedHeight = padding * 2f + titleHeight + gap * 2f + buttonHeight;
 
             // Rows shrink before the card leaves the screen - on a phone on its side.
-            var rowHeight = Mathf.Min(UiTheme.Px(64f), (availableHeight - fixedHeight) / RowKeys.Length);
-            var height = fixedHeight + rowHeight * RowKeys.Length;
+            var rowHeight = Mathf.Min(UiTheme.Px(64f), (availableHeight - fixedHeight) / rowKeys.Length);
+            var height = fixedHeight + rowHeight * rowKeys.Length;
 
             var radius = UiTheme.PxInt(UiTheme.CardRadius);
             var card = UiFactory.CreateImage("Card", Panel.Content, UiSprites.Rounded(radius), new Color(0.035f, 0.045f, 0.075f, 0.92f));
@@ -67,7 +91,7 @@ namespace FractalVisio.UI
                 new Vector2(width, height));
 
             var title = UiFactory.CreateText(
-                "Title", card.transform, Strings.Get("gestures.title"), UiTheme.TitleFontSize, UiTheme.Text,
+                "Title", card.transform, Strings.Get(forScene ? "gestures.scene_title" : "gestures.title"), UiTheme.TitleFontSize, UiTheme.Text,
                 TextAnchor.MiddleLeft, fitToRect: true);
             title.fontStyle = FontStyle.Bold;
             Place(title.rectTransform, padding, -padding, width - padding * 2f, titleHeight);
@@ -76,7 +100,7 @@ namespace FractalVisio.UI
             var iconSize = Mathf.Round(Mathf.Min(UiTheme.Px(40f), rowHeight * 0.75f));
             var textLeft = padding + iconSize + UiTheme.Px(16f);
             var cursor = padding + titleHeight + gap;
-            for (var i = 0; i < RowKeys.Length; i++)
+            for (var i = 0; i < rowKeys.Length; i++)
             {
                 var icon = UiFactory.CreateImage("Icon", card.transform, null, UiTheme.Accent);
                 icon.sprite = icons[i](Mathf.RoundToInt(iconSize));
@@ -84,7 +108,7 @@ namespace FractalVisio.UI
                 Place(icon.rectTransform, padding, -(cursor + (rowHeight - iconSize) * 0.5f), iconSize, iconSize);
 
                 var text = UiFactory.CreateText(
-                    "Text", card.transform, Strings.Get(RowKeys[i]), UiTheme.SegmentFontSize - 2, UiTheme.Text,
+                    "Text", card.transform, Strings.Get(rowKeys[i]), UiTheme.SegmentFontSize - 2, UiTheme.Text,
                     TextAnchor.MiddleLeft, fitToRect: true);
                 Place(text.rectTransform, textLeft, -cursor, width - textLeft - padding, rowHeight);
                 cursor += rowHeight;

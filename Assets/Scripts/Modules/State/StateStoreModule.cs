@@ -96,12 +96,13 @@ namespace FractalVisio.Modules
                 interfaceSettings.ScreenshotSupersampling = settings.screenshotSupersampling;
                 interfaceSettings.ScreenshotJpeg = settings.screenshotJpeg;
                 interfaceSettings.GestureHintSeen = settings.gestureHintSeen;
+                interfaceSettings.SceneHintSeen = settings.sceneHintSeen;
                 services.Session.SetInterface(interfaceSettings);
             }
 
             if (StateCodec.TryFromJson<FractalStateDto>(storage.Read(SessionKey), out var state))
             {
-                services.Session.Apply(state, services.Catalog, services.Palettes);
+                services.Session.Apply(state, services.Catalog, services.Scenes, services.Palettes);
             }
 
             // Restoring is itself a session change; it is not a reason to write the same file back.
@@ -129,7 +130,8 @@ namespace FractalVisio.Modules
                 screenshotHeight = session.Interface.ScreenshotHeight,
                 screenshotSupersampling = session.Interface.ScreenshotSupersampling,
                 screenshotJpeg = session.Interface.ScreenshotJpeg,
-                gestureHintSeen = session.Interface.GestureHintSeen
+                gestureHintSeen = session.Interface.GestureHintSeen,
+                sceneHintSeen = session.Interface.SceneHintSeen
             }));
         }
 
@@ -157,6 +159,9 @@ namespace FractalVisio.Modules
 
             /// <summary>Files from before the hint read as not seen: everyone sees it once.</summary>
             public bool gestureHintSeen;
+
+            /// <summary>The 3D hint, likewise.</summary>
+            public bool sceneHintSeen;
         }
     }
 }

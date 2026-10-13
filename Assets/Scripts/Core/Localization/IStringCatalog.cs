@@ -65,8 +65,8 @@ namespace FractalVisio.Core
             return strings != null && strings.TryGet(key, out var value) ? value : fallback;
         }
 
-        /// <summary><c>fractal.&lt;id&gt;</c>, else the definition's own <see cref="IFractalDefinition.DisplayName"/>.</summary>
-        public static string FractalName(this IStringCatalog strings, IFractalDefinition definition)
+        /// <summary><c>fractal.&lt;id&gt;</c>, else the mode's own <see cref="IExplorationMode.DisplayName"/>.</summary>
+        public static string FractalName(this IStringCatalog strings, IExplorationMode definition)
         {
             return definition == null ? string.Empty : strings.GetOr("fractal." + definition.Id, definition.DisplayName);
         }
@@ -75,7 +75,7 @@ namespace FractalVisio.Core
         /// <c>fractal.&lt;id&gt;.about</c>: one or two sentences for the gallery and the fractal panel.
         /// Empty when there is none - a description is optional, like the translated name.
         /// </summary>
-        public static string FractalDescription(this IStringCatalog strings, IFractalDefinition definition)
+        public static string FractalDescription(this IStringCatalog strings, IExplorationMode definition)
         {
             return definition == null ? string.Empty : strings.GetOr("fractal." + definition.Id + ".about", string.Empty);
         }
@@ -94,7 +94,7 @@ namespace FractalVisio.Core
 
         /// <summary><c>fractal.&lt;id&gt;.&lt;key&gt;</c>, else the descriptor's own label.</summary>
         public static string ParameterLabel(
-            this IStringCatalog strings, IFractalDefinition definition, in FractalParameterDescriptor descriptor)
+            this IStringCatalog strings, IExplorationMode definition, in FractalParameterDescriptor descriptor)
         {
             return definition == null
                 ? descriptor.Label
@@ -107,8 +107,19 @@ namespace FractalVisio.Core
         /// </summary>
         public static string PlaceName(this IStringCatalog strings, IFractalDefinition definition, in PlaceOfInterest place)
         {
-            var shared = strings.GetOr("place." + place.Id, place.Id);
-            return definition == null ? shared : strings.GetOr("fractal." + definition.Id + ".place." + place.Id, shared);
+            return PlaceName(strings, definition, place.Id);
+        }
+
+        /// <summary>A 3D scene's place, named as a plane fractal's is.</summary>
+        public static string PlaceName(this IStringCatalog strings, ISceneDefinition scene, in ScenePlace place)
+        {
+            return PlaceName(strings, scene, place.Id);
+        }
+
+        private static string PlaceName(IStringCatalog strings, IExplorationMode mode, string placeId)
+        {
+            var shared = strings.GetOr("place." + placeId, placeId);
+            return mode == null ? shared : strings.GetOr("fractal." + mode.Id + ".place." + placeId, shared);
         }
 
         /// <summary>

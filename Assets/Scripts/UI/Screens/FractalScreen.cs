@@ -26,6 +26,9 @@ namespace FractalVisio.UI
     /// gets them as rows to edit - formula, power, repeats - instead of a slider per parameter. A
     /// row's formula and its place in the order are changed on the step's own sheet
     /// (<see cref="StepScreen"/>); a removed row comes back through Undo.
+    ///
+    /// A 3D scene gets its description, places, parameters and two camera commands: level the
+    /// horizon - a roll is easy to make with two fingers and hard to undo exactly - and the start.
     /// </summary>
     public sealed class FractalScreen : BlockScreen
     {
@@ -36,9 +39,10 @@ namespace FractalVisio.UI
         private readonly Action<int> openStep;
         private readonly Action<string, Action> showUndo;
         private readonly List<ParameterControl> parameterControls = new();
-        private IFractalDefinition builtFor;
+        private IExplorationMode builtFor;
         private IParameterPlane plane;
         private IReadOnlyList<PlaceOfInterest> places;
+        private IReadOnlyList<ScenePlace> scenePlaces;
         private IStepSequence sequence;
         private SequenceBlock sequenceBlock;
         private Text constantText;
@@ -59,18 +63,28 @@ namespace FractalVisio.UI
         /// <summary>Parameters read best one under another; a second column only splits a short list.</summary>
         protected override int MaximumColumns => 2;
 
-        protected override string BuildTitle() => Strings.FractalName(Services.Session.Definition);
+        protected override string BuildTitle() => Strings.FractalName(Services.Session.Mode);
 
         protected override void CollectBlocks(List<Block> blocks)
         {
             var definition = Services.Session.Definition;
-            builtFor = definition;
+            builtFor = Services.Session.Mode;
             parameterControls.Clear();
             constantText = null;
             presetSection = null;
             sequenceBlock = null;
+            plane = null;
+            sequence = null;
+            places = null;
+            scenePlaces = null;
             shownReal = double.NaN;
             shownImaginary = double.NaN;
+
+            if (Services.Session.IsScene)
+            {
+                CollectSceneBlocks(blocks, Services.Session.Scene);
+                return;
+            }
 
             // A plane only counts when its map can be found and drawn: otherwise C stays two sliders.
             plane = ParameterMapScreen.FindPlane(Services, definition) != null ? definition as IParameterPlane : null;
@@ -138,6 +152,61 @@ namespace FractalVisio.UI
         {
             base.OnBuild(parent);
             RefreshParameters();
+        }
+
+        /// <summary>A scene: what it is, where to look, its shape, and the camera's way back.</summary>
+        private void CollectSceneBlocks(List<Block> blocks, ISceneDefinition scene)
+        {
+            var description = Strings.FractalDescription(scene);
+            if (!string.IsNullOrEmpty(description))
+            {
+                blocks.Add(new TextBlock(description));
+            }
+
+            scenePlaces = (scene as IScenePlaces)?.Places;
+            if (scenePlaces != null && scenePlaces.Count > 0)
+            {
+                var names = new string[scenePlaces.Count];
+                for (var i = 0; i < names.Length; i++)
+                {
+                    names[i] = Strings.PlaceName(scene, scenePlaces[i]);
+                }
+
+                blocks.Add(new OptionsBlock(
+                    Strings.Get("fractal_panel.places"), names, ApplyScenePlace, section => section.SetSelected(-1)));
+            }
+
+            if (scene.Parameters.Count > 0)
+            {
+                blocks.Add(new ParametersBlock(this, scene, scene.Parameters));
+            }
+
+            var session = Services.Session;
+            blocks.Add(new ActionBlock(
+                Strings.Get("fractal_panel.level_horizon"), () => session.SetCamera(SceneNavigator.Level(session.Camera))));
+            blocks.Add(new ActionBlock(Strings.Get("fractal_panel.reset_view"), () => session.ResetView()));
+            blocks.Add(new ActionBlock(Strings.Get("fractal_panel.all_fractals"), openGallery, ActionStyle.Accent));
+        }
+
+        /// <summary>A scene's place: its shape, then its camera, fitted to the screen. The panel closes to show it.</summary>
+        private void ApplyScenePlace(int index)
+        {
+            if (scenePlaces == null || index < 0 || index >= scenePlaces.Count)
+            {
+                return;
+            }
+
+            var place = scenePlaces[index];
+            var session = Services.Session;
+            var values = new ParameterValue[place.Parameters.Count];
+            for (var i = 0; i < values.Length; i++)
+            {
+                values[i] = place.Parameters[i];
+            }
+
+            session.SetParameters(values);
+            session.SetFramedCamera(place.Camera);
+            Close();
         }
 
         /// <summary>The descriptors that get a control of their own: all of them, less a plane's point and a sequence's rows.</summary>
@@ -268,7 +337,7 @@ namespace FractalVisio.UI
         protected override void OnTick()
         {
             // Another fractal has other parameters and another name: a different panel.
-            if (!ReferenceEquals(Services.Session.Definition, builtFor))
+            if (!ReferenceEquals(Services.Session.Mode, builtFor))
             {
                 NeedsRebuild = true;
                 return;
@@ -279,7 +348,7 @@ namespace FractalVisio.UI
 
         protected override void OnOpenChanged(bool open)
         {
-            if (open && !ReferenceEquals(Services.Session.Definition, builtFor))
+            if (open && !ReferenceEquals(Services.Session.Mode, builtFor))
             {
                 NeedsRebuild = true;
             }
@@ -519,10 +588,10 @@ namespace FractalVisio.UI
         private sealed class ParametersBlock : Block
         {
             private readonly FractalScreen owner;
-            private readonly IFractalDefinition definition;
+            private readonly IExplorationMode definition;
             private readonly IReadOnlyList<FractalParameterDescriptor> descriptors;
 
-            public ParametersBlock(FractalScreen owner, IFractalDefinition definition, IReadOnlyList<FractalParameterDescriptor> descriptors)
+            public ParametersBlock(FractalScreen owner, IExplorationMode definition, IReadOnlyList<FractalParameterDescriptor> descriptors)
             {
                 this.owner = owner;
                 this.definition = definition;

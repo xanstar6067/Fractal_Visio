@@ -35,6 +35,50 @@ namespace FractalVisio.Core
 
         public ColoringDto coloring;
         public ParameterValueDto[] parameters;
+
+        /// <summary>
+        /// Camera and look when <see cref="fractal"/> names a 3D scene (<see cref="ISceneDefinition"/>);
+        /// the centre, scale and rotation above are then unused. JsonUtility writes it for a plane
+        /// fractal too, empty - and files from before 3D read as empty: a scene with no camera starts
+        /// at its default one.
+        /// </summary>
+        public SceneStateDto scene;
+    }
+
+    /// <summary>A 3D scene's camera and look. A zero <see cref="distance"/> means "none saved".</summary>
+    [Serializable]
+    public sealed class SceneStateDto
+    {
+        /// <summary>The camera's turn as a unit quaternion: exact, where angles would round.</summary>
+        public float qx;
+        public float qy;
+        public float qz;
+        public float qw;
+        public float distance;
+        public float targetX;
+        public float targetY;
+        public float targetZ;
+        public float fieldOfView;
+
+        public SceneLookDto look;
+    }
+
+    /// <summary><see cref="SceneLook"/>. A zero <see cref="version"/> means "none saved".</summary>
+    [Serializable]
+    public sealed class SceneLookDto
+    {
+        public int version;
+        public int shading;
+        public int coloring;
+        public float lightAngle;
+        public float lightHeight;
+        public float ambient;
+        public float specular;
+        public bool shadows;
+        public bool occlusion;
+        public float effect;
+        public float colorScale;
+        public float colorOffset;
     }
 
     [Serializable]

@@ -33,7 +33,7 @@ namespace FractalVisio.Modules
             Load();
 
             // The state store has already restored the session by now: what is open is recent.
-            RecordRecent(services.Session.Definition);
+            RecordRecent(services.Session.Mode);
             services.Session.Changed += OnSessionChanged;
             services.Provide<IGalleryPreferences>(this);
         }
@@ -77,11 +77,11 @@ namespace FractalVisio.Modules
         {
             if ((change & SessionChange.Definition) != 0)
             {
-                RecordRecent(services.Session.Definition);
+                RecordRecent(services.Session.Mode);
             }
         }
 
-        private void RecordRecent(IFractalDefinition definition)
+        private void RecordRecent(IExplorationMode definition)
         {
             var id = definition?.Id;
             if (string.IsNullOrEmpty(id) || (recent.Count > 0 && recent[0] == id))

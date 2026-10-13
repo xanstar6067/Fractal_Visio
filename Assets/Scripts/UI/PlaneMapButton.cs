@@ -23,7 +23,7 @@ namespace FractalVisio.UI
         private readonly Image selection;
         private readonly PlaneMap map;
         private readonly IFractalThumbnails thumbnails;
-        private IFractalDefinition shownFor;
+        private IExplorationMode shownFor;
         private bool lit;
 
         private PlaneMapButton(AppServices services, GlassPanel surface, Image selection, PlaneMap map, Func<bool> isActive)
@@ -97,11 +97,13 @@ namespace FractalVisio.UI
         /// <summary>Show or hide it for the fractal on screen, redraw the thumbnail if needed, move the dot, light it while the map is open.</summary>
         public void Refresh()
         {
+            // A scene has no plane to pick a point on; the plane fractal behind it is not on screen.
             var definition = services.Session.Definition;
-            if (!ReferenceEquals(definition, shownFor))
+            var mode = services.Session.Mode;
+            if (!ReferenceEquals(mode, shownFor))
             {
-                shownFor = definition;
-                var planeDefinition = ParameterMapScreen.FindPlane(services, definition);
+                shownFor = mode;
+                var planeDefinition = services.Session.IsScene ? null : ParameterMapScreen.FindPlane(services, definition);
                 var shown = planeDefinition != null;
                 Surface.Root.gameObject.SetActive(shown);
                 if (shown)

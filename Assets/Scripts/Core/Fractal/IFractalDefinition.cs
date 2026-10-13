@@ -8,18 +8,13 @@ namespace FractalVisio.Core
     /// point: a new fractal is a sampler struct, one of these, and a shader. Nothing in
     /// <c>Rendering</c>, <c>App</c> or the UI is edited to add one - if it has to be, the
     /// abstraction leaked and the fix belongs here rather than in a special case there.
+    ///
+    /// Id, name and parameters come from <see cref="IExplorationMode"/>, which a 3D scene shares.
     /// </summary>
-    public interface IFractalDefinition
+    public interface IFractalDefinition : IExplorationMode
     {
-        /// <summary>Stable key used by saved state and bookmarks. Never rename a shipped one.</summary>
-        string Id { get; }
-
-        string DisplayName { get; }
-
         /// <summary>Where the view starts, and what "reset" returns to.</summary>
         ViewState DefaultView { get; }
-
-        IReadOnlyList<FractalParameterDescriptor> Parameters { get; }
 
         PrecisionTier SupportedPrecision { get; }
 

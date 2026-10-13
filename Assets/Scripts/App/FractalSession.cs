@@ -22,7 +22,13 @@ namespace FractalVisio.App
         Quality = 1 << 5,
 
         /// <summary>Interface scale and anything else about the UI rather than the picture.</summary>
-        Interface = 1 << 6
+        Interface = 1 << 6,
+
+        /// <summary>A 3D scene's camera.</summary>
+        Camera = 1 << 7,
+
+        /// <summary>A 3D scene's look: shading, colouring source, light. Unlike the plane's colouring, a new render.</summary>
+        Look = 1 << 8
     }
 
     /// <summary>Iteration budget and the scale thresholds that pick a backend and a precision.</summary>
@@ -89,6 +95,11 @@ namespace FractalVisio.App
     ///
     /// It owns the active fractal definition and its parameters, the palette and colouring, and -
     /// until stage 7 gives them a home of their own - the interface settings.
+    ///
+    /// What is on screen is a <see cref="Mode"/>: a plane fractal or a 3D scene (<see cref="Scene"/>,
+    /// with its <see cref="Camera"/> and <see cref="Look"/>). While a scene is open
+    /// <see cref="Definition"/> stays the last plane fractal - never null, so nothing that only a
+    /// plane fractal uses has to guard against it - and <see cref="Parameters"/> are the scene's.
     /// </summary>
     public sealed class FractalSession
     {
@@ -100,6 +111,9 @@ namespace FractalVisio.App
         private ColoringSettings coloring;
         private InterfaceSettings interfaceSettings;
         private double displayAspect = 1d;
+        private ISceneDefinition scene;
+        private SceneCamera camera;
+        private SceneLook look = SceneLook.Default;
 
         /// <param name="displayAspect">Width over height of the screen, for framing the default view; see <see cref="SetDisplayAspect"/>.</param>
         public FractalSession(IFractalDefinition definition, in RenderQuality quality, double displayAspect = 1d)
@@ -120,8 +134,50 @@ namespace FractalVisio.App
         public ViewState View => view;
         public RenderQuality Quality => quality;
 
-        /// <summary>The active fractal. Everything fractal-specific goes through it.</summary>
+        /// <summary>
+        /// The plane fractal - the one on screen, or while a scene is open the last one. Everything
+        /// specific to plane fractals goes through it.
+        /// </summary>
         public IFractalDefinition Definition => definition;
+
+        /// <summary>What is on screen: <see cref="Scene"/> while one is open, else <see cref="Definition"/>.</summary>
+        public IExplorationMode Mode => scene != null ? scene : definition;
+
+        /// <summary>The 3D scene on screen, or null while a plane fractal is.</summary>
+        public ISceneDefinition Scene => scene;
+
+        public bool IsScene => scene != null;
+
+        /// <summary>The scene's camera. Meaningless while no scene is open.</summary>
+        public SceneCamera Camera => camera;
+
+        /// <summary>How scenes are shaded and coloured. Kept across scenes, as the palette is across fractals.</summary>
+        public SceneLook Look => look;
+
+        /// <summary>
+        /// Where the scene's camera starts on this screen: its <see cref="ISceneDefinition.DefaultCamera"/>,
+        /// backed away on a screen held upright as a plane fractal's default view is widened.
+        /// </summary>
+        public SceneCamera DefaultCamera => scene != null ? FittedCamera(scene.DefaultCamera) : camera;
+
+        /// <summary>
+        /// How far in from the start, as the readouts print it: x1 at the default view, x10 at a view
+        /// ten times closer. A scene's is the default camera's distance over its camera's.
+        /// </summary>
+        public double Zoom
+        {
+            get
+            {
+                if (scene != null)
+                {
+                    var distance = (double)camera.Distance;
+                    return distance > 0d ? DefaultCamera.Distance / distance : 1d;
+                }
+
+                var scale = view.scale.AsDouble;
+                return scale > 0d ? DefaultView.scale.AsDouble / scale : 1d;
+            }
+        }
 
         public FractalParameterSet Parameters => parameters;
 
@@ -175,19 +231,86 @@ namespace FractalVisio.App
             }
         }
 
+        /// <summary>Open a plane fractal or a scene, whichever <paramref name="value"/> is.</summary>
+        public void SetMode(IExplorationMode value)
+        {
+            if (value is ISceneDefinition sceneValue)
+            {
+                SetScene(sceneValue);
+            }
+            else if (value is IFractalDefinition definitionValue)
+            {
+                SetDefinition(definitionValue);
+            }
+        }
+
         /// <summary>Switch fractal: view and parameters return to that fractal's own defaults.</summary>
         public void SetDefinition(IFractalDefinition value)
         {
-            if (value == null || ReferenceEquals(value, definition))
+            if (value == null || (scene == null && ReferenceEquals(value, definition)))
             {
                 return;
             }
 
+            scene = null;
             definition = value;
             parameters = FractalParameterSet.Defaults(value.Parameters);
             view = DefaultView;
             ApplyBudget(ref view);
             Raise(SessionChange.Definition | SessionChange.Parameters | SessionChange.View);
+        }
+
+        /// <summary>Open a 3D scene: camera and parameters start at its own defaults; the look is kept.</summary>
+        public void SetScene(ISceneDefinition value)
+        {
+            if (value == null || ReferenceEquals(value, scene))
+            {
+                return;
+            }
+
+            scene = value;
+            parameters = FractalParameterSet.Defaults(value.Parameters);
+            camera = DefaultCamera;
+            Raise(SessionChange.Definition | SessionChange.Parameters | SessionChange.Camera);
+        }
+
+        /// <summary>Move the scene's camera. A damaged camera keeps the current one; no scene, no change.</summary>
+        public void SetCamera(in SceneCamera value)
+        {
+            if (scene == null)
+            {
+                return;
+            }
+
+            var next = value.Sanitized(camera);
+            if (next.Equals(camera))
+            {
+                return;
+            }
+
+            camera = next;
+            Raise(SessionChange.Camera);
+        }
+
+        /// <summary>
+        /// A camera framed the way a default one is - for a screen at least as wide as it is tall -
+        /// fitted to this screen: for a scene's places, as <see cref="SetFramedView"/> is for a plane's.
+        /// </summary>
+        public void SetFramedCamera(in SceneCamera framing)
+        {
+            SetCamera(FittedCamera(framing));
+        }
+
+        public void SetLook(in SceneLook value)
+        {
+            var next = value.Sanitized();
+            if (next.Equals(look))
+            {
+                return;
+            }
+
+            look = next;
+            Raise(SessionChange.Look);
         }
 
         public void SetParameter(string key, double value)
@@ -324,8 +447,15 @@ namespace FractalVisio.App
             SetView(next);
         }
 
+        /// <summary>Back to the start: the default camera of a scene, the default view of a plane fractal.</summary>
         public void ResetView()
         {
+            if (scene != null)
+            {
+                SetCamera(DefaultCamera);
+                return;
+            }
+
             SetView(DefaultView);
         }
 
@@ -352,6 +482,20 @@ namespace FractalVisio.App
             return target;
         }
 
+        /// <summary>
+        /// The field of view is a height; upright, the same height leaves a shape's sides cut off, so
+        /// the camera backs away until what was the screen's height fits across its width.
+        /// </summary>
+        private SceneCamera FittedCamera(in SceneCamera target)
+        {
+            if (displayAspect >= 1d)
+            {
+                return target;
+            }
+
+            return target.WithDistance(Mathf.Min(target.Distance / (float)displayAspect, SceneCamera.MaximumDistance));
+        }
+
         /// <summary>The picture as saved state: fractal, view, parameters, palette and colouring.</summary>
         public FractalStateDto Capture()
         {
@@ -361,17 +505,26 @@ namespace FractalVisio.App
                 values[i] = new ParameterValueDto { key = parameters.Descriptors[i].Key, value = parameters[i] };
             }
 
+            // The look rides along with a plane fractal too, as the palette rides along with a scene:
+            // a bookmark puts back the whole appearance it was saved with.
+            var sceneState = StateCodec.ToDto(camera, look);
+            if (scene == null)
+            {
+                sceneState.distance = 0f;
+            }
+
             return new FractalStateDto
             {
                 version = FractalStateDto.CurrentVersion,
-                fractal = definition.Id,
+                fractal = Mode.Id,
                 centerX = view.x.ToInvariantString(),
                 centerY = view.y.ToInvariantString(),
                 scale = view.scale.ToInvariantString(),
                 rotation = view.rotation,
                 palette = palette.Id,
                 coloring = StateCodec.ToDto(coloring),
-                parameters = values
+                parameters = values,
+                scene = sceneState
             };
         }
 
@@ -382,7 +535,8 @@ namespace FractalVisio.App
         /// </summary>
         public bool Apply(
             FractalStateDto state,
-            System.Collections.Generic.IReadOnlyList<IFractalDefinition> catalog,
+            IReadOnlyList<IFractalDefinition> catalog,
+            IReadOnlyList<ISceneDefinition> scenes,
             PaletteCatalog palettes)
         {
             state = StateCodec.Upgrade(state);
@@ -401,19 +555,42 @@ namespace FractalVisio.App
                 }
             }
 
-            if (target == null)
+            ISceneDefinition targetScene = null;
+            for (var i = 0; target == null && scenes != null && i < scenes.Count; i++)
+            {
+                if (scenes[i].Id == state.fractal)
+                {
+                    targetScene = scenes[i];
+                }
+            }
+
+            if (target == null && targetScene == null)
             {
                 return false;
             }
 
-            var change = SessionChange.View | SessionChange.Parameters;
-            if (!ReferenceEquals(target, definition))
+            var change = SessionChange.Parameters;
+            if (target != null)
             {
-                definition = target;
-                change |= SessionChange.Definition;
+                change |= SessionChange.View;
+                if (!ReferenceEquals(target, definition) || scene != null)
+                {
+                    definition = target;
+                    scene = null;
+                    change |= SessionChange.Definition;
+                }
+            }
+            else
+            {
+                change |= SessionChange.Camera;
+                if (!ReferenceEquals(targetScene, scene))
+                {
+                    scene = targetScene;
+                    change |= SessionChange.Definition;
+                }
             }
 
-            var nextParameters = FractalParameterSet.Defaults(target.Parameters);
+            var nextParameters = FractalParameterSet.Defaults(Mode.Parameters);
             if (state.parameters != null)
             {
                 foreach (var value in state.parameters)
@@ -426,6 +603,22 @@ namespace FractalVisio.App
             }
 
             parameters = nextParameters;
+
+            var nextLook = StateCodec.LookFromDto(state.scene?.look, look);
+            if (!nextLook.Equals(look))
+            {
+                look = nextLook;
+                change |= SessionChange.Look;
+            }
+
+            if (targetScene != null)
+            {
+                // A saved camera is put back exactly as it was, like a saved view: never refit.
+                camera = StateCodec.CameraFromDto(state.scene, FittedCamera(targetScene.DefaultCamera));
+                ApplyAppearance(state, palettes, ref change);
+                Raise(change);
+                return true;
+            }
 
             var nextView = Fitted(target.DefaultView);
             if (HighPrecision.TryParse(state.centerX, out var x) &&
@@ -442,6 +635,14 @@ namespace FractalVisio.App
             Normalize(ref nextView);
             view = nextView;
 
+            ApplyAppearance(state, palettes, ref change);
+            Raise(change);
+            return true;
+        }
+
+        /// <summary>The palette and the plane's colouring a saved state names, where they still exist.</summary>
+        private void ApplyAppearance(FractalStateDto state, PaletteCatalog palettes, ref SessionChange change)
+        {
             var nextPalette = palettes?.Find(state.palette);
             if (nextPalette != null && !ReferenceEquals(nextPalette, palette))
             {
@@ -458,9 +659,6 @@ namespace FractalVisio.App
                     change |= SessionChange.Coloring;
                 }
             }
-
-            Raise(change);
-            return true;
         }
 
         /// <summary>

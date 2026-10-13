@@ -59,6 +59,7 @@ namespace FractalVisio.Bootstrap
         private UiRouter uiRouter;
         private float lastInteractionTime;
         private readonly ViewInertia inertia = new();
+        private readonly SceneGestures sceneGestures = new();
         private ViewState inertiaView;
 
         /// <summary>
@@ -129,6 +130,14 @@ namespace FractalVisio.Bootstrap
                 pressStartedOnUi = false;
             }
 
+            if (session.IsScene)
+            {
+                UpdateScene(gesture);
+                return;
+            }
+
+            sceneGestures.Stop();
+
             // Catching the picture with a finger stops the coast; so does anything else moving the
             // view - a bookmark, a reset, another fractal - or the coast would carry on from there.
             if (inertia.IsActive && (gesture.Touching || !SameView(session.View, inertiaView)))
@@ -170,6 +179,33 @@ namespace FractalVisio.Bootstrap
             var interacting = gesture.IsInteracting || inertia.IsActive ||
                               Time.unscaledTime - lastInteractionTime < settleDelay;
             presenter.Tick(interacting, inertia);
+
+            for (var i = 0; i < modules.Count; i++)
+            {
+                modules[i].Tick();
+            }
+        }
+
+        /// <summary>
+        /// A 3D scene's frame: fingers move its camera (<see cref="SceneGestures"/>), and the picture
+        /// counts as moving for the settle delay after they stop, as the plane's does.
+        /// </summary>
+        private void UpdateScene(in FractalGestureFrame gesture)
+        {
+            inertia.Stop();
+            if (gesture.ResetRequested)
+            {
+                ResetView();
+            }
+
+            if (sceneGestures.Update(session, gesture, presenter.DisplayViewport, session.Interface.InertiaSeconds))
+            {
+                lastInteractionTime = Time.unscaledTime;
+            }
+
+            var interacting = gesture.IsInteracting || sceneGestures.IsSpinning ||
+                              Time.unscaledTime - lastInteractionTime < settleDelay;
+            presenter.Tick(interacting);
 
             for (var i = 0; i < modules.Count; i++)
             {
@@ -266,6 +302,7 @@ namespace FractalVisio.Bootstrap
                 presenter,
                 presenter,
                 FractalCatalog.All,
+                FractalCatalog.Scenes,
                 FractalCatalog.Gallery,
                 new PaletteCatalog(storage),
                 storage,

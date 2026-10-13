@@ -94,12 +94,12 @@ namespace FractalVisio.UI
         private string Describe(Bookmark bookmark)
         {
             var name = bookmark.state?.fractal ?? string.Empty;
-            var catalog = Services.Catalog;
-            for (var i = 0; i < catalog.Count; i++)
+            var gallery = Services.Gallery;
+            for (var i = 0; i < gallery.Count; i++)
             {
-                if (catalog[i].Id == name)
+                if (gallery[i].Id == name)
                 {
-                    name = Strings.FractalName(catalog[i]);
+                    name = Strings.FractalName(gallery[i].Mode);
                     break;
                 }
             }

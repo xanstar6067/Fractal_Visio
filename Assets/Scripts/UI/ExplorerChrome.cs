@@ -32,7 +32,7 @@ namespace FractalVisio.UI
         private CanvasGroup group;
         private GlassPanel pill;
         private Text pillLabel;
-        private IFractalDefinition labelledDefinition;
+        private IExplorationMode labelledDefinition;
         private GlassPanel toolbar;
         private PlaneMapButton planeButton;
         private float visibility = 1f;
@@ -119,7 +119,7 @@ namespace FractalVisio.UI
                 surfaces[i].SetBackdrop(backdrop);
             }
 
-            if (!ReferenceEquals(services.Session.Definition, labelledDefinition))
+            if (!ReferenceEquals(services.Session.Mode, labelledDefinition))
             {
                 LabelPill();
             }
@@ -210,7 +210,7 @@ namespace FractalVisio.UI
         /// </summary>
         private void LabelPill()
         {
-            labelledDefinition = services.Session.Definition;
+            labelledDefinition = services.Session.Mode;
             var name = services.Strings.FractalName(labelledDefinition);
             pillLabel.text = name;
             pillLabel.lineSpacing = 1f;

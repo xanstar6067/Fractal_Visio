@@ -19,7 +19,10 @@ namespace FractalVisio.Gestures
             bool hasFling = false,
             FlingVelocity fling = default,
             bool tapped = false,
-            Vector2 tapPosition = default)
+            Vector2 tapPosition = default,
+            bool began = false,
+            int pointers = 0,
+            Vector2 pointer = default)
         {
             IsInteracting = isInteracting;
             Changed = changed;
@@ -35,6 +38,9 @@ namespace FractalVisio.Gestures
             Fling = fling;
             Tapped = tapped;
             TapPosition = tapPosition;
+            Began = began;
+            Pointers = pointers;
+            Pointer = pointer;
         }
 
         /// <summary>
@@ -78,6 +84,21 @@ namespace FractalVisio.Gestures
 
         /// <summary>Screen point of the tap, in the same pixels as the touches.</summary>
         public Vector2 TapPosition { get; }
+
+        /// <summary>
+        /// The gesture engaged this frame - past its dead zone, nothing applied yet. What it acts on is
+        /// decided now: a 3D scene picks the point under <see cref="Pointer"/> to turn and zoom about.
+        /// </summary>
+        public bool Began { get; }
+
+        /// <summary>Fingers (or mouse buttons) driving the gesture: 1 a drag, 2 a pinch, 0 none (the wheel).</summary>
+        public int Pointers { get; }
+
+        /// <summary>
+        /// Where the gesture acts, in screen pixels: the finger of a drag - where it went down, on the
+        /// frame it begins - the middle of a pinch, the cursor of the wheel.
+        /// </summary>
+        public Vector2 Pointer { get; }
 
         public bool HasZoom => ZoomRatio > 0f && Mathf.Abs(ZoomRatio - 1f) > 0.0001f;
         public bool HasRotation => Mathf.Abs(RotationDelta) > 0f;
@@ -324,13 +345,15 @@ namespace FractalVisio.Gestures
                 dragEngaged = true;
                 Engage(GestureKind.Drag, touch.position);
                 return new FractalGestureFrame(
-                    true, false, Vector2.zero, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false, touching: true);
+                    true, false, Vector2.zero, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false, touching: true,
+                    began: true, pointers: 1, pointer: touch.position - dragTravel);
             }
 
             AddSample(touch.deltaPosition, 0f, 0f);
             var moved = touch.deltaPosition.sqrMagnitude > 0f;
             return new FractalGestureFrame(
-                true, moved, touch.deltaPosition, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false, touching: true);
+                true, moved, touch.deltaPosition, Vector2.zero, Vector2.zero, 1f, 0f, Vector2.zero, false, touching: true,
+                pointers: 1, pointer: touch.position);
         }
 
         private FractalGestureFrame ReadPinch()
@@ -380,7 +403,8 @@ namespace FractalVisio.Gestures
                 pinchEngaged = true;
                 Engage(GestureKind.Pinch, currentCenter);
                 return new FractalGestureFrame(
-                    true, false, Vector2.zero, currentCenter, currentCenter, 1f, 0f, currentCenter, false, touching: true);
+                    true, false, Vector2.zero, currentCenter, currentCenter, 1f, 0f, currentCenter, false, touching: true,
+                    began: true, pointers: 2, pointer: currentCenter);
             }
 
             lastPivot = currentCenter;
@@ -401,7 +425,9 @@ namespace FractalVisio.Gestures
                 rotationDelta,
                 currentCenter,
                 false,
-                touching: true);
+                touching: true,
+                pointers: 2,
+                pointer: currentCenter);
         }
 
         private FractalGestureFrame ReadMouse()
@@ -447,6 +473,7 @@ namespace FractalVisio.Gestures
 
             var rawDelta = pressed && mouseWasPressed ? position - previousMousePosition : Vector2.zero;
             var panDelta = Vector2.zero;
+            var began = false;
 
             if (pressed)
             {
@@ -462,6 +489,7 @@ namespace FractalVisio.Gestures
                     if (dragTravel.magnitude >= DragSlop)
                     {
                         dragEngaged = true;
+                        began = true;
                         Engage(GestureKind.Drag, position);
                     }
                 }
@@ -496,7 +524,7 @@ namespace FractalVisio.Gestures
             mouseWasPressed = pressed;
 
             return new FractalGestureFrame(
-                changed,
+                changed || began,
                 changed,
                 panDelta,
                 position,
@@ -507,7 +535,10 @@ namespace FractalVisio.Gestures
                 reset,
                 touching: pressed,
                 tapped: tapped,
-                tapPosition: position);
+                tapPosition: position,
+                began: began,
+                pointers: pressed && dragEngaged ? 1 : 0,
+                pointer: began ? position - dragTravel : position);
         }
 
         private static FractalGestureFrame Resting() =>

@@ -43,6 +43,7 @@ namespace FractalVisio.Modules
         // A capture waiting for a finished frame of the view it is for, and the one being read back.
         private string captureId;
         private ViewState captureView;
+        private SceneCamera captureCamera;
         private float captureRequestedAt;
         private int idleFrames;
         private string grabbingId;
@@ -84,7 +85,7 @@ namespace FractalVisio.Modules
             }
 
             // The user has moved on: the frame on screen is not the bookmark any more.
-            if (!SameView(services.Session.View, captureView))
+            if (!SameView(services.Session.View, captureView) || !services.Session.Camera.Equals(captureCamera))
             {
                 captureId = null;
                 return;
@@ -140,7 +141,7 @@ namespace FractalVisio.Modules
         public bool Open(Bookmark bookmark)
         {
             if (bookmark?.state == null || services == null ||
-                !services.Session.Apply(bookmark.state, services.Catalog, services.Palettes))
+                !services.Session.Apply(bookmark.state, services.Catalog, services.Scenes, services.Palettes))
             {
                 return false;
             }
@@ -235,19 +236,18 @@ namespace FractalVisio.Modules
         /// </summary>
         private static string DescribeCurrent(FractalSession session, IStringCatalog strings)
         {
-            var reference = session.DefaultView.scale.AsDouble;
-            var scale = session.View.scale.AsDouble;
-            var zoom = scale > 0d ? reference / scale : 1d;
+            var zoom = session.Zoom;
             var depth = zoom < 1000d
                 ? zoom.ToString("0.#", CultureInfo.InvariantCulture)
                 : zoom.ToString("0.#e+00", CultureInfo.InvariantCulture);
-            return strings.FractalName(session.Definition) + "  x" + depth;
+            return strings.FractalName(session.Mode) + "  x" + depth;
         }
 
         private void RequestCapture(string id)
         {
             captureId = id;
             captureView = services.Session.View;
+            captureCamera = services.Session.Camera;
             captureRequestedAt = Time.unscaledTime;
             idleFrames = 0;
         }

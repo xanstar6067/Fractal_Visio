@@ -7,7 +7,7 @@ namespace FractalVisio.Fractals
     /// <summary>
     /// Every fractal the app knows, and where the gallery files it. Adding one is a line here plus
     /// its three files - or, for a member of the folded polynomial family, a line in
-    /// <see cref="FoldedFamily"/>. Its section and folder decide the group it appears under, and the
+    /// <see cref="FoldedFamily"/>; a 3D scene is a line here plus its definition and shader. Its section and folder decide the group it appears under, and the
     /// order of the lines is the order of the gallery - sections and folders included, in order of
     /// first appearance.
     ///
@@ -22,6 +22,7 @@ namespace FractalVisio.Fractals
         {
             public const string MandelbrotFamily = "mandelbrot-family";
             public const string JuliaFamily = "julia-family";
+            public const string Scenes = "fractals-3d";
         }
 
         /// <summary>The folded family's own folders, after the classics. Declared before
@@ -38,7 +39,13 @@ namespace FractalVisio.Fractals
 
         private static readonly IFractalDefinition[] Definitions = BuildDefinitions();
 
+        private static readonly ISceneDefinition[] SceneDefinitions = BuildScenes();
+
+        /// <summary>The plane fractals, in gallery order.</summary>
         public static IReadOnlyList<IFractalDefinition> All => Definitions;
+
+        /// <summary>The 3D scenes, in gallery order.</summary>
+        public static IReadOnlyList<ISceneDefinition> Scenes => SceneDefinitions;
 
         /// <summary>The gallery: every definition with its section and folder, in display order.</summary>
         public static IReadOnlyList<CatalogEntry> Gallery => Entries;
@@ -101,18 +108,40 @@ namespace FractalVisio.Fractals
                 }
             }
 
+            // Three dimensions: ray marched on the GPU, turned with a finger.
+            void Scene(ISceneDefinition scene) => entries.Add(new CatalogEntry(scene, Sections.Scenes));
+
+            Scene(new MandelbulbDefinition());
+
             return entries.ToArray();
         }
 
         private static IFractalDefinition[] BuildDefinitions()
         {
-            var definitions = new IFractalDefinition[Entries.Length];
+            var definitions = new List<IFractalDefinition>();
             for (var i = 0; i < Entries.Length; i++)
             {
-                definitions[i] = Entries[i].Definition;
+                if (Entries[i].Definition != null)
+                {
+                    definitions.Add(Entries[i].Definition);
+                }
             }
 
-            return definitions;
+            return definitions.ToArray();
+        }
+
+        private static ISceneDefinition[] BuildScenes()
+        {
+            var scenes = new List<ISceneDefinition>();
+            for (var i = 0; i < Entries.Length; i++)
+            {
+                if (Entries[i].Scene != null)
+                {
+                    scenes.Add(Entries[i].Scene);
+                }
+            }
+
+            return scenes.ToArray();
         }
     }
 }

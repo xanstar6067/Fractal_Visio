@@ -19,6 +19,9 @@ namespace FractalVisio.App
     ///
     /// Colour is likewise kept out of the render: the CPU renderer accumulates escape values and
     /// applies a palette at publish time, so a palette change costs a remap rather than a render.
+    ///
+    /// While the session shows a 3D scene the frame is <see cref="ScenePresenter"/>'s and the plane
+    /// engines rest; status, backdrop and render size then describe the scene's picture.
     /// </summary>
     public sealed class FractalPresenter : IRenderStatusSource, IBackdropSource, IDisposable
     {
@@ -72,6 +75,7 @@ namespace FractalVisio.App
         private WideFieldLayer wideLayer;
         private FrameCompositor compositor;
         private readonly RetainedFrame retained = new();
+        private readonly ScenePresenter scenePresenter;
         private IViewForecast forecast;
 
         private RenderTexture interactiveGpuTexture;
@@ -113,6 +117,7 @@ namespace FractalVisio.App
             cpuRenderer = new FractalCpuRenderer(colorMapper, workerBudget, false);
             wideLayer = new WideFieldLayer(colorMapper, workerBudget);
             compositor = new FrameCompositor(session.Coloring.InteriorColor);
+            scenePresenter = new ScenePresenter(profile);
             cpuRenderer.FrameReplacing += OnMainFrameReplacing;
 
             session.Changed += OnSessionChanged;
@@ -127,6 +132,22 @@ namespace FractalVisio.App
         {
             get
             {
+                if (session.IsScene)
+                {
+                    return new RenderStatus(
+                        RenderBackend.GpuFloat,
+                        scenePresenter.Interacting,
+                        0,
+                        false,
+                        PrecisionTier.Float,
+                        scenePresenter.IsBusy,
+                        scenePresenter.IsBusy ? 1 : 2,
+                        2,
+                        scenePresenter.Progress,
+                        workerBudget.Allowed,
+                        workerBudget.Total);
+                }
+
                 var busy = cpuRenderer != null && cpuRenderer.IsBusy;
                 var precision = currentBackend == RenderBackend.GpuFloat
                     ? PrecisionTier.Float
@@ -168,9 +189,11 @@ namespace FractalVisio.App
             : string.Empty;
 
         /// <summary>Pixel size of the buffer the fractal is actually computed into, for the HUD.</summary>
-        public Vector2Int RenderSize => currentBackend == RenderBackend.GpuFloat
-            ? new Vector2Int(settledViewport.Width, settledViewport.Height)
-            : cpuBuffer;
+        public Vector2Int RenderSize => session.IsScene
+            ? scenePresenter.RenderSize
+            : currentBackend == RenderBackend.GpuFloat
+                ? new Vector2Int(settledViewport.Width, settledViewport.Height)
+                : cpuBuffer;
 
         /// <summary>What is on screen, for the UI backdrop. See <see cref="IBackdropSource"/>.</summary>
         Texture IBackdropSource.Texture => targetImage != null ? targetImage.texture : null;
@@ -187,6 +210,12 @@ namespace FractalVisio.App
             }
 
             forecast = viewForecast;
+
+            if (session.IsScene)
+            {
+                TickScene(interacting);
+                return;
+            }
 
             if (Screen.width != cachedScreenWidth ||
                 Screen.height != cachedScreenHeight ||
@@ -237,6 +266,7 @@ namespace FractalVisio.App
             }
 
             retained.Dispose();
+            scenePresenter.Dispose();
             cpuRenderer?.Dispose();
             gpuRenderer?.Dispose();
             wideLayer?.Dispose();
@@ -267,6 +297,43 @@ namespace FractalVisio.App
             if ((change & (SessionChange.Palette | SessionChange.Coloring)) != 0)
             {
                 coloringDirty = true;
+            }
+
+            // Leaving a scene: its frames are of nothing on screen any more, and full-screen render
+            // textures are worth giving back. A plane frame from before the scene shows something
+            // else too, so the plane engines start clean.
+            if ((change & SessionChange.Definition) != 0)
+            {
+                if (session.IsScene)
+                {
+                    scenePresenter.Invalidate();
+                }
+                else
+                {
+                    scenePresenter.Release();
+                }
+
+                placeholdersStale = true;
+                hasRequestedView = false;
+            }
+        }
+
+        /// <summary>
+        /// A scene's frame. The plane engines stop computing - a render left running for the
+        /// fractal before would compete for the cores and publish nothing anyone sees.
+        /// </summary>
+        private void TickScene(bool interacting)
+        {
+            retained.Release();
+            cpuRenderer?.Invalidate();
+            wideLayer?.Suspend();
+            workerBudget.Regulate(Time.unscaledDeltaTime, TargetFrameSeconds, false);
+
+            scenePresenter.Tick(session, interacting, session.Quality.RenderScale);
+            if (scenePresenter.Displayed != null)
+            {
+                targetImage.texture = scenePresenter.Displayed;
+                targetImage.uvRect = FullRect;
             }
         }
 

@@ -74,7 +74,7 @@ namespace FractalVisio.UI
         private float gridViewportHeight;
         private int preferencesVersion;
         private int shownPreferencesVersion;
-        private IFractalDefinition shownCurrent;
+        private IExplorationMode shownCurrent;
 
         // Search: whether the field is up, and what is in it. Kept like the filter.
         private bool searching;
@@ -176,7 +176,7 @@ namespace FractalVisio.UI
                 }
             }
 
-            if (!ReferenceEquals(Services.Session.Definition, shownCurrent))
+            if (!ReferenceEquals(Services.Session.Mode, shownCurrent))
             {
                 RebuildGrid(true);
             }
@@ -420,7 +420,7 @@ namespace FractalVisio.UI
             {
                 var entry = gallery[i];
                 var haystack = Normalize(
-                    Strings.FractalName(entry.Definition) + " " + entry.Definition.DisplayName + " " +
+                    Strings.FractalName(entry.Mode) + " " + entry.Mode.DisplayName + " " +
                     Strings.FolderName(entry.Folder) + " " + Strings.SectionName(entry.Section));
                 var all = true;
                 for (var w = 0; w < words.Length && all; w++)
@@ -621,7 +621,7 @@ namespace FractalVisio.UI
             continueTitle = null;
             shownPreferencesVersion = preferencesVersion;
             shownBookmarksVersion = bookmarksVersion;
-            shownCurrent = Services.Session.Definition;
+            shownCurrent = Services.Session.Mode;
 
             gridContent = UiFactory.CreateRect("GridContent", gridViewport);
             gridContent.anchorMin = new Vector2(0f, 1f);
@@ -756,7 +756,7 @@ namespace FractalVisio.UI
                     continue;
                 }
 
-                if (seenSections.Add(entry.Section) || ReferenceEquals(entry.Definition, Services.Session.Definition))
+                if (seenSections.Add(entry.Section) || ReferenceEquals(entry.Mode, Services.Session.Mode))
                 {
                     openFolders.Add(FolderKey(entry.Section, entry.Folder));
                 }
@@ -906,7 +906,7 @@ namespace FractalVisio.UI
 
         private CardView BuildCard(in CatalogEntry entry, float x, float y)
         {
-            var definition = entry.Definition;
+            var definition = entry.Mode;
             var radius = UiTheme.PxInt(UiTheme.CardRadius);
             var padding = UiTheme.Px(10f);
 
@@ -941,7 +941,7 @@ namespace FractalVisio.UI
                 TextAnchor.UpperLeft, fitToRect: true);
             Place(about.rectTransform, padding, -aboutTop, textWidth, cardHeight - aboutTop - UiTheme.Px(6f));
 
-            if (ReferenceEquals(definition, Services.Session.Definition))
+            if (ReferenceEquals(definition, Services.Session.Mode))
             {
                 // The fractal open right now: the card to tap to carry on with it.
                 var outline = UiFactory.CreateImage(
@@ -1145,13 +1145,11 @@ namespace FractalVisio.UI
             }
 
             var session = Services.Session;
-            var reference = session.DefaultView.scale.AsDouble;
-            var scale = session.View.scale.AsDouble;
-            var zoom = scale > 0d ? reference / scale : 1d;
+            var zoom = session.Zoom;
             var depth = zoom < 1000d
                 ? zoom.ToString("0.#", CultureInfo.InvariantCulture)
                 : zoom.ToString("0.#e+00", CultureInfo.InvariantCulture);
-            var title = Strings.Format("gallery.continue_detail", Strings.FractalName(session.Definition), depth);
+            var title = Strings.Format("gallery.continue_detail", Strings.FractalName(session.Mode), depth);
             if (continueTitle.text != title)
             {
                 continueTitle.text = title;
@@ -1178,9 +1176,9 @@ namespace FractalVisio.UI
         {
             // The same fractal keeps its view: tapping the card of what is open means "carry on",
             // and resetting a deep zoom by accident would lose it. Reset lives in the fractal panel.
-            if (!ReferenceEquals(Services.Session.Definition, entry.Definition))
+            if (!ReferenceEquals(Services.Session.Mode, entry.Mode))
             {
-                Services.Session.SetDefinition(entry.Definition);
+                Services.Session.SetMode(entry.Mode);
             }
 
             Close();

@@ -24,6 +24,7 @@ namespace FractalVisio.App
             IRenderStatusSource render,
             IBackdropSource backdrop,
             IReadOnlyList<IFractalDefinition> catalog,
+            IReadOnlyList<ISceneDefinition> scenes,
             IReadOnlyList<CatalogEntry> gallery,
             PaletteCatalog palettes,
             IAppStorage storage,
@@ -35,6 +36,7 @@ namespace FractalVisio.App
             Render = render;
             Backdrop = backdrop;
             Catalog = catalog ?? Array.Empty<IFractalDefinition>();
+            Scenes = scenes ?? Array.Empty<ISceneDefinition>();
             Gallery = gallery ?? Array.Empty<CatalogEntry>();
             Palettes = palettes;
             Storage = storage;
@@ -54,9 +56,12 @@ namespace FractalVisio.App
         /// </summary>
         public IReadOnlyList<IFractalDefinition> Catalog { get; }
 
+        /// <summary>Every 3D scene the app knows, as Core interfaces - the other half of what the gallery opens.</summary>
+        public IReadOnlyList<ISceneDefinition> Scenes { get; }
+
         /// <summary>
-        /// The same fractals as <see cref="Catalog"/>, as the gallery shows them: each with its
-        /// section and preview framing, in display order.
+        /// The fractals of <see cref="Catalog"/> and the scenes of <see cref="Scenes"/>, as the gallery
+        /// shows them: each with its section and preview framing, in display order.
         /// </summary>
         public IReadOnlyList<CatalogEntry> Gallery { get; }
 

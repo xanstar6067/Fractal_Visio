@@ -87,6 +87,77 @@ namespace FractalVisio.Core
             return result.Sanitized();
         }
 
+        public static SceneStateDto ToDto(in SceneCamera camera, in SceneLook look)
+        {
+            return new SceneStateDto
+            {
+                qx = camera.Orientation.x,
+                qy = camera.Orientation.y,
+                qz = camera.Orientation.z,
+                qw = camera.Orientation.w,
+                distance = camera.Distance,
+                targetX = camera.Target.x,
+                targetY = camera.Target.y,
+                targetZ = camera.Target.z,
+                fieldOfView = camera.FieldOfView,
+                look = new SceneLookDto
+                {
+                    version = 1,
+                    shading = (int)look.Shading,
+                    coloring = (int)look.Coloring,
+                    lightAngle = look.LightAngle,
+                    lightHeight = look.LightHeight,
+                    ambient = look.Ambient,
+                    specular = look.Specular,
+                    shadows = look.Shadows,
+                    occlusion = look.Occlusion,
+                    effect = look.Effect,
+                    colorScale = look.ColorScale,
+                    colorOffset = look.ColorOffset
+                }
+            };
+        }
+
+        /// <summary>The saved camera, or <paramref name="fallback"/> when there is none or it is damaged.</summary>
+        public static SceneCamera CameraFromDto(SceneStateDto dto, in SceneCamera fallback)
+        {
+            if (dto == null || !(dto.distance > 0f))
+            {
+                return fallback;
+            }
+
+            var camera = new SceneCamera(
+                new Quaternion(dto.qx, dto.qy, dto.qz, dto.qw),
+                dto.distance,
+                new Vector3(dto.targetX, dto.targetY, dto.targetZ),
+                dto.fieldOfView);
+            return camera.Sanitized(fallback);
+        }
+
+        /// <summary>The saved look, or <paramref name="fallback"/> when there is none.</summary>
+        public static SceneLook LookFromDto(SceneLookDto dto, in SceneLook fallback)
+        {
+            if (dto == null || dto.version < 1)
+            {
+                return fallback;
+            }
+
+            return new SceneLook
+            {
+                Shading = (SceneShading)dto.shading,
+                Coloring = (SceneColoring)dto.coloring,
+                LightAngle = dto.lightAngle,
+                LightHeight = dto.lightHeight,
+                Ambient = dto.ambient,
+                Specular = dto.specular,
+                Shadows = dto.shadows,
+                Occlusion = dto.occlusion,
+                Effect = dto.effect,
+                ColorScale = dto.colorScale,
+                ColorOffset = dto.colorOffset
+            }.Sanitized();
+        }
+
         public static PaletteDto ToDto(PaletteData palette)
         {
             var stops = palette.Stops;
