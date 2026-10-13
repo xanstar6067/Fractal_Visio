@@ -16,6 +16,9 @@ namespace FractalVisio.App
     ///
     /// It lives in App rather than in Modules because it needs a renderer, and no module is handed
     /// one. It is still an <see cref="IAppModule"/> so the bootstrap ticks it like the rest.
+    ///
+    /// A 3D scene's tile is its default camera, ray marched in one draw at full quality in the
+    /// session's look: a tile is small enough for that to take a few milliseconds.
     /// </summary>
     public sealed class ThumbnailModule : IAppModule, IFractalThumbnails
     {
@@ -41,6 +44,7 @@ namespace FractalVisio.App
         private int textureCount;
         private AppServices services;
         private FractalGpuRenderer renderer;
+        private SceneGpuRenderer sceneRenderer;
         private bool coloringDirty = true;
 
         public string Id => "thumbnails";
@@ -49,6 +53,7 @@ namespace FractalVisio.App
         {
             services = context;
             renderer = new FractalGpuRenderer();
+            sceneRenderer = new SceneGpuRenderer();
             services.Session.Changed += OnSessionChanged;
             services.Provide<IFractalThumbnails>(this);
         }
@@ -133,12 +138,14 @@ namespace FractalVisio.App
             textureCount = 0;
             renderer?.Dispose();
             renderer = null;
+            sceneRenderer?.Dispose();
+            sceneRenderer = null;
             services = null;
         }
 
         public Texture Get(in CatalogEntry entry, int size)
         {
-            if (renderer == null || entry.Definition == null)
+            if (renderer == null || entry.Mode == null)
             {
                 return null;
             }
@@ -174,7 +181,7 @@ namespace FractalVisio.App
 
         private void OnSessionChanged(SessionChange change)
         {
-            if ((change & (SessionChange.Palette | SessionChange.Coloring)) != 0)
+            if ((change & (SessionChange.Palette | SessionChange.Coloring | SessionChange.Look)) != 0)
             {
                 coloringDirty = true;
             }
@@ -190,6 +197,7 @@ namespace FractalVisio.App
             coloringDirty = false;
             ColoringVersion++;
             renderer.SetColoring(services.Session.Palette, services.Session.Coloring);
+            sceneRenderer.SetPalette(services.Session.Palette);
             foreach (var slot in slots.Values)
             {
                 slot.Stale = true;
@@ -198,6 +206,13 @@ namespace FractalVisio.App
 
         private void Draw(Slot slot)
         {
+            var scene = slot.Entry.Scene;
+            if (scene != null)
+            {
+                DrawScene(slot, scene);
+                return;
+            }
+
             var definition = slot.Entry.Definition;
             if (!renderer.Supports(definition))
             {
@@ -222,6 +237,29 @@ namespace FractalVisio.App
                 view,
                 view.iterations,
                 slot.Texture);
+            slot.Stale = false;
+        }
+
+        private void DrawScene(Slot slot, ISceneDefinition scene)
+        {
+            if (!sceneRenderer.Supports(scene))
+            {
+                slot.Supported = false;
+                Release(slot);
+                return;
+            }
+
+            if (slot.Texture == null || slot.Texture.width != slot.Size || !slot.Texture.IsCreated())
+            {
+                Release(slot);
+                slot.Texture = CreateTarget(slot.Size, slot.Entry.Id);
+                textureCount++;
+            }
+
+            var size = new Vector2Int(slot.Size, slot.Size);
+            var frame = new SceneFrame(
+                scene, FractalParameterSet.Defaults(scene.Parameters), scene.DefaultCamera, services.Session.Look, draft: false);
+            sceneRenderer.Render(frame, size, new RectInt(0, 0, size.x, size.y), null, 0, size.y, slot.Texture);
             slot.Stale = false;
         }
 

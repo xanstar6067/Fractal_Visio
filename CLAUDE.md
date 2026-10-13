@@ -206,6 +206,15 @@ any feature that is not a bug fix, and update it when a design decision changes.
   (`ReferenceOrbit.Extra`), which is why a cycle is capped at 16 steps. The fractal panel edits the
   rows (`SequenceBlock`, `StepRow`, the step sheet `StepScreen`); edits go through `StepSequenceEdit`
   as one `FractalSession.SetParameters` change.
+- **3D scenes** (docs\ARCHITECTURE.md §5.14) are the second kind of mode: the gallery opens an
+  `IExplorationMode`, either an `IFractalDefinition` or an `ISceneDefinition` (ray-marched distance
+  estimate; its CPU copy, `CreateDistance`, finds the point under a finger). While a scene is open
+  `FractalSession.Definition` stays the last plane fractal - never null - and `Mode`, `Scene`, `Camera`
+  and `Look` describe the scene; check `IsScene` before showing anything plane-only. A scene's shader
+  writes `SceneMap` and includes `Common/SceneCommon.hlsl` and `Common/SceneMarch.hlsl` (a port of the
+  WPF `Fractal3DShader`); keep `SceneMap` and the definition's CPU estimate line for line the same.
+  `ScenePresenter` draws a draft on every change and builds the full frame in bands over later frames:
+  never ray march a whole phone-sized frame in one draw. The light is screen-relative, as the relief's.
 - All mutable state belongs to `FractalSession`; UI and modules read it and call its
   setters, never the renderers directly. Clamping and the iteration budget live in
   `FractalSession.SetView` alone - do not recompute either at a call site.

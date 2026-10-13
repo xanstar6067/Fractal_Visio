@@ -52,6 +52,9 @@ gestures.two_fingers = Two fingers zoom in and out and turn it
 gestures.three_fingers = Three fingers bring back the starting view
 gestures.tap = A tap hides the buttons or brings them back
 gestures.got_it = Got it
+gestures.scene_title = How to turn a 3D shape
+gestures.scene_one_finger = One finger: turn about the point under it
+gestures.scene_two_fingers = Two fingers: come closer to the point, slide, roll
 
 # Gallery - the main menu
 gallery.title = Fractals
@@ -73,6 +76,7 @@ gallery.exit_hint = Press back again to leave
 # Gallery sections: section.<id>, the ids in FractalCatalog.Sections
 section.mandelbrot-family = Mandelbrot family
 section.julia-family = Julia family
+section.fractals-3d = 3D fractals
 # Gallery folders inside a section: folder.<id>, the ids in FoldedFamily.Folders
 folder.classic = Classic
 folder.perpendicular = Perpendicular and Mandelbar
@@ -89,6 +93,7 @@ toolbar.settings = Settings
 
 # Fractal panel
 fractal_panel.reset_view = Reset view
+fractal_panel.level_horizon = Level the horizon
 fractal_panel.all_fractals = All fractals
 # A fractal whose parameter is a point on another fractal's plane: a Julia set's C
 fractal_panel.constant = CONSTANT C
@@ -127,6 +132,36 @@ colour.relief.off = Off
 colour.relief.on = On
 colour.relief.depth = Depth
 colour.relief.shine = Shine
+colour.shading = Shading
+colour.shading.classic = Classic
+colour.shading.clay = Clay
+colour.shading.metal = Metal
+colour.shading.glow = Glow
+colour.shading.density = Density
+colour.shading.studio = Studio
+colour.shading.toon = Cartoon
+colour.shading.translucent = Translucent
+colour.shading.mirror = Mirror
+colour.source = Colour by
+colour.source.material = Material
+colour.source.normal = Normal
+colour.source.orbit = Orbit
+colour.source.depth = Depth
+colour.source.cross = Axes
+colour.source.iteration = Iteration
+colour.source.escape = Escape
+colour.source.height = Height
+colour.source.occlusion = Folds
+colour.source.fresnel = Edges
+colour.source.steps = Steps
+colour.light = Light
+colour.light.ambient = Ambient
+colour.light.specular = Highlight
+colour.shadows = Shadows
+colour.occlusion = Shaded folds
+colour.effect = Effect strength
+colour.palette_scale = Palette scale
+colour.palette_offset = Palette shift
 
 # Bookmarks panel
 bookmarks.title = Bookmarks
@@ -481,6 +516,16 @@ fractal.julia-simonobrot.power = Power
 fractal.julia-simonobrot.inversion = Inversion
 fractal.hybrid = Hybrid constructor
 fractal.hybrid.about = Formulas in turn: each step a formula, its power and its repeats, then the cycle starts over. Build your own in the Fractal panel.
+fractal.mandelbulb = Mandelbulb
+fractal.mandelbulb.about = The Mandelbrot set in three dimensions: z to the power n in spherical coordinates, plus c. Turn it with a finger, come closer with two.
+fractal.mandelbulb.power = Power
+fractal.mandelbulb.iterations = Iterations
+fractal.mandelbulb.bailout = Escape radius
+fractal.mandelbulb.place.classic = Power 8, classic view
+fractal.mandelbulb.place.north-pole = Power 8, north pole
+fractal.mandelbulb.place.smooth-petals = Power 3, smooth petals
+fractal.mandelbulb.place.needle-crown = Power 16, crown of needles
+fractal.mandelbulb.place.fold-closeup = Close-up of a fold
 fractal.hybrid.place.celtic-mandelbar = Celtic × Mandelbar
 fractal.hybrid.place.ship-and-bulb = Ship and cube
 fractal.hybrid.place.perpendicular-weave = Perpendicular weave

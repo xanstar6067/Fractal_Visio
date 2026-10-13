@@ -17,6 +17,10 @@ namespace FractalVisio.App
     /// per screen); past it the CPU does, with perturbation where the explorer would use it.
     /// Supersampling renders each tile that many times larger and averages blocks of samples.
     ///
+    /// A 3D scene's tiles are windows into one large ray-marched image, drawn by the scene renderer
+    /// at full quality; the camera's field of view narrows for an image wider than the screen, so
+    /// the image is the screen's picture cropped as a plane fractal's is.
+    ///
     /// It lives in App rather than in Modules for the reason <see cref="ThumbnailModule"/> does: it
     /// needs renderers, and no module is handed one.
     /// </summary>
@@ -26,6 +30,7 @@ namespace FractalVisio.App
         private readonly List<TiledRender> jobs = new();
         private AppServices services;
         private FractalGpuRenderer gpuRenderer;
+        private SceneGpuRenderer sceneRenderer;
 
         public FrameExportModule(FractalPresenter presenter)
         {
@@ -49,9 +54,10 @@ namespace FractalVisio.App
 
             // Materials are cached per shader, so one GPU renderer serves every export of the run.
             gpuRenderer ??= new FractalGpuRenderer();
+            sceneRenderer ??= new SceneGpuRenderer();
             var display = presenter.DisplayViewport;
             var job = new TiledRender(
-                services.Session, gpuRenderer, presenter.WorkerBudget,
+                services.Session, gpuRenderer, sceneRenderer, presenter.WorkerBudget,
                 width, height, Mathf.Clamp(supersampling, 1, 3), display.Width, display.Height);
             jobs.Add(job);
             return job;
@@ -82,6 +88,8 @@ namespace FractalVisio.App
             jobs.Clear();
             gpuRenderer?.Dispose();
             gpuRenderer = null;
+            sceneRenderer?.Dispose();
+            sceneRenderer = null;
             services = null;
         }
 
@@ -103,6 +111,13 @@ namespace FractalVisio.App
 
             /// <summary>GPU tiles in flight at once: the read back takes a frame or two, the draw far less.</summary>
             private const int GpuTilesInFlight = 4;
+
+            /// <summary>Tile side in samples for a scene: a ray-marched pixel costs far more than a plane's.</summary>
+            private const int SceneTileSamples = 512;
+
+            private readonly SceneGpuRenderer sceneRenderer;
+            private readonly SceneFrame sceneFrame;
+            private readonly bool useScene;
 
             private readonly IFractalDefinition definition;
             private readonly FractalParameterSet parameters;
@@ -133,6 +148,7 @@ namespace FractalVisio.App
             public TiledRender(
                 FractalSession session,
                 FractalGpuRenderer gpu,
+                SceneGpuRenderer scenes,
                 CpuWorkerBudget budget,
                 int width,
                 int height,
@@ -146,7 +162,26 @@ namespace FractalVisio.App
                 sampleWidth = width * supersampling;
                 sampleHeight = height * supersampling;
                 gpuRenderer = gpu;
+                sceneRenderer = scenes;
                 workerBudget = budget;
+
+                if (session.IsScene)
+                {
+                    // Wider than the screen: the same width, so a narrower field of view.
+                    var displayAspect = displayWidth / (double)Mathf.Max(1, displayHeight);
+                    var outputAspect = width / (double)height;
+                    var camera = session.Camera;
+                    if (outputAspect > displayAspect)
+                    {
+                        var half = Mathf.Tan(camera.FieldOfView * Mathf.Deg2Rad * 0.5f) * (float)(displayAspect / outputAspect);
+                        camera = camera.WithFieldOfView(2f * Mathf.Atan(half) * Mathf.Rad2Deg);
+                    }
+
+                    useScene = true;
+                    useGpu = true;
+                    palette = session.Palette;
+                    sceneFrame = new SceneFrame(session.Scene, session.Parameters, camera, session.Look, draft: false);
+                }
 
                 definition = session.Definition;
                 parameters = session.Parameters;
@@ -154,14 +189,17 @@ namespace FractalVisio.App
                 coloring = session.Coloring;
                 view = Cropped(session.View, displayWidth / (double)Mathf.Max(1, displayHeight), width / (double)height);
 
-                // The explorer's limits are scales of a screen-high view; per sample they become
-                // spacings, which is what decides whether an engine can resolve neighbouring pixels.
-                var quality = session.Quality;
-                var spacing = view.scale.AsDouble / sampleHeight;
-                var perDisplayPixel = 1d / Mathf.Max(1, displayHeight);
-                useGpu = gpu.Supports(definition) && spacing >= quality.GpuMinimumScale * perDisplayPixel;
-                extendedPrecision = spacing < quality.ExtendedPrecisionScale * perDisplayPixel &&
-                                    (definition.SupportedPrecision & (PrecisionTier.DoubleDouble | PrecisionTier.Perturbation)) != 0;
+                if (!useScene)
+                {
+                    // The explorer's limits are scales of a screen-high view; per sample they become
+                    // spacings, which is what decides whether an engine can resolve neighbouring pixels.
+                    var quality = session.Quality;
+                    var spacing = view.scale.AsDouble / sampleHeight;
+                    var perDisplayPixel = 1d / Mathf.Max(1, displayHeight);
+                    useGpu = gpu.Supports(definition) && spacing >= quality.GpuMinimumScale * perDisplayPixel;
+                    extendedPrecision = spacing < quality.ExtendedPrecisionScale * perDisplayPixel &&
+                                        (definition.SupportedPrecision & (PrecisionTier.DoubleDouble | PrecisionTier.Perturbation)) != 0;
+                }
 
                 try
                 {
@@ -173,7 +211,7 @@ namespace FractalVisio.App
                     return;
                 }
 
-                var side = (useGpu ? GpuTileSamples : CpuTileSamples) / samples;
+                var side = (useScene ? SceneTileSamples : useGpu ? GpuTileSamples : CpuTileSamples) / samples;
                 for (var y = 0; y < height; y += side)
                 {
                     for (var x = 0; x < width; x += side)
@@ -183,7 +221,7 @@ namespace FractalVisio.App
                 }
 
                 Debug.Log($"Export {width}x{height}, {samples}x{samples} samples, {tiles.Count} tiles on the " +
-                          (useGpu ? "GPU" : extendedPrecision ? "CPU (extended precision)" : "CPU") + ".");
+                          (useScene ? "GPU (ray march)" : useGpu ? "GPU" : extendedPrecision ? "CPU (extended precision)" : "CPU") + ".");
             }
 
             public int Width { get; }
@@ -335,6 +373,7 @@ namespace FractalVisio.App
                 }
 
                 gpuRenderer.SetColoring(palette, coloring);
+                sceneRenderer?.SetPalette(palette);
                 while (!failed && nextTile < tiles.Count && gpuInFlight.Count < GpuTilesInFlight)
                 {
                     var tile = tiles[nextTile++];
@@ -343,7 +382,17 @@ namespace FractalVisio.App
                     var target = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32);
                     try
                     {
-                        gpuRenderer.Render(definition, parameters, TileView(tile), view.iterations, target);
+                        if (useScene)
+                        {
+                            var window = new RectInt(tile.x * samples, tile.y * samples, width, height);
+                            sceneRenderer.Render(
+                                sceneFrame, new Vector2Int(sampleWidth, sampleHeight), window, null, 0, height, target);
+                        }
+                        else
+                        {
+                            gpuRenderer.Render(definition, parameters, TileView(tile), view.iterations, target);
+                        }
+
                         var grab = new FrameGrab();
                         if (!grab.Begin(target, new Rect(0f, 0f, 1f, 1f), width, height))
                         {

@@ -45,6 +45,9 @@ gestures.two_fingers = Два пальца — приближать, отдал�
 gestures.three_fingers = Три пальца — вернуть начальный вид
 gestures.tap = Касание — спрятать или показать кнопки
 gestures.got_it = Понятно
+gestures.scene_title = Как вращать 3D-фигуру
+gestures.scene_one_finger = Один палец — вращать вокруг точки под пальцем
+gestures.scene_two_fingers = Два пальца — приблизиться к точке, сдвинуть, наклонить
 
 # Галерея - главное меню
 gallery.title = Фракталы
@@ -64,6 +67,7 @@ gallery.exit_hint = Нажмите «Назад» ещё раз, чтобы вы
 # Разделы галереи
 section.mandelbrot-family = Семейство Мандельброта
 section.julia-family = Семейство Жюлиа
+section.fractals-3d = 3D-фракталы
 # Папки галереи внутри раздела: folder.<id>, id из FoldedFamily.Folders
 folder.classic = Классические
 folder.perpendicular = Перпендикулярные и Mandelbar
@@ -80,6 +84,7 @@ toolbar.settings = Настройки
 
 # Панель «Фрактал»
 fractal_panel.reset_view = Сбросить вид
+fractal_panel.level_horizon = Выровнять горизонт
 fractal_panel.all_fractals = Все фракталы
 fractal_panel.constant = КОНСТАНТА C
 fractal_panel.pick_on_map = Выбрать C на карте
@@ -109,6 +114,36 @@ colour.relief.off = Выкл
 colour.relief.on = Вкл
 colour.relief.depth = Глубина
 colour.relief.shine = Блеск
+colour.shading = Стиль
+colour.shading.classic = Классика
+colour.shading.clay = Глина
+colour.shading.metal = Металл
+colour.shading.glow = Свечение
+colour.shading.density = Плотность
+colour.shading.studio = Студия
+colour.shading.toon = Мультяшный
+colour.shading.translucent = Просвет
+colour.shading.mirror = Зеркало
+colour.source = Окраска
+colour.source.material = Материал
+colour.source.normal = Нормаль
+colour.source.orbit = Орбита
+colour.source.depth = Глубина
+colour.source.cross = Оси
+colour.source.iteration = Итерация
+colour.source.escape = Вылет
+colour.source.height = Высота
+colour.source.occlusion = Складки
+colour.source.fresnel = Края
+colour.source.steps = Шаги
+colour.light = Свет
+colour.light.ambient = Фон
+colour.light.specular = Блики
+colour.shadows = Тени
+colour.occlusion = Затенение складок
+colour.effect = Сила эффекта
+colour.palette_scale = Масштаб палитры
+colour.palette_offset = Сдвиг палитры
 
 # Закладки
 bookmarks.title = Закладки
@@ -454,6 +489,16 @@ fractal.julia-simonobrot.power = Степень
 fractal.julia-simonobrot.inversion = Инверсия
 fractal.hybrid = Конструктор гибридов
 fractal.hybrid.about = Формулы по очереди: шаг — формула, степень и число повторов, затем цикл сначала. Свой гибрид собирается в панели «Фрактал».
+fractal.mandelbulb = Мандельбульб
+fractal.mandelbulb.about = Множество Мандельброта в трёх измерениях: z в степени n в сферических координатах плюс c. Вращайте пальцем, приближайтесь двумя.
+fractal.mandelbulb.power = Степень
+fractal.mandelbulb.iterations = Итерации
+fractal.mandelbulb.bailout = Радиус вылета
+fractal.mandelbulb.place.classic = Степень 8, классический вид
+fractal.mandelbulb.place.north-pole = Степень 8, северный полюс
+fractal.mandelbulb.place.smooth-petals = Степень 3, гладкие лепестки
+fractal.mandelbulb.place.needle-crown = Степень 16, игольчатая корона
+fractal.mandelbulb.place.fold-closeup = Крупный план складки
 fractal.hybrid.place.celtic-mandelbar = Celtic × Mandelbar
 fractal.hybrid.place.ship-and-bulb = Корабль и куб
 fractal.hybrid.place.perpendicular-weave = Перпендикулярное плетение
